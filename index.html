@@ -572,7 +572,16 @@
       ({res,data}=await request(jwt));
     }
 
-    if(!res.ok) throw new Error(data?.message||data?.hint||data?.details||'تعذر الاتصال بقاعدة البيانات');
+    if(!res.ok){
+      const finalMessage=data?.message||data?.hint||data?.details||'تعذر الاتصال بقاعدة البيانات';
+      const finalText=String(finalMessage).toLowerCase();
+      if(finalText.includes('jwk') || finalText.includes('jwt') || finalText.includes('key not found')){
+        authJwt='';
+        try{await fetch(AUTH_BASE+'/sign-out',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:'{}'})}catch{}
+        throw new Error('تم تحديث مفاتيح الأمان. أعد تسجيل الدخول مرة واحدة ثم حاول الحفظ من جديد.');
+      }
+      throw new Error(finalMessage);
+    }
     return data;
   };
   const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
