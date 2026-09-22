@@ -144,8 +144,8 @@
       </div>
       <form class="login-form" id="loginForm" novalidate>
         <div class="field">
-          <label id="identityLabel" for="identity">رقم الطالب أو البريد الإلكتروني</label>
-          <div class="input-wrap"><span>👤</span><input id="identity" autocomplete="username" placeholder="أدخل رقم الطالب أو البريد" /></div>
+          <label id="identityLabel" for="identity">اسم المستخدم أو رقم الطالب</label>
+          <div class="input-wrap"><span>👤</span><input id="identity" autocomplete="username" placeholder="أدخل اسم المستخدم أو رقم الطالب" /></div>
         </div>
         <div class="field">
           <label for="password">كلمة المرور</label>
@@ -211,8 +211,8 @@
           <div class="panel-head"><div><h3>الطلاب المسجلون</h3><p>أحدث الطلاب المسجلين في النظام</p></div><button class="link-btn" id="refreshStudents" type="button">تحديث</button></div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>رقم الطالب</th><th>اسم الطالب</th><th>الجوال</th><th>تاريخ التسجيل</th><th>الحالة</th></tr></thead>
-              <tbody id="registeredStudentsRows"><tr><td colspan="5" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض الطلاب.</td></tr></tbody>
+              <thead><tr><th>رقم الطالب</th><th>اسم الطالب</th><th>اسم المستخدم</th><th>الجوال</th><th>تاريخ التسجيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody id="registeredStudentsRows"><tr><td colspan="7" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض الطلاب.</td></tr></tbody>
             </table>
           </div>
         </article>
@@ -474,6 +474,15 @@
       </div>
 
       <div class="form-section">
+        <div class="form-section-title">🔐 بيانات دخول الطالب</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم المستخدم</label><input id="nsUsername" placeholder="اتركه فارغًا لاستخدام رقم الطالب تلقائيًا" autocomplete="off" /></div>
+          <div class="form-field"><label>كلمة المرور <span class="required">*</span></label><div style="display:flex;gap:8px"><input id="nsPassword" required autocomplete="off" /><button class="secondary-action" type="button" id="generateStudentPassword">توليد عشوائي</button></div></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">تُعرض كلمة المرور عند الإنشاء فقط، وبعد ذلك يمكن إعادة تعيينها من زر تعديل الطالب.</div>
+      </div>
+
+      <div class="form-section">
         <div class="form-section-title">👨‍👩‍👧 بيانات ولي الأمر</div>
         <div class="form-grid">
           <div class="form-field"><label>اسم ولي الأمر <span class="required">*</span></label><input id="nsParentName" required /></div>
@@ -507,10 +516,64 @@
   </div>
 </div>
 
+<div class="student-modal" id="editStudentModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="editStudentModalTitle">
+    <div class="student-dialog-head">
+      <div><h3 id="editStudentModalTitle">تعديل بيانات الطالب</h3><p id="editStudentNoLabel">تعديل الملف وبيانات الدخول.</p></div>
+      <button class="close-modal" type="button" id="closeEditStudentModal" aria-label="إغلاق">×</button>
+    </div>
+    <form class="student-form" id="editStudentForm">
+      <input type="hidden" id="esStudentId" />
+      <div class="student-form-msg" id="editStudentMsg"></div>
+      <div class="registration-result" id="editCredentialsResult"></div>
+
+      <div class="form-section">
+        <div class="form-section-title">🎓 بيانات الطالب</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم الطالب بالكامل <span class="required">*</span></label><input id="esFullName" required /></div>
+          <div class="form-field"><label>النوع</label><select id="esGender"><option value="">غير محدد</option><option value="male">ذكر</option><option value="female">أنثى</option></select></div>
+          <div class="form-field"><label>تاريخ الميلاد</label><input id="esBirthDate" type="date" /></div>
+          <div class="form-field"><label>جوال الطالب</label><input id="esPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>البريد الإلكتروني</label><input id="esEmail" type="email" /></div>
+          <div class="form-field"><label>تاريخ الالتحاق</label><input id="esJoinedOn" type="date" /></div>
+          <div class="form-field"><label>المرحلة</label><select id="esStage"><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
+          <div class="form-field"><label>الصف الدراسي</label><input id="esGrade" /></div>
+          <div class="form-field"><label>ملاحظات</label><input id="esNotes" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">👨‍👩‍👧 بيانات ولي الأمر</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم ولي الأمر</label><input id="esParentName" /></div>
+          <div class="form-field"><label>جوال ولي الأمر</label><input id="esParentPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>صلة القرابة</label><select id="esRelationship"><option value="father">الأب</option><option value="mother">الأم</option><option value="guardian">ولي أمر</option><option value="other">أخرى</option></select></div>
+          <div class="form-field"><label>جوال بديل</label><input id="esParentAltPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>بريد ولي الأمر</label><input id="esParentEmail" type="email" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">🔐 بيانات دخول الطالب</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم المستخدم</label><input id="esUsername" autocomplete="off" /></div>
+          <div class="form-field"><label>كلمة مرور جديدة</label><div style="display:flex;gap:8px"><input id="esPassword" autocomplete="off" placeholder="اتركها فارغة للإبقاء على الحالية" /><button class="secondary-action" type="button" id="generateEditStudentPassword">توليد عشوائي</button></div></div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">لأسباب أمنية لا يمكن عرض كلمة المرور القديمة؛ يمكن فقط تعيين كلمة مرور جديدة.</div>
+      </div>
+
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="cancelEditStudentModal">إلغاء</button>
+        <button class="save-student" type="submit" id="saveEditStudentBtn">حفظ التعديلات</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function(){
   const roles={
-    student:{label:'رقم الطالب أو البريد الإلكتروني',placeholder:'أدخل رقم الطالب أو البريد',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
+    student:{label:'اسم المستخدم أو رقم الطالب',placeholder:'أدخل اسم المستخدم أو رقم الطالب',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
     parent:{label:'رقم الجوال أو البريد الإلكتروني',placeholder:'أدخل رقم الجوال أو البريد',button:'دخول ولي الأمر',subtitle:'تابع حضور الأبناء ونتائجهم ومدفوعاتهم من حساب واحد.'},
     teacher:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل البريد أو رقم الجوال',button:'دخول المعلم',subtitle:'إدارة الحصص والحضور والواجبات والاختبارات والمجموعات.'},
     admin:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل بيانات حساب الإدارة',button:'دخول الإدارة',subtitle:'الوصول إلى الإدارة التعليمية والمالية والتقارير والصلاحيات.'}
@@ -581,6 +644,39 @@
     throw new Error(msg.includes('invalid_or_expired_session')?'انتهت جلسة الدخول. سجل الدخول مرة أخرى.':msg);
   };
 
+  const studentLoginRequest=async(identityValue,passwordValue)=>{
+    const res=await fetch(ROVEN_API,{
+      method:'POST',
+      mode:'cors',
+      cache:'no-store',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify({
+        action:'student_login',
+        sessionToken:'student-public-login',
+        payload:{p_identity:identityValue,p_password:passwordValue}
+      })
+    });
+    let data=null; try{data=await res.json()}catch{}
+    if(!res.ok) throw new Error(String(data?.error||data?.message||'بيانات دخول الطالب غير صحيحة.'));
+    return data;
+  };
+
+  const enterStudentPortal=data=>{
+    openDashboard();
+    document.getElementById('pageTitle').textContent='بوابة الطالب';
+    document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=btn.dataset.section==='dashboard'?'':'none'});
+    document.querySelectorAll('.module').forEach(m=>m.classList.remove('active'));
+    const dash=document.getElementById('dashboard');
+    dash.classList.add('active');
+    dash.innerHTML=`<div class="welcome"><div><div class="tag">بوابة الطالب</div><h2>مرحبًا، ${escapeHtml(data?.full_name||'الطالب')}</h2><p>يمكنك الدخول إلى خدماتك التعليمية من حسابك الشخصي.</p></div><div class="year"><span>رقم الطالب</span><strong>${escapeHtml(data?.student_no||'—')}</strong></div></div>
+      <div class="stats">
+        <div class="stat"><div class="stat-head"><span>اسم المستخدم</span><span class="stat-icon">👤</span></div><div class="value" style="font-size:20px">${escapeHtml(data?.username||'—')}</div><div class="sub">حساب الطالب</div></div>
+        <div class="stat"><div class="stat-head"><span>المرحلة</span><span class="stat-icon">🎓</span></div><div class="value" style="font-size:20px">${escapeHtml(data?.stage_name||'—')}</div><div class="sub">${escapeHtml(data?.grade_name||'—')}</div></div>
+        <div class="stat"><div class="stat-head"><span>الحصص</span><span class="stat-icon">📚</span></div><div class="value" style="font-size:20px">قريبًا</div><div class="sub">جدول الطالب</div></div>
+        <div class="stat"><div class="stat-head"><span>الواجبات والاختبارات</span><span class="stat-icon">✓</span></div><div class="value" style="font-size:20px">قريبًا</div><div class="sub">المهام والنتائج</div></div>
+      </div>`;
+  };
+
   const dataApiFetch=async(path,options={})=>{
     if(path.startsWith('/rpc/')){
       const action=path.slice('/rpc/'.length).split('?')[0];
@@ -629,6 +725,11 @@
       if(!email||!pass){loginError.textContent='أدخل البريد الإلكتروني وكلمة المرور.';loginError.classList.add('show');return}
       loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
       try{
+        if(activeRole==='student'){
+          const studentData=await studentLoginRequest(email,pass);
+          enterStudentPortal(studentData);
+          return;
+        }
         const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
         rovenSessionToken='';
         const authRole=data?.user?.role||data?.role||'';
@@ -1037,11 +1138,21 @@
   const studentFormMsg=document.getElementById('studentFormMsg');
   const registrationResult=document.getElementById('registrationResult');
   const saveStudentBtn=document.getElementById('saveStudentBtn');
-  const openStudentModal=()=>{studentModal.classList.add('show');studentModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';studentFormMsg.className='student-form-msg';registrationResult.className='registration-result';};
+  const makeRandomStudentPassword=()=>{
+    const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const bytes=new Uint8Array(12);crypto.getRandomValues(bytes);
+    return Array.from(bytes,b=>chars[b%chars.length]).join('');
+  };
+  const openStudentModal=()=>{
+    studentModal.classList.add('show');studentModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    studentFormMsg.className='student-form-msg';registrationResult.className='registration-result';
+    document.getElementById('nsPassword').value=makeRandomStudentPassword();
+  };
   const closeStudentModal=()=>{studentModal.classList.remove('show');studentModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('openStudentModal').addEventListener('click',openStudentModal);
   document.getElementById('closeStudentModal').addEventListener('click',closeStudentModal);
   document.getElementById('cancelStudentModal').addEventListener('click',closeStudentModal);
+  document.getElementById('generateStudentPassword').addEventListener('click',()=>{document.getElementById('nsPassword').value=makeRandomStudentPassword()});
   studentModal.addEventListener('click',e=>{if(e.target===studentModal)closeStudentModal()});
   document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);
 
@@ -1057,12 +1168,20 @@
   const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
   const loadRegisteredStudents=async()=>{
     const tbody=document.getElementById('registeredStudentsRows');
-    tbody.innerHTML='<tr><td colspan="5" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
     try{
-      const data=await dataApiFetch('/students?select=student_no,full_name,phone,status,joined_on&order=created_at.desc&limit=30');
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا يوجد طلاب مسجلون بعد.</td></tr>';return}
-      tbody.innerHTML=data.map(s=>`<tr><td><b>${escapeHtml(s.student_no)}</b></td><td>${escapeHtml(s.full_name)}</td><td>${escapeHtml(s.phone||'—')}</td><td>${escapeHtml(s.joined_on||'—')}</td><td><span class="status active">نشط</span></td></tr>`).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلاب')+'</td></tr>'}
+      const data=await dataApiFetch('/rpc/list_students_admin',{method:'POST',body:'{}'});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد طلاب مسجلون بعد.</td></tr>';return}
+      tbody.innerHTML=data.map(s=>`<tr>
+        <td><b>${escapeHtml(s.student_no)}</b></td>
+        <td>${escapeHtml(s.full_name)}</td>
+        <td>${escapeHtml(s.username||'لم يُنشأ')}</td>
+        <td>${escapeHtml(s.phone||'—')}</td>
+        <td>${escapeHtml(s.joined_on||'—')}</td>
+        <td><span class="status active">نشط</span></td>
+        <td><button class="secondary-action edit-student-btn" type="button" data-id="${escapeHtml(s.student_id)}">تعديل</button></td>
+      </tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلاب')+'</td></tr>'}
   };
   document.getElementById('refreshStudents').addEventListener('click',loadRegisteredStudents);
 
@@ -1088,7 +1207,10 @@
       p_relationship:document.getElementById('nsRelationship').value,
       p_fee:fee,p_discount:discount,p_first_payment:firstPayment,
       p_payment_method:document.getElementById('nsPaymentMethod').value,
-      p_notes:document.getElementById('nsNotes').value.trim()||null
+      p_notes:document.getElementById('nsNotes').value.trim()||null,
+      p_username:document.getElementById('nsUsername').value.trim()||null,
+      p_password:document.getElementById('nsPassword').value,
+      p_generate_password:false
     };
     if(!payload.p_full_name||!payload.p_stage_name||!payload.p_grade_name||!payload.p_parent_name||!payload.p_parent_phone){
       studentFormMsg.textContent='أكمل البيانات المطلوبة المعلّمة بنجمة.';studentFormMsg.className='student-form-msg error show';return
@@ -1102,6 +1224,8 @@
         <div class="result-item"><span>الفاتورة</span><b>${escapeHtml(r?.invoice_no||'لا توجد')}</b></div>
         <div class="result-item"><span>المدفوع</span><b>${Number(r?.paid||0).toFixed(2)}</b></div>
         <div class="result-item"><span>المتبقي</span><b>${Number(r?.balance||0).toFixed(2)}</b></div>
+        <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||r?.student_no||'—')}</b></div>
+        <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
       </div>`;
       registrationResult.className='registration-result show';
       studentFormMsg.textContent='تم حفظ بيانات الطالب وولي الأمر والاشتراك في قاعدة البيانات.';
@@ -1112,6 +1236,105 @@
       studentFormMsg.textContent=err.message||'حدث خطأ أثناء تسجيل الطالب.';
       studentFormMsg.className='student-form-msg error show';
     }finally{saveStudentBtn.disabled=false;saveStudentBtn.textContent='حفظ الطالب'}
+  });
+
+  const editStudentModal=document.getElementById('editStudentModal');
+  const editStudentForm=document.getElementById('editStudentForm');
+  const editStudentMsg=document.getElementById('editStudentMsg');
+  const editCredentialsResult=document.getElementById('editCredentialsResult');
+  const closeEditStudentModal=()=>{
+    editStudentModal.classList.remove('show');
+    editStudentModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  document.getElementById('closeEditStudentModal').addEventListener('click',closeEditStudentModal);
+  document.getElementById('cancelEditStudentModal').addEventListener('click',closeEditStudentModal);
+  editStudentModal.addEventListener('click',e=>{if(e.target===editStudentModal)closeEditStudentModal()});
+  document.getElementById('generateEditStudentPassword').addEventListener('click',()=>{document.getElementById('esPassword').value=makeRandomStudentPassword()});
+
+  const setEditValue=(id,v)=>{document.getElementById(id).value=v??''};
+  const openEditStudent=async studentId=>{
+    editStudentMsg.className='student-form-msg';
+    editCredentialsResult.className='registration-result';
+    editStudentModal.classList.add('show');
+    editStudentModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+    try{
+      const s=await dataApiFetch('/rpc/get_student_admin',{method:'POST',body:JSON.stringify({p_student_id:studentId})});
+      setEditValue('esStudentId',s.student_id);
+      setEditValue('esFullName',s.full_name);
+      setEditValue('esGender',s.gender);
+      setEditValue('esBirthDate',s.birth_date);
+      setEditValue('esPhone',s.phone);
+      setEditValue('esEmail',s.email);
+      setEditValue('esJoinedOn',s.joined_on);
+      setEditValue('esStage',s.stage_name);
+      setEditValue('esGrade',s.grade_name);
+      setEditValue('esNotes',s.notes);
+      setEditValue('esParentName',s.parent_name);
+      setEditValue('esParentPhone',s.parent_phone);
+      setEditValue('esParentAltPhone',s.parent_alt_phone);
+      setEditValue('esParentEmail',s.parent_email);
+      setEditValue('esRelationship',s.relationship||'guardian');
+      setEditValue('esUsername',s.username||s.student_no);
+      setEditValue('esPassword','');
+      document.getElementById('editStudentNoLabel').textContent='رقم الطالب: '+(s.student_no||'—');
+    }catch(err){
+      editStudentMsg.textContent=err.message||'تعذر تحميل بيانات الطالب.';
+      editStudentMsg.className='student-form-msg error show';
+    }
+  };
+
+  document.getElementById('registeredStudentsRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.edit-student-btn');
+    if(btn) openEditStudent(btn.dataset.id);
+  });
+
+  editStudentForm.addEventListener('submit',async e=>{
+    e.preventDefault();
+    editStudentMsg.className='student-form-msg';
+    editCredentialsResult.className='registration-result';
+    const payload={
+      p_student_id:document.getElementById('esStudentId').value,
+      p_full_name:document.getElementById('esFullName').value.trim(),
+      p_gender:document.getElementById('esGender').value||null,
+      p_birth_date:document.getElementById('esBirthDate').value||null,
+      p_phone:document.getElementById('esPhone').value.trim()||null,
+      p_email:document.getElementById('esEmail').value.trim()||null,
+      p_stage_name:document.getElementById('esStage').value||null,
+      p_grade_name:document.getElementById('esGrade').value.trim()||null,
+      p_joined_on:document.getElementById('esJoinedOn').value||null,
+      p_parent_name:document.getElementById('esParentName').value.trim()||null,
+      p_parent_phone:document.getElementById('esParentPhone').value.trim()||null,
+      p_parent_alt_phone:document.getElementById('esParentAltPhone').value.trim()||null,
+      p_parent_email:document.getElementById('esParentEmail').value.trim()||null,
+      p_relationship:document.getElementById('esRelationship').value||'guardian',
+      p_notes:document.getElementById('esNotes').value.trim()||null,
+      p_username:document.getElementById('esUsername').value.trim()||null,
+      p_password:document.getElementById('esPassword').value||null,
+      p_generate_password:false
+    };
+    const btn=document.getElementById('saveEditStudentBtn');
+    btn.disabled=true;btn.textContent='جارٍ الحفظ...';
+    try{
+      const result=await dataApiFetch('/rpc/update_student_admin',{method:'POST',body:JSON.stringify(payload)});
+      const shownPassword=result?.generated_password||payload.p_password;
+      editStudentMsg.textContent='تم حفظ تعديلات الطالب وبيانات الدخول.';
+      editStudentMsg.className='student-form-msg success show';
+      if(shownPassword){
+        editCredentialsResult.innerHTML=`<h4>✓ بيانات الدخول الجديدة</h4><div class="result-grid">
+          <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(result?.username||payload.p_username||'—')}</b></div>
+          <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(shownPassword)}</b></div>
+        </div>`;
+        editCredentialsResult.className='registration-result show';
+      }
+      document.getElementById('esPassword').value='';
+      await loadRegisteredStudents();
+    }catch(err){
+      const msg=String(err.message||'حدث خطأ أثناء التعديل.');
+      editStudentMsg.textContent=msg.includes('username_already_used')?'اسم المستخدم مستخدم لطالب آخر.':msg;
+      editStudentMsg.className='student-form-msg error show';
+    }finally{btn.disabled=false;btn.textContent='حفظ التعديلات'}
   });
 
     const students=[
