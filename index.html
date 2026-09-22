@@ -40,6 +40,36 @@
     @media(max-width:980px){.login-screen{grid-template-columns:1fr}.login-visual{display:none}.login-panel-wrap{padding:28px 18px;min-height:100vh}.login-panel{max-width:590px}.login-mobile-logo{display:block}.login-panel-head{text-align:center}.role-grid{grid-template-columns:repeat(4,1fr)}}
     @media(max-width:560px){.login-panel{padding:22px 16px;border-radius:22px}.login-panel-wrap{padding:16px 11px}.role-grid{grid-template-columns:repeat(2,1fr);gap:8px}.role-btn{min-height:69px}.login-panel-head h3{font-size:21px}.form-row{align-items:flex-start}.login-mobile-logo img{width:82px;height:82px}.login-points{grid-template-columns:1fr}}
 
+    /* ===== Student registration ===== */
+    .section-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:15px}
+    .section-toolbar h2{margin:0;font-size:20px}.section-toolbar p{margin:4px 0 0;color:var(--muted);font-size:11px}
+    .primary-action{border:0;background:linear-gradient(135deg,#147b9d,#0f766e);color:#fff;padding:11px 16px;border-radius:12px;font-weight:800;box-shadow:0 8px 18px rgba(15,118,110,.16)}
+    .students-empty{padding:34px;text-align:center;color:var(--muted);font-size:12px}
+    .student-modal{display:none;position:fixed;inset:0;background:rgba(7,30,36,.52);backdrop-filter:blur(4px);z-index:100;padding:22px;overflow:auto}
+    .student-modal.show{display:flex;align-items:flex-start;justify-content:center}
+    .student-dialog{width:min(980px,100%);background:#fff;border-radius:24px;box-shadow:0 30px 90px rgba(10,46,56,.25);margin:auto;overflow:hidden}
+    .student-dialog-head{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(135deg,#fafdfe,#f3faf7)}
+    .student-dialog-head h3{margin:0;font-size:19px}.student-dialog-head p{margin:4px 0 0;color:var(--muted);font-size:11px}
+    .close-modal{width:38px;height:38px;border:1px solid var(--line);background:#fff;border-radius:11px;font-size:20px}
+    .student-form{padding:22px 24px 25px}
+    .form-section{margin-bottom:22px}.form-section-title{display:flex;align-items:center;gap:8px;font-weight:800;color:#214954;margin-bottom:12px;font-size:13px}
+    .form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    .form-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .form-field label{display:block;font-size:10px;color:#61777f;margin:0 2px 6px;font-weight:700}
+    .form-field input,.form-field select,.form-field textarea{width:100%;border:1px solid #dce7ea;background:#fbfdfd;border-radius:11px;padding:10px 11px;outline:0;font-family:'Cairo',sans-serif;color:#173a47}
+    .form-field input,.form-field select{height:44px}.form-field textarea{min-height:78px;resize:vertical}
+    .form-field input:focus,.form-field select:focus,.form-field textarea:focus{border-color:#58a8bc;box-shadow:0 0 0 3px rgba(58,151,180,.08);background:#fff}
+    .form-hint{font-size:9px;color:#91a0a5;margin-top:4px}.required{color:#c24b43}
+    .money-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;background:#f7fbfa;border:1px solid #dfefeb;border-radius:14px;padding:12px;margin-top:12px}
+    .money-summary div{font-size:10px;color:#678089}.money-summary strong{display:block;color:#173f4c;font-size:15px;margin-top:2px}
+    .student-form-actions{display:flex;justify-content:flex-end;gap:9px;padding-top:5px}.secondary-action{border:1px solid var(--line);background:#fff;color:#526970;padding:10px 15px;border-radius:11px}
+    .save-student{border:0;background:linear-gradient(135deg,#147b9d,#0f766e);color:#fff;padding:10px 20px;border-radius:11px;font-weight:800;min-width:145px}
+    .save-student:disabled{opacity:.6;cursor:not-allowed}
+    .student-form-msg{display:none;margin-bottom:14px;padding:11px 13px;border-radius:11px;font-size:11px}.student-form-msg.show{display:block}.student-form-msg.error{background:#fff2f1;color:#a3433e;border:1px solid #f3d1cf}.student-form-msg.success{background:#eaf8f2;color:#147d52;border:1px solid #ccebdc}
+    .registration-result{display:none;background:#f4fbf8;border:1px solid #cfeadf;border-radius:15px;padding:14px 15px;margin-bottom:18px}.registration-result.show{display:block}
+    .registration-result h4{margin:0 0 9px;color:#166a51}.result-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.result-item{background:#fff;border:1px solid #e1eeea;border-radius:10px;padding:9px}.result-item span{display:block;font-size:9px;color:#78908a}.result-item b{font-size:12px}
+    @media(max-width:760px){.section-toolbar{align-items:flex-start;flex-direction:column}.primary-action{width:100%}.form-grid,.form-grid.two{grid-template-columns:1fr}.student-modal{padding:8px}.student-dialog{border-radius:18px}.student-dialog-head,.student-form{padding:16px}.money-summary,.result-grid{grid-template-columns:1fr 1fr}.student-form-actions{position:sticky;bottom:0;background:#fff;padding:12px 0 0}.save-student{flex:1}}
+
   </style>
 </head>
 <body>
@@ -146,7 +176,21 @@
         </div>
         <article class="panel students"><div class="panel-head"><div><h3>متابعة الطلاب</h3><p>آخر الحالات التي تحتاج انتباه الإدارة</p></div><div class="search">⌕ <input id="studentSearch" placeholder="بحث باسم الطالب أو الصف" /></div></div><div class="table-wrap"><table class="table"><thead><tr><th>الطالب</th><th>الصف</th><th>الحضور</th><th>الحالة المالية</th><th>الحالة</th></tr></thead><tbody id="studentRows"></tbody></table></div></article>
       </section>
-      <section class="module" id="students"><div class="placeholder"><div class="big">👥</div><h2>الطلاب وأولياء الأمور</h2><p>سيضم تسجيل الطالب، ملفه الكامل، ولي الأمر، الصف، المواد، الاشتراك، المدفوعات، الحضور، النتائج وسجل المتابعة.</p></div><div class="cards3"><div class="feature"><b>تسجيل طالب جديد</b><span>بيانات الطالب وولي الأمر والمرحلة الدراسية.</span></div><div class="feature"><b>ملف الطالب</b><span>حضور، درجات، اشتراكات، مدفوعات وملاحظات.</span></div><div class="feature"><b>متابعة ولي الأمر</b><span>عرض حالة الأبناء التعليمية والمالية.</span></div></div></section>
+      <section class="module" id="students">
+        <div class="section-toolbar">
+          <div><h2>الطلاب وأولياء الأمور</h2><p>إدارة التسجيل والملفات الأكاديمية والمالية للطلاب.</p></div>
+          <button class="primary-action" type="button" id="openStudentModal">＋ تسجيل طالب جديد</button>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><div><h3>الطلاب المسجلون</h3><p>أحدث الطلاب المسجلين في النظام</p></div><button class="link-btn" id="refreshStudents" type="button">تحديث</button></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>رقم الطالب</th><th>اسم الطالب</th><th>الجوال</th><th>تاريخ التسجيل</th><th>الحالة</th></tr></thead>
+              <tbody id="registeredStudentsRows"><tr><td colspan="5" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض الطلاب.</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
       <section class="module" id="education"><div class="placeholder"><div class="big">🎓</div><h2>الإدارة التعليمية</h2><p>المراحل والصفوف والمواد والكورسات والمجموعات والمعلمون والجداول والدروس.</p></div></section>
       <section class="module" id="attendance"><div class="placeholder"><div class="big">✅</div><h2>الحضور والغياب</h2><p>تسجيل حاضر، غائب، متأخر، بعذر أو غادر مبكرًا مع تقارير الطالب والمجموعة.</p></div></section>
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
@@ -157,6 +201,66 @@
   </main>
   <nav class="mobile-bottom" id="bottomNav"><button class="active" data-section="dashboard" data-title="لوحة التحكم"><span class="m-ico">⌂</span><span>الرئيسية</span></button><button data-section="students" data-title="الطلاب وأولياء الأمور"><span class="m-ico">👥</span><span>الطلاب</span></button><button data-section="education" data-title="الإدارة التعليمية"><span class="m-ico">🎓</span><span>التعليم</span></button><button data-section="attendance" data-title="الحضور والغياب"><span class="m-ico">✓</span><span>الحضور</span></button><button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="m-ico">💳</span><span>المالية</span></button></nav>
 </div>
+
+<div class="student-modal" id="studentModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="studentModalTitle">
+    <div class="student-dialog-head">
+      <div><h3 id="studentModalTitle">تسجيل طالب جديد</h3><p>رقم الطالب والفاتورة والإيصال يتم إنشاؤهم تلقائيًا.</p></div>
+      <button class="close-modal" type="button" id="closeStudentModal" aria-label="إغلاق">×</button>
+    </div>
+    <form class="student-form" id="newStudentForm">
+      <div class="student-form-msg" id="studentFormMsg"></div>
+      <div class="registration-result" id="registrationResult"></div>
+
+      <div class="form-section">
+        <div class="form-section-title">🎓 بيانات الطالب</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم الطالب بالكامل <span class="required">*</span></label><input id="nsFullName" required placeholder="مثال: محمد أحمد علي" /></div>
+          <div class="form-field"><label>النوع</label><select id="nsGender"><option value="">غير محدد</option><option value="male">ذكر</option><option value="female">أنثى</option></select></div>
+          <div class="form-field"><label>تاريخ الميلاد</label><input id="nsBirthDate" type="date" /></div>
+          <div class="form-field"><label>جوال الطالب</label><input id="nsPhone" inputmode="tel" placeholder="اختياري" /></div>
+          <div class="form-field"><label>البريد الإلكتروني</label><input id="nsEmail" type="email" placeholder="اختياري" /></div>
+          <div class="form-field"><label>تاريخ الالتحاق</label><input id="nsJoinedOn" type="date" /></div>
+          <div class="form-field"><label>المرحلة <span class="required">*</span></label><input id="nsStage" required placeholder="مثال: المرحلة الثانوية" /></div>
+          <div class="form-field"><label>الصف الدراسي <span class="required">*</span></label><input id="nsGrade" required placeholder="مثال: أول ثانوي" /></div>
+          <div class="form-field"><label>ملاحظات</label><input id="nsNotes" placeholder="أي ملاحظات أولية" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">👨‍👩‍👧 بيانات ولي الأمر</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم ولي الأمر <span class="required">*</span></label><input id="nsParentName" required /></div>
+          <div class="form-field"><label>جوال ولي الأمر <span class="required">*</span></label><input id="nsParentPhone" inputmode="tel" required /></div>
+          <div class="form-field"><label>صلة القرابة</label><select id="nsRelationship"><option value="father">الأب</option><option value="mother">الأم</option><option value="guardian">ولي أمر</option><option value="other">أخرى</option></select></div>
+          <div class="form-field"><label>جوال بديل</label><input id="nsParentAltPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>بريد ولي الأمر</label><input id="nsParentEmail" type="email" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">💳 الاشتراك والسداد</div>
+        <div class="form-grid">
+          <div class="form-field"><label>قيمة الاشتراك</label><input id="nsFee" type="number" min="0" step="0.01" value="0" /></div>
+          <div class="form-field"><label>الخصم</label><input id="nsDiscount" type="number" min="0" step="0.01" value="0" /></div>
+          <div class="form-field"><label>الدفعة الأولى</label><input id="nsFirstPayment" type="number" min="0" step="0.01" value="0" /></div>
+          <div class="form-field"><label>طريقة الدفع</label><select id="nsPaymentMethod"><option value="cash">نقدي</option><option value="bank_transfer">تحويل بنكي</option><option value="card">بطاقة</option><option value="wallet">محفظة إلكترونية</option><option value="online">دفع إلكتروني</option><option value="other">أخرى</option></select></div>
+        </div>
+        <div class="money-summary">
+          <div>الإجمالي بعد الخصم<strong id="sumTotal">0.00</strong></div>
+          <div>المدفوع<strong id="sumPaid">0.00</strong></div>
+          <div>المتبقي<strong id="sumBalance">0.00</strong></div>
+        </div>
+      </div>
+
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="cancelStudentModal">إلغاء</button>
+        <button class="save-student" type="submit" id="saveStudentBtn">حفظ الطالب</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function(){
   const roles={
@@ -170,10 +274,33 @@
   roleGrid.querySelectorAll('.role-btn').forEach(btn=>btn.addEventListener('click',()=>{activeRole=btn.dataset.role;roleGrid.querySelectorAll('.role-btn').forEach(x=>x.classList.toggle('active',x===btn));const r=roles[activeRole];identityLabel.textContent=r.label;identity.placeholder=r.placeholder;loginSubmit.textContent=r.button;loginSubtitle.textContent=r.subtitle;loginError.classList.remove('show');}));
   document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
   const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
+  const DATA_API='https://ep-jolly-band-b5o7f86y.apirest.c-7.us-east-2.aws.neon.tech/schooldb/rest/v1';
+  let authJwt=sessionStorage.getItem('roven_jwt')||'';
   const authPost=async(path,body)=>{
     const res=await fetch(AUTH_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body)});
+    const headerJwt=res.headers.get('set-auth-jwt'); if(headerJwt){authJwt=headerJwt;sessionStorage.setItem('roven_jwt',headerJwt)}
     let data={}; try{data=await res.json()}catch{}
+    if(data?.token && String(data.token).split('.').length===3){authJwt=data.token;sessionStorage.setItem('roven_jwt',authJwt)}
     if(!res.ok) throw new Error(data?.message||data?.error?.message||'تعذر إتمام الطلب');
+    return data;
+  };
+  const getAuthJwt=async()=>{
+    if(authJwt) return authJwt;
+    const tokenRes=await fetch(AUTH_BASE+'/token',{method:'GET',credentials:'include'});
+    if(tokenRes.ok){
+      const data=await tokenRes.json().catch(()=>({}));
+      if(data?.token){authJwt=data.token;sessionStorage.setItem('roven_jwt',authJwt);return authJwt}
+    }
+    const sessionRes=await fetch(AUTH_BASE+'/get-session',{method:'GET',credentials:'include'});
+    const headerJwt=sessionRes.headers.get('set-auth-jwt');
+    if(headerJwt){authJwt=headerJwt;sessionStorage.setItem('roven_jwt',headerJwt);return headerJwt}
+    throw new Error('انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
+  };
+  const dataApiFetch=async(path,options={})=>{
+    const jwt=await getAuthJwt();
+    const res=await fetch(DATA_API+path,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+jwt,'Accept':'application/json',...(options.headers||{})}});
+    let data=null; try{data=await res.json()}catch{}
+    if(!res.ok) throw new Error(data?.message||data?.hint||data?.details||'تعذر الاتصال بقاعدة البيانات');
     return data;
   };
   const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
@@ -248,7 +375,90 @@
   // Remove any service worker/cache from previous broken Vite deployment.
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
-  const students=[
+
+  const studentModal=document.getElementById('studentModal');
+  const newStudentForm=document.getElementById('newStudentForm');
+  const studentFormMsg=document.getElementById('studentFormMsg');
+  const registrationResult=document.getElementById('registrationResult');
+  const saveStudentBtn=document.getElementById('saveStudentBtn');
+  const openStudentModal=()=>{studentModal.classList.add('show');studentModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';studentFormMsg.className='student-form-msg';registrationResult.className='registration-result';};
+  const closeStudentModal=()=>{studentModal.classList.remove('show');studentModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('openStudentModal').addEventListener('click',openStudentModal);
+  document.getElementById('closeStudentModal').addEventListener('click',closeStudentModal);
+  document.getElementById('cancelStudentModal').addEventListener('click',closeStudentModal);
+  studentModal.addEventListener('click',e=>{if(e.target===studentModal)closeStudentModal()});
+  document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);
+
+  const moneyValue=id=>Math.max(0,Number(document.getElementById(id).value)||0);
+  const updateMoneySummary=()=>{
+    const fee=moneyValue('nsFee'),discount=moneyValue('nsDiscount'),paid=moneyValue('nsFirstPayment'),total=Math.max(0,fee-discount);
+    document.getElementById('sumTotal').textContent=total.toFixed(2);
+    document.getElementById('sumPaid').textContent=Math.min(paid,total).toFixed(2);
+    document.getElementById('sumBalance').textContent=Math.max(0,total-paid).toFixed(2);
+  };
+  ['nsFee','nsDiscount','nsFirstPayment'].forEach(id=>document.getElementById(id).addEventListener('input',updateMoneySummary));
+
+  const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  const loadRegisteredStudents=async()=>{
+    const tbody=document.getElementById('registeredStudentsRows');
+    tbody.innerHTML='<tr><td colspan="5" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
+    try{
+      const data=await dataApiFetch('/students?select=student_no,full_name,phone,status,joined_on&order=created_at.desc&limit=30');
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا يوجد طلاب مسجلون بعد.</td></tr>';return}
+      tbody.innerHTML=data.map(s=>`<tr><td><b>${escapeHtml(s.student_no)}</b></td><td>${escapeHtml(s.full_name)}</td><td>${escapeHtml(s.phone||'—')}</td><td>${escapeHtml(s.joined_on||'—')}</td><td><span class="status active">نشط</span></td></tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلاب')+'</td></tr>'}
+  };
+  document.getElementById('refreshStudents').addEventListener('click',loadRegisteredStudents);
+
+  newStudentForm.addEventListener('submit',async e=>{
+    e.preventDefault();
+    studentFormMsg.className='student-form-msg'; registrationResult.className='registration-result';
+    const fee=moneyValue('nsFee'),discount=moneyValue('nsDiscount'),firstPayment=moneyValue('nsFirstPayment');
+    if(discount>fee){studentFormMsg.textContent='الخصم لا يمكن أن يكون أكبر من قيمة الاشتراك.';studentFormMsg.className='student-form-msg error show';return}
+    if(firstPayment>Math.max(0,fee-discount)){studentFormMsg.textContent='الدفعة الأولى أكبر من المبلغ المستحق بعد الخصم.';studentFormMsg.className='student-form-msg error show';return}
+    const payload={
+      p_full_name:document.getElementById('nsFullName').value.trim(),
+      p_gender:document.getElementById('nsGender').value||null,
+      p_birth_date:document.getElementById('nsBirthDate').value||null,
+      p_phone:document.getElementById('nsPhone').value.trim()||null,
+      p_email:document.getElementById('nsEmail').value.trim()||null,
+      p_stage_name:document.getElementById('nsStage').value.trim(),
+      p_grade_name:document.getElementById('nsGrade').value.trim(),
+      p_joined_on:document.getElementById('nsJoinedOn').value||new Date().toISOString().slice(0,10),
+      p_parent_name:document.getElementById('nsParentName').value.trim(),
+      p_parent_phone:document.getElementById('nsParentPhone').value.trim(),
+      p_parent_alt_phone:document.getElementById('nsParentAltPhone').value.trim()||null,
+      p_parent_email:document.getElementById('nsParentEmail').value.trim()||null,
+      p_relationship:document.getElementById('nsRelationship').value,
+      p_fee:fee,p_discount:discount,p_first_payment:firstPayment,
+      p_payment_method:document.getElementById('nsPaymentMethod').value,
+      p_notes:document.getElementById('nsNotes').value.trim()||null
+    };
+    if(!payload.p_full_name||!payload.p_stage_name||!payload.p_grade_name||!payload.p_parent_name||!payload.p_parent_phone){
+      studentFormMsg.textContent='أكمل البيانات المطلوبة المعلّمة بنجمة.';studentFormMsg.className='student-form-msg error show';return
+    }
+    saveStudentBtn.disabled=true;saveStudentBtn.textContent='جارٍ الحفظ...';
+    try{
+      const result=await dataApiFetch('/rpc/register_new_student',{method:'POST',body:JSON.stringify(payload)});
+      const r=Array.isArray(result)?result[0]:result;
+      registrationResult.innerHTML=`<h4>✓ تم تسجيل الطالب بنجاح</h4><div class="result-grid">
+        <div class="result-item"><span>رقم الطالب</span><b>${escapeHtml(r?.student_no||'—')}</b></div>
+        <div class="result-item"><span>الفاتورة</span><b>${escapeHtml(r?.invoice_no||'لا توجد')}</b></div>
+        <div class="result-item"><span>المدفوع</span><b>${Number(r?.paid||0).toFixed(2)}</b></div>
+        <div class="result-item"><span>المتبقي</span><b>${Number(r?.balance||0).toFixed(2)}</b></div>
+      </div>`;
+      registrationResult.className='registration-result show';
+      studentFormMsg.textContent='تم حفظ بيانات الطالب وولي الأمر والاشتراك في قاعدة البيانات.';
+      studentFormMsg.className='student-form-msg success show';
+      await loadRegisteredStudents();
+      newStudentForm.reset();document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);updateMoneySummary();
+    }catch(err){
+      studentFormMsg.textContent=err.message||'حدث خطأ أثناء تسجيل الطالب.';
+      studentFormMsg.className='student-form-msg error show';
+    }finally{saveStudentBtn.disabled=false;saveStudentBtn.textContent='حفظ الطالب'}
+  });
+
+    const students=[
     {name:'أحمد محمد علي',grade:'أول ثانوي',attendance:'96%',balance:'مسدد',status:'نشط'},
     {name:'سارة محمود حسن',grade:'ثالث إعدادي',attendance:'89%',balance:'450 ج',status:'نشط'},
     {name:'يوسف خالد أحمد',grade:'ثاني ثانوي',attendance:'93%',balance:'مسدد',status:'نشط'},
@@ -258,7 +468,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
