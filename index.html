@@ -520,40 +520,29 @@
   roleGrid.querySelectorAll('.role-btn').forEach(btn=>btn.addEventListener('click',()=>{activeRole=btn.dataset.role;roleGrid.querySelectorAll('.role-btn').forEach(x=>x.classList.toggle('active',x===btn));const r=roles[activeRole];identityLabel.textContent=r.label;identity.placeholder=r.placeholder;loginSubmit.textContent=r.button;loginSubtitle.textContent=r.subtitle;loginError.classList.remove('show');}));
   document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
   const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
-  const DATA_API='https://ep-jolly-band-b5o7f86y.apirest.c-7.us-east-2.aws.neon.tech/schooldb/rest/v1';
-  const NEON_SDK='https://esm.run/@neondatabase/neon-js@0.7.0-beta';
-
-  // Neon Auth remains responsible for login only.
-  // Database operations intentionally use the opaque Neon Auth session token
-  // through a single PostgreSQL dispatcher, so they no longer depend on JWT/JWKS.
-  const neonReady=import(NEON_SDK).then(({createClient})=>createClient({
-    auth:{url:AUTH_BASE},
-    dataApi:{url:DATA_API}
-  })).catch(err=>{
-    console.error('Neon SDK failed to load',err);
-    throw new Error('تعذر تحميل مكوّن تسجيل الدخول. حدّث الصفحة وحاول مرة أخرى.');
-  });
-
-  const getNeonClient=async()=>await neonReady;
+  const ROVEN_API='https://br-round-hall-b5qw20e0-rovenapi.compute.c-7.us-east-2.aws.neon.tech/';
   let rovenSessionToken='';
 
+  // Authentication is handled by Neon Auth using its normal opaque session cookie.
+  // All school database operations go through the Neon Function above and connect
+  // directly to PostgreSQL. JWT/JWKS and Data API are not used by application CRUD.
   const authPost=async(path,body)=>{
     const res=await fetch(AUTH_BASE+path,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
       credentials:'include',
       cache:'no-store',
       body:JSON.stringify(body)
     });
     let data={}; try{data=await res.json()}catch{}
-    if(!res.ok) throw new Error(data?.message||data?.error?.message||'تعذر إتمام الطلب');
+    if(!res.ok) throw new Error(data?.message||data?.error?.message||data?.error||'تعذر إتمام الطلب');
     return data;
   };
 
   const getOpaqueSessionToken=async(force=false)=>{
     if(rovenSessionToken && !force) return rovenSessionToken;
 
-    const res=await fetch(AUTH_BASE+'/get-session',{
+    const res=await fetch(AUTH_BASE+'/get-session?disableCookieCache=true',{
       method:'GET',
       credentials:'include',
       cache:'no-store',
@@ -561,15 +550,11 @@
     });
     let data={}; try{data=await res.json()}catch{}
 
-    if(!res.ok) throw new Error(data?.message||'انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
+    if(!res.ok) throw new Error(data?.message||data?.error?.message||'انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
 
     const token=data?.session?.token||data?.data?.session?.token||'';
     if(!token) throw new Error('تعذر قراءة جلسة الدخول. سجل الخروج ثم ادخل مرة أخرى.');
-
-    // This must be Better Auth's opaque session id, not a JWT.
-    if(String(token).split('.').length===3){
-      throw new Error('تعذر استخدام جلسة الدخول الحالية. سجل الخروج ثم ادخل مرة أخرى.');
-    }
+    if(String(token).split('.').length===3) throw new Error('تم استلام رمز جلسة غير متوقع. سجل الخروج ثم ادخل مرة أخرى.');
 
     rovenSessionToken=String(token);
     return rovenSessionToken;
@@ -577,30 +562,23 @@
 
   const callRovenRpc=async(action,payload={},retry=true)=>{
     const sessionToken=await getOpaqueSessionToken(!retry);
-    const res=await fetch(DATA_API+'/rpc/roven_rpc',{
+    const res=await fetch(ROVEN_API,{
       method:'POST',
+      mode:'cors',
+      cache:'no-store',
       headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({
-        p_action:action,
-        p_session_token:sessionToken,
-        p_payload:payload||{}
-      })
+      body:JSON.stringify({action,sessionToken,payload:payload||{}})
     });
 
     let data=null; try{data=await res.json()}catch{}
     if(res.ok) return data;
 
-    const msg=String(data?.message||data?.details||data?.hint||'تعذر تنفيذ العملية.');
+    const msg=String(data?.error||data?.message||data?.details||'تعذر تنفيذ العملية.');
     if(retry && (msg.includes('invalid_or_expired_session')||msg.includes('app_user_not_active'))){
       rovenSessionToken='';
       return callRovenRpc(action,payload,false);
     }
-
-    throw new Error(
-      msg.includes('invalid_or_expired_session')
-        ? 'انتهت جلسة الدخول. سجل الدخول مرة أخرى.'
-        : msg
-    );
+    throw new Error(msg.includes('invalid_or_expired_session')?'انتهت جلسة الدخول. سجل الدخول مرة أخرى.':msg);
   };
 
   const dataApiFetch=async(path,options={})=>{
@@ -617,7 +595,7 @@
     const table=parsed.pathname.replace(/^\/+/, '');
     if(table==='students') return callRovenRpc('list_students_admin',{});
 
-    throw new Error('هذه العملية غير مدعومة في الاتصال الآمن الحالي.');
+    throw new Error('هذه العملية غير مدعومة في الاتصال الحالي.');
   };
   const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
   const token=new URLSearchParams(location.search).get('token');
@@ -651,10 +629,7 @@
       if(!email||!pass){loginError.textContent='أدخل البريد الإلكتروني وكلمة المرور.';loginError.classList.add('show');return}
       loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
       try{
-        const client=await getNeonClient();
-        const loginResult=await client.auth.signIn.email({email,password:pass,rememberMe:true});
-        if(loginResult?.error) throw new Error(loginResult.error.message||'بيانات الدخول غير صحيحة.');
-        const data=loginResult?.data||loginResult||{};
+        const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
         rovenSessionToken='';
         const authRole=data?.user?.role||data?.role||'';
         if(activeRole==='admin' && authRole && !['super_admin','school_manager','academic_admin','finance_admin','reception'].includes(String(authRole))){
