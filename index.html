@@ -521,31 +521,57 @@
   document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
   const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
   const DATA_API='https://ep-jolly-band-b5o7f86y.apirest.c-7.us-east-2.aws.neon.tech/schooldb/rest/v1';
-  let authJwt=sessionStorage.getItem('roven_jwt')||'';
+  let authJwt='';
+  try{sessionStorage.removeItem('roven_jwt')}catch{}
   const authPost=async(path,body)=>{
     const res=await fetch(AUTH_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body)});
-    const headerJwt=res.headers.get('set-auth-jwt'); if(headerJwt){authJwt=headerJwt;sessionStorage.setItem('roven_jwt',headerJwt)}
+    const headerJwt=res.headers.get('set-auth-jwt');
     let data={}; try{data=await res.json()}catch{}
-    if(data?.token && String(data.token).split('.').length===3){authJwt=data.token;sessionStorage.setItem('roven_jwt',authJwt)}
+    if(headerJwt && String(headerJwt).split('.').length===3) authJwt=headerJwt;
+    if(data?.token && String(data.token).split('.').length===3) authJwt=data.token;
     if(!res.ok) throw new Error(data?.message||data?.error?.message||'تعذر إتمام الطلب');
     return data;
   };
-  const getAuthJwt=async()=>{
-    if(authJwt) return authJwt;
-    const tokenRes=await fetch(AUTH_BASE+'/token',{method:'GET',credentials:'include'});
+  const getAuthJwt=async(forceRefresh=false)=>{
+    if(authJwt && !forceRefresh) return authJwt;
+
+    const tokenRes=await fetch(AUTH_BASE+'/token',{method:'GET',credentials:'include',cache:'no-store'});
     if(tokenRes.ok){
       const data=await tokenRes.json().catch(()=>({}));
-      if(data?.token){authJwt=data.token;sessionStorage.setItem('roven_jwt',authJwt);return authJwt}
+      if(data?.token && String(data.token).split('.').length===3){
+        authJwt=data.token;
+        return authJwt;
+      }
     }
-    const sessionRes=await fetch(AUTH_BASE+'/get-session',{method:'GET',credentials:'include'});
+
+    const sessionRes=await fetch(AUTH_BASE+'/get-session',{method:'GET',credentials:'include',cache:'no-store'});
     const headerJwt=sessionRes.headers.get('set-auth-jwt');
-    if(headerJwt){authJwt=headerJwt;sessionStorage.setItem('roven_jwt',headerJwt);return headerJwt}
+    if(headerJwt && String(headerJwt).split('.').length===3){
+      authJwt=headerJwt;
+      return authJwt;
+    }
+
     throw new Error('انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
   };
   const dataApiFetch=async(path,options={})=>{
-    const jwt=await getAuthJwt();
-    const res=await fetch(DATA_API+path,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+jwt,'Accept':'application/json',...(options.headers||{})}});
-    let data=null; try{data=await res.json()}catch{}
+    const request=async(jwt)=>{
+      const res=await fetch(DATA_API+path,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+jwt,'Accept':'application/json',...(options.headers||{})}});
+      let data=null; try{data=await res.json()}catch{}
+      return {res,data};
+    };
+
+    let jwt=await getAuthJwt();
+    let {res,data}=await request(jwt);
+
+    const errText=String(data?.message||data?.hint||data?.details||'').toLowerCase();
+    const authKeyError=res.status===401 || errText.includes('jwk') || errText.includes('jwt') || errText.includes('key not found');
+
+    if(!res.ok && authKeyError){
+      authJwt='';
+      jwt=await getAuthJwt(true);
+      ({res,data}=await request(jwt));
+    }
+
     if(!res.ok) throw new Error(data?.message||data?.hint||data?.details||'تعذر الاتصال بقاعدة البيانات');
     return data;
   };
