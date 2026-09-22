@@ -191,7 +191,26 @@
           </div>
         </article>
       </section>
-      <section class="module" id="education"><div class="placeholder"><div class="big">🎓</div><h2>الإدارة التعليمية</h2><p>المراحل والصفوف والمواد والكورسات والمجموعات والمعلمون والجداول والدروس.</p></div></section>
+      <section class="module" id="education">
+        <div class="section-toolbar">
+          <div><h2>الإدارة التعليمية</h2><p>إدارة المعلمين والمراحل والمواد والمجموعات والحصص.</p></div>
+          <button class="primary-action" type="button" id="openTeacherModal">＋ تسجيل معلم جديد</button>
+        </div>
+        <div class="cards3" style="margin-bottom:15px">
+          <div class="feature"><b>المعلمين</b><span>البيانات الشخصية والوظيفية والرواتب والمواد.</span></div>
+          <div class="feature"><b>المواد والمراحل</b><span>ربط كل معلم بالمادة أو أكثر.</span></div>
+          <div class="feature"><b>الجداول والحصص</b><span>إدارة المجموعات ومواعيد التدريس.</span></div>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><div><h3>المعلمون المسجلون</h3><p>البيانات الوظيفية والمالية الحالية</p></div><button class="link-btn" id="refreshTeachers" type="button">تحديث</button></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>الرقم الوظيفي</th><th>المعلم</th><th>التخصص / المواد</th><th>الجوال</th><th>تاريخ الالتحاق</th><th>المرتب</th><th>الحالة</th></tr></thead>
+              <tbody id="teachersRows"><tr><td colspan="7" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المعلمين.</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
       <section class="module" id="attendance"><div class="placeholder"><div class="big">✅</div><h2>الحضور والغياب</h2><p>تسجيل حاضر، غائب، متأخر، بعذر أو غادر مبكرًا مع تقارير الطالب والمجموعة.</p></div></section>
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
@@ -200,6 +219,71 @@
     </div>
   </main>
   <nav class="mobile-bottom" id="bottomNav"><button class="active" data-section="dashboard" data-title="لوحة التحكم"><span class="m-ico">⌂</span><span>الرئيسية</span></button><button data-section="students" data-title="الطلاب وأولياء الأمور"><span class="m-ico">👥</span><span>الطلاب</span></button><button data-section="education" data-title="الإدارة التعليمية"><span class="m-ico">🎓</span><span>التعليم</span></button><button data-section="attendance" data-title="الحضور والغياب"><span class="m-ico">✓</span><span>الحضور</span></button><button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="m-ico">💳</span><span>المالية</span></button></nav>
+</div>
+
+
+<div class="student-modal" id="teacherModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="teacherModalTitle">
+    <div class="student-dialog-head">
+      <div><h3 id="teacherModalTitle">تسجيل معلم جديد</h3><p>سيتم إنشاء رقم وظيفي تلقائي وحفظ بيانات التوظيف والمرتب.</p></div>
+      <button class="close-modal" type="button" id="closeTeacherModal" aria-label="إغلاق">×</button>
+    </div>
+    <form class="student-form" id="newTeacherForm">
+      <div class="student-form-msg" id="teacherFormMsg"></div>
+      <div class="registration-result" id="teacherRegistrationResult"></div>
+
+      <div class="form-section">
+        <div class="form-section-title">👨‍🏫 البيانات الشخصية</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم المعلم بالكامل <span class="required">*</span></label><input id="ntFullName" required placeholder="مثال: أحمد محمد علي" /></div>
+          <div class="form-field"><label>رقم الجوال</label><input id="ntPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>البريد الإلكتروني</label><input id="ntEmail" type="email" /></div>
+          <div class="form-field"><label>رقم الهوية / الرقم القومي</label><input id="ntNationalId" /></div>
+          <div class="form-field"><label>النوع</label><select id="ntGender"><option value="">غير محدد</option><option value="male">ذكر</option><option value="female">أنثى</option></select></div>
+          <div class="form-field"><label>تاريخ الميلاد</label><input id="ntBirthDate" type="date" /></div>
+          <div class="form-field" style="grid-column:1/-1"><label>العنوان</label><input id="ntAddress" placeholder="العنوان بالتفصيل" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">🎓 البيانات الأكاديمية والوظيفية</div>
+        <div class="form-grid">
+          <div class="form-field"><label>المؤهل العلمي</label><input id="ntQualification" placeholder="مثال: بكالوريوس تربية" /></div>
+          <div class="form-field"><label>التخصص</label><input id="ntSpecialization" placeholder="مثال: رياضيات" /></div>
+          <div class="form-field"><label>تاريخ الالتحاق <span class="required">*</span></label><input id="ntHireDate" type="date" required /></div>
+          <div class="form-field" style="grid-column:1/-1"><label>المواد التي يدرسها</label><input id="ntSubjects" placeholder="مثال: رياضيات، إحصاء، جبر" /><div class="form-hint">افصل بين المواد بفاصلة.</div></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">💰 المرتب والبيانات المالية</div>
+        <div class="form-grid">
+          <div class="form-field"><label>نظام المرتب <span class="required">*</span></label>
+            <select id="ntSalaryType">
+              <option value="monthly">مرتب شهري</option>
+              <option value="per_lesson">بالحصة</option>
+              <option value="per_hour">بالساعة</option>
+              <option value="percentage">نسبة</option>
+              <option value="custom">اتفاق خاص</option>
+            </select>
+          </div>
+          <div class="form-field"><label id="ntSalaryAmountLabel">المرتب الشهري</label><input id="ntSalaryAmount" type="number" min="0" step="0.01" value="0" /></div>
+          <div class="form-field"><label>اسم البنك</label><input id="ntBankName" /></div>
+          <div class="form-field"><label>رقم الحساب / IBAN</label><input id="ntBankAccount" /></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">📝 ملاحظات</div>
+        <div class="form-field"><textarea id="ntNotes" placeholder="أي ملاحظات خاصة بالتعاقد أو العمل"></textarea></div>
+      </div>
+
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="cancelTeacherModal">إلغاء</button>
+        <button class="save-student" type="submit" id="saveTeacherBtn">حفظ المعلم</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <div class="student-modal" id="studentModal" aria-hidden="true">
@@ -376,6 +460,98 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
 
+
+  const teacherModal=document.getElementById('teacherModal');
+  const newTeacherForm=document.getElementById('newTeacherForm');
+  const teacherFormMsg=document.getElementById('teacherFormMsg');
+  const teacherRegistrationResult=document.getElementById('teacherRegistrationResult');
+  const saveTeacherBtn=document.getElementById('saveTeacherBtn');
+  const openTeacherModal=()=>{teacherModal.classList.add('show');teacherModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';teacherFormMsg.className='student-form-msg';teacherRegistrationResult.className='registration-result';};
+  const closeTeacherModal=()=>{teacherModal.classList.remove('show');teacherModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('openTeacherModal').addEventListener('click',openTeacherModal);
+  document.getElementById('closeTeacherModal').addEventListener('click',closeTeacherModal);
+  document.getElementById('cancelTeacherModal').addEventListener('click',closeTeacherModal);
+  teacherModal.addEventListener('click',e=>{if(e.target===teacherModal)closeTeacherModal()});
+  document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);
+
+  const salaryLabels={monthly:'المرتب الشهري',per_lesson:'قيمة الحصة',per_hour:'قيمة الساعة',percentage:'النسبة %',custom:'قيمة الاتفاق'};
+  document.getElementById('ntSalaryType').addEventListener('change',e=>{document.getElementById('ntSalaryAmountLabel').textContent=salaryLabels[e.target.value]||'قيمة المرتب';});
+
+  const salaryText=t=>{
+    const type=t.salary_type||'monthly',base=Number(t.base_salary||0),rate=Number(t.rate_value||0);
+    if(type==='monthly') return base.toFixed(2)+' ج / شهر';
+    if(type==='per_lesson') return rate.toFixed(2)+' ج / حصة';
+    if(type==='per_hour') return rate.toFixed(2)+' ج / ساعة';
+    if(type==='percentage') return rate.toFixed(2)+'%';
+    return (base||rate).toFixed(2)+' ج';
+  };
+
+  const loadTeachers=async()=>{
+    const tbody=document.getElementById('teachersRows');
+    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل المعلمين...</td></tr>';
+    try{
+      const data=await dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
+      tbody.innerHTML=data.map(t=>`<tr>
+        <td><b>${escapeHtml(t.employee_no||'—')}</b></td>
+        <td><strong>${escapeHtml(t.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.email||'')}</span></td>
+        <td>${escapeHtml(t.specialization||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.subjects||'')}</span></td>
+        <td>${escapeHtml(t.phone||'—')}</td>
+        <td>${escapeHtml(t.hire_date||'—')}</td>
+        <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
+        <td><span class="status ${t.status==='active'?'active':'watch'}">${t.status==='active'?'نشط':'غير نشط'}</span></td>
+      </tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المعلمين')+'</td></tr>'}
+  };
+  document.getElementById('refreshTeachers').addEventListener('click',loadTeachers);
+
+  newTeacherForm.addEventListener('submit',async e=>{
+    e.preventDefault();
+    teacherFormMsg.className='student-form-msg';teacherRegistrationResult.className='registration-result';
+    const salaryType=document.getElementById('ntSalaryType').value;
+    const salaryAmount=Math.max(0,Number(document.getElementById('ntSalaryAmount').value)||0);
+    const subjects=document.getElementById('ntSubjects').value.split(/[،,]/).map(x=>x.trim()).filter(Boolean);
+    const payload={
+      p_full_name:document.getElementById('ntFullName').value.trim(),
+      p_phone:document.getElementById('ntPhone').value.trim()||null,
+      p_email:document.getElementById('ntEmail').value.trim()||null,
+      p_national_id:document.getElementById('ntNationalId').value.trim()||null,
+      p_gender:document.getElementById('ntGender').value||null,
+      p_birth_date:document.getElementById('ntBirthDate').value||null,
+      p_address:document.getElementById('ntAddress').value.trim()||null,
+      p_qualification:document.getElementById('ntQualification').value.trim()||null,
+      p_specialization:document.getElementById('ntSpecialization').value.trim()||null,
+      p_hire_date:document.getElementById('ntHireDate').value||new Date().toISOString().slice(0,10),
+      p_salary_type:salaryType,
+      p_base_salary:(salaryType==='monthly'||salaryType==='custom')?salaryAmount:0,
+      p_rate_value:(salaryType==='monthly'||salaryType==='custom')?0:salaryAmount,
+      p_bank_name:document.getElementById('ntBankName').value.trim()||null,
+      p_bank_account:document.getElementById('ntBankAccount').value.trim()||null,
+      p_subject_names:subjects.length?subjects:null,
+      p_notes:document.getElementById('ntNotes').value.trim()||null
+    };
+    if(!payload.p_full_name){teacherFormMsg.textContent='اسم المعلم مطلوب.';teacherFormMsg.className='student-form-msg error show';return}
+    saveTeacherBtn.disabled=true;saveTeacherBtn.textContent='جارٍ الحفظ...';
+    try{
+      const result=await dataApiFetch('/rpc/register_new_teacher',{method:'POST',body:JSON.stringify(payload)});
+      const r=Array.isArray(result)?result[0]:result;
+      teacherRegistrationResult.innerHTML=`<h4>✓ تم تسجيل المعلم بنجاح</h4><div class="result-grid">
+        <div class="result-item"><span>الرقم الوظيفي</span><b>${escapeHtml(r?.employee_no||'—')}</b></div>
+        <div class="result-item"><span>المعلم</span><b>${escapeHtml(r?.full_name||payload.p_full_name)}</b></div>
+        <div class="result-item"><span>تاريخ الالتحاق</span><b>${escapeHtml(r?.hire_date||payload.p_hire_date)}</b></div>
+        <div class="result-item"><span>نظام المرتب</span><b>${escapeHtml(salaryLabels[r?.salary_type||salaryType]||salaryType)}</b></div>
+      </div>`;
+      teacherRegistrationResult.className='registration-result show';
+      teacherFormMsg.textContent='تم حفظ بيانات المعلم وبيانات التوظيف والمرتب والمواد في قاعدة البيانات.';
+      teacherFormMsg.className='student-form-msg success show';
+      await loadTeachers();
+      newTeacherForm.reset();document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);document.getElementById('ntSalaryAmountLabel').textContent='المرتب الشهري';
+    }catch(err){
+      teacherFormMsg.textContent=(String(err.message).includes('duplicate')||String(err.message).includes('unique'))?'يوجد معلم مسجل بنفس رقم الهوية أو بيانات مكررة.':(err.message||'حدث خطأ أثناء تسجيل المعلم.');
+      teacherFormMsg.className='student-form-msg error show';
+    }finally{saveTeacherBtn.disabled=false;saveTeacherBtn.textContent='حفظ المعلم'}
+  });
+
   const studentModal=document.getElementById('studentModal');
   const newStudentForm=document.getElementById('newStudentForm');
   const studentFormMsg=document.getElementById('studentFormMsg');
@@ -468,7 +644,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education')loadTeachers();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
