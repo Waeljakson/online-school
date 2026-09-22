@@ -354,7 +354,7 @@
           <div class="form-field"><label>اسم المجموعة <span class="required">*</span></label><input id="ngName" required placeholder="مثال: رياضيات أول ثانوي - A" /></div>
           <div class="form-field"><label>المعلم <span class="required">*</span></label><select id="ngTeacher" required><option value="">اختر المعلم</option></select></div>
           <div class="form-field"><label>المادة <span class="required">*</span></label><input id="ngSubject" required placeholder="مثال: رياضيات" /></div>
-          <div class="form-field"><label>المرحلة</label><input id="ngStage" placeholder="مثال: المرحلة الثانوية" /></div>
+          <div class="form-field"><label>المرحلة</label><select id="ngStage"><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
           <div class="form-field"><label>الصف الدراسي</label><input id="ngGrade" placeholder="مثال: أول ثانوي" /></div>
           <div class="form-field"><label>الحد الأقصى للطلاب</label><input id="ngCapacity" type="number" min="1" placeholder="اختياري" /></div>
           <div class="form-field" style="grid-column:1/-1"><label>رابط الحصة / Zoom / Meet</label><input id="ngMeetingUrl" type="url" placeholder="https://..." /></div>
@@ -467,7 +467,7 @@
           <div class="form-field"><label>جوال الطالب</label><input id="nsPhone" inputmode="tel" placeholder="اختياري" /></div>
           <div class="form-field"><label>البريد الإلكتروني</label><input id="nsEmail" type="email" placeholder="اختياري" /></div>
           <div class="form-field"><label>تاريخ الالتحاق</label><input id="nsJoinedOn" type="date" /></div>
-          <div class="form-field"><label>المرحلة <span class="required">*</span></label><input id="nsStage" required placeholder="مثال: المرحلة الثانوية" /></div>
+          <div class="form-field"><label>المرحلة <span class="required">*</span></label><select id="nsStage" required><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
           <div class="form-field"><label>الصف الدراسي <span class="required">*</span></label><input id="nsGrade" required placeholder="مثال: أول ثانوي" /></div>
           <div class="form-field"><label>ملاحظات</label><input id="nsNotes" placeholder="أي ملاحظات أولية" /></div>
         </div>
