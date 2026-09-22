@@ -98,7 +98,7 @@
         <div class="form-row"><label class="remember"><input type="checkbox" /> تذكرني على هذا الجهاز</label><a class="forgot" href="#" id="forgotLink">نسيت كلمة المرور؟</a></div>
         <div class="login-error" id="loginError"></div>
         <button class="login-submit" id="loginSubmit" type="submit">دخول الطالب</button>
-        <div class="login-note"><span>🔐</span><span>واجهة الدخول جاهزة. سيتم ربط التحقق الفعلي بالحسابات مع Neon Auth عند إنشاء حسابات المستخدمين.</span></div>
+        <div class="login-note"><span>🔐</span><span>تسجيل الدخول مؤمّن عبر Neon Auth. إذا كان الحساب جديدًا ولم تُعيّن له كلمة مرور بعد، استخدم «نسيت كلمة المرور؟» لتفعيلها.</span></div>
       </form>
       <div class="login-demo"><button type="button" id="previewDashboard">معاينة لوحة الإدارة الحالية ←</button></div>
       <div class="login-footer">© 2026 Rivan Online School • جميع الحقوق محفوظة</div>
@@ -169,8 +169,69 @@
   const roleGrid=document.getElementById('roleGrid'),identityLabel=document.getElementById('identityLabel'),identity=document.getElementById('identity'),loginSubmit=document.getElementById('loginSubmit'),loginSubtitle=document.getElementById('loginSubtitle'),password=document.getElementById('password'),loginError=document.getElementById('loginError');
   roleGrid.querySelectorAll('.role-btn').forEach(btn=>btn.addEventListener('click',()=>{activeRole=btn.dataset.role;roleGrid.querySelectorAll('.role-btn').forEach(x=>x.classList.toggle('active',x===btn));const r=roles[activeRole];identityLabel.textContent=r.label;identity.placeholder=r.placeholder;loginSubmit.textContent=r.button;loginSubtitle.textContent=r.subtitle;loginError.classList.remove('show');}));
   document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
-  document.getElementById('loginForm').addEventListener('submit',e=>{e.preventDefault();loginError.textContent='تم تجهيز واجهة الدخول. الخطوة التالية هي إنشاء حسابات '+({'student':'الطلاب','parent':'أولياء الأمور','teacher':'المعلمين','admin':'الإدارة'}[activeRole])+' وربطها بالمصادقة الفعلية في Neon Auth.';loginError.classList.add('show')});
-  document.getElementById('forgotLink').addEventListener('click',e=>{e.preventDefault();loginError.textContent='سيتم تفعيل استعادة كلمة المرور مع ربط Neon Auth.';loginError.classList.add('show')});
+  const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
+  const authPost=async(path,body)=>{
+    const res=await fetch(AUTH_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body)});
+    let data={}; try{data=await res.json()}catch{}
+    if(!res.ok) throw new Error(data?.message||data?.error?.message||'تعذر إتمام الطلب');
+    return data;
+  };
+  const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
+  const token=new URLSearchParams(location.search).get('token');
+  const resetError=new URLSearchParams(location.search).get('error');
+  if(token){
+    document.querySelector('.role-grid').style.display='none';
+    document.querySelector('.login-panel-head h3').textContent='تعيين كلمة مرور جديدة';
+    loginSubtitle.textContent='اكتب كلمة مرور جديدة لحسابك ثم احفظها.';
+    document.getElementById('loginForm').innerHTML=`
+      <div class="field"><label for="newPassword">كلمة المرور الجديدة</label><div class="input-wrap"><span>🔒</span><input id="newPassword" type="password" autocomplete="new-password" placeholder="8 أحرف على الأقل" /></div></div>
+      <div class="field"><label for="confirmPassword">تأكيد كلمة المرور</label><div class="input-wrap"><span>🔒</span><input id="confirmPassword" type="password" autocomplete="new-password" placeholder="أعد كتابة كلمة المرور" /></div></div>
+      <div class="login-error" id="resetMsg"></div>
+      <button class="login-submit" type="submit">حفظ كلمة المرور</button>`;
+    document.getElementById('loginForm').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const p1=document.getElementById('newPassword').value,p2=document.getElementById('confirmPassword').value,msg=document.getElementById('resetMsg');
+      if(p1.length<8){msg.textContent='كلمة المرور يجب ألا تقل عن 8 أحرف.';msg.classList.add('show');return}
+      if(p1!==p2){msg.textContent='كلمتا المرور غير متطابقتين.';msg.classList.add('show');return}
+      try{
+        await authPost('/reset-password',{newPassword:p1,token});
+        msg.textContent='تم تعيين كلمة المرور بنجاح. سيتم إعادتك إلى تسجيل الدخول.';
+        msg.style.background='#eaf8f2';msg.style.color='#147d52';msg.style.borderColor='#ccebdc';msg.classList.add('show');
+        setTimeout(()=>location.href=location.origin+location.pathname,1400);
+      }catch(err){msg.textContent=err.message||'تعذر تعيين كلمة المرور.';msg.classList.add('show')}
+    });
+  }else{
+    if(resetError){loginError.textContent='رابط استعادة كلمة المرور غير صالح أو انتهت صلاحيته.';loginError.classList.add('show')}
+    document.getElementById('loginForm').addEventListener('submit',async e=>{
+      e.preventDefault(); loginError.classList.remove('show');
+      const email=identity.value.trim(),pass=password.value;
+      if(!email||!pass){loginError.textContent='أدخل البريد الإلكتروني وكلمة المرور.';loginError.classList.add('show');return}
+      loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
+      try{
+        const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
+        const authRole=data?.user?.role||data?.role||'';
+        if(activeRole==='admin' && authRole && !String(authRole).includes('super_admin') && !String(authRole).includes('admin')){
+          throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
+        }
+        openDashboard();
+      }catch(err){
+        loginError.textContent='بيانات الدخول غير صحيحة أو كلمة المرور لم تُفعّل بعد. استخدم «نسيت كلمة المرور؟» لتعيينها أول مرة.';
+        loginError.classList.add('show');
+      }finally{
+        loginSubmit.disabled=false;loginSubmit.textContent=roles[activeRole].button;
+      }
+    });
+    document.getElementById('forgotLink').addEventListener('click',async e=>{
+      e.preventDefault();loginError.classList.remove('show');
+      const email=identity.value.trim();
+      if(!email||!email.includes('@')){loginError.textContent='اكتب البريد الإلكتروني أولًا ثم اضغط نسيت كلمة المرور.';loginError.classList.add('show');return}
+      try{
+        await authPost('/request-password-reset',{email,redirectTo:location.origin+location.pathname});
+        loginError.textContent='تم إرسال رابط تعيين كلمة المرور إلى بريدك الإلكتروني. افحص الوارد والرسائل غير المرغوب فيها.';
+        loginError.style.background='#eaf8f2';loginError.style.color='#147d52';loginError.style.borderColor='#ccebdc';loginError.classList.add('show');
+      }catch(err){loginError.textContent='تعذر إرسال رابط الاستعادة الآن. حاول مرة أخرى.';loginError.classList.add('show')}
+    });
+  }
   document.getElementById('previewDashboard').addEventListener('click',()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)});
 
   // Remove any service worker/cache from previous broken Vite deployment.
