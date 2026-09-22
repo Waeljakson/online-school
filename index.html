@@ -154,7 +154,7 @@
         <div class="form-row"><label class="remember"><input type="checkbox" /> تذكرني على هذا الجهاز</label><a class="forgot" href="#" id="forgotLink">نسيت كلمة المرور؟</a></div>
         <div class="login-error" id="loginError"></div>
         <button class="login-submit" id="loginSubmit" type="submit">دخول الطالب</button>
-        <div class="login-note"><span>🔐</span><span>تسجيل الدخول مؤمّن عبر Neon Auth. إذا كان الحساب جديدًا ولم تُعيّن له كلمة مرور بعد، استخدم «نسيت كلمة المرور؟» لتفعيلها.</span></div>
+        <div class="login-note"><span>🔐</span><span>تم تحديث نظام الأمان. لحساب الإدارة الرئيسي استخدم «نسيت كلمة المرور؟» مرة واحدة لتعيين كلمة المرور على التكامل الجديد، ثم سجّل الدخول بشكل طبيعي.</span></div>
       </form>
       <div class="login-demo"><button type="button" id="previewDashboard">معاينة لوحة الإدارة الحالية ←</button></div>
       <div class="login-footer">© 2026 ROVEN Online School • جميع الحقوق محفوظة</div>
@@ -533,6 +533,16 @@
   });
 
   const getNeonClient=async()=>await neonReady;
+
+  // One-time cleanup after the Neon Auth integration was rebuilt.
+  const AUTH_REPAIR_VERSION='20260923-v2';
+  try{
+    if(localStorage.getItem('roven_auth_repair')!==AUTH_REPAIR_VERSION){
+      fetch(AUTH_BASE+'/sign-out',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:'{}'}).catch(()=>{}).finally(()=>{
+        try{localStorage.setItem('roven_auth_repair',AUTH_REPAIR_VERSION)}catch{}
+      });
+    }
+  }catch{}
 
   // Kept only for password-reset endpoints; sign-in and Data API use the official SDK.
   const authPost=async(path,body)=>{
