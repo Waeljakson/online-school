@@ -86,6 +86,16 @@
     .group-count{font-weight:800;color:#0f766e}
     @media(max-width:680px){.schedule-row{grid-template-columns:1fr 1fr}.schedule-row .remove-schedule{grid-column:2}.student-picker-list{max-height:190px}}
 
+    .role-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 9px;font-size:9px;font-weight:800;white-space:nowrap}
+    .role-super_admin{background:#efe9ff;color:#6741b5}.role-school_manager{background:#eaf4ff;color:#27699d}.role-teacher{background:#eaf8f2;color:#147d52}.role-reception{background:#fff5df;color:#a45c0a}
+    .user-role-select{height:34px!important;min-width:125px;padding:3px 8px!important;font-size:10px!important}
+    .user-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.mini-btn{border:1px solid var(--line);background:#fff;color:#526970;padding:6px 8px;border-radius:8px;font-size:9px;font-weight:700}
+    .mini-btn.primary{background:#edf8f6;color:#0f766e;border-color:#cfe7e2}.mini-btn.danger{background:#fff2f1;color:#a3433e;border-color:#f3d1cf}
+    .user-activation-note{background:#f6fafb;border:1px solid #e4edef;border-radius:12px;padding:11px 12px;font-size:10px;color:#647b83;line-height:1.8}
+    .teacher-link-box{display:none}.teacher-link-box.show{display:block}
+    @media(max-width:900px){#settings .cards3{grid-template-columns:1fr 1fr!important}}
+    @media(max-width:560px){#settings .cards3{grid-template-columns:1fr!important}}
+
   </style>
 </head>
 <body>
@@ -246,13 +256,87 @@
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
-      <section class="module" id="settings"><div class="placeholder"><div class="big">⚙️</div><h2>الإعدادات والصلاحيات</h2><p>حسابات الإدارة والمعلمين والطلاب وأولياء الأمور والصلاحيات التفصيلية لكل دور.</p></div></section>
+      <section class="module" id="settings">
+        <div class="section-toolbar">
+          <div><h2>المستخدمون والصلاحيات</h2><p>إنشاء حسابات النظام وتحديد الدور والصلاحية الأساسية لكل مستخدم.</p></div>
+          <button class="primary-action" type="button" id="openUserModal">＋ إنشاء مستخدم</button>
+        </div>
+
+        <div class="cards3" style="grid-template-columns:repeat(4,1fr);margin-bottom:15px">
+          <div class="feature"><b>🛡️ مدير نظام</b><span>صلاحية كاملة تشمل المستخدمين والإعدادات وكافة أقسام المدرسة.</span></div>
+          <div class="feature"><b>🏫 مدير</b><span>إدارة المدرسة والتعليم والمالية والتقارير، بدون إدارة حسابات مدير النظام.</span></div>
+          <div class="feature"><b>👨‍🏫 معلم</b><span>الوصول إلى مجموعاته وحصصه وطلابه والواجبات والاختبارات المرتبطة به.</span></div>
+          <div class="feature"><b>🗂️ طاقم إداري</b><span>التسجيل والمتابعة والتحصيل والعمليات الإدارية اليومية.</span></div>
+        </div>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div><h3>حسابات المستخدمين</h3><p>يمكن لمدير النظام إنشاء المستخدمين وتغيير أدوارهم أو إيقافهم.</p></div>
+            <button class="link-btn" id="refreshUsers" type="button">تحديث</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>المستخدم</th><th>البريد / الجوال</th><th>الصلاحية</th><th>ملف المعلم</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody id="systemUsersRows"><tr><td colspan="6" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المستخدمين.</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
     </div>
   </main>
   <nav class="mobile-bottom" id="bottomNav"><button class="active" data-section="dashboard" data-title="لوحة التحكم"><span class="m-ico">⌂</span><span>الرئيسية</span></button><button data-section="students" data-title="الطلاب وأولياء الأمور"><span class="m-ico">👥</span><span>الطلاب</span></button><button data-section="education" data-title="الإدارة التعليمية"><span class="m-ico">🎓</span><span>التعليم</span></button><button data-section="attendance" data-title="الحضور والغياب"><span class="m-ico">✓</span><span>الحضور</span></button><button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="m-ico">💳</span><span>المالية</span></button></nav>
 </div>
 
 
+
+
+<div class="student-modal" id="userModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="userModalTitle" style="max-width:760px">
+    <div class="student-dialog-head">
+      <div><h3 id="userModalTitle">إنشاء مستخدم جديد</h3><p>أنشئ الحساب وحدد صلاحية المستخدم داخل ROVEN Online School.</p></div>
+      <button class="close-modal" type="button" id="closeUserModal" aria-label="إغلاق">×</button>
+    </div>
+    <form class="student-form" id="newUserForm">
+      <div class="student-form-msg" id="userFormMsg"></div>
+      <div class="registration-result" id="userCreationResult"></div>
+
+      <div class="form-section">
+        <div class="form-section-title">👤 بيانات الحساب</div>
+        <div class="form-grid two">
+          <div class="form-field"><label>الاسم بالكامل <span class="required">*</span></label><input id="nuFullName" required /></div>
+          <div class="form-field"><label>البريد الإلكتروني <span class="required">*</span></label><input id="nuEmail" type="email" required placeholder="name@example.com" /></div>
+          <div class="form-field"><label>رقم الجوال</label><input id="nuPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>الصلاحية <span class="required">*</span></label>
+            <select id="nuRole">
+              <option value="super_admin">مدير نظام</option>
+              <option value="school_manager">مدير</option>
+              <option value="teacher">معلم</option>
+              <option value="reception">طاقم إداري</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section teacher-link-box" id="teacherLinkBox">
+        <div class="form-section-title">👨‍🏫 ربط حساب المعلم</div>
+        <div class="form-field">
+          <label>ملف معلم موجود</label>
+          <select id="nuTeacherId"><option value="">إنشاء ملف معلم تلقائيًا</option></select>
+          <div class="form-hint">اختياري. إذا كان المعلم مسجلًا مسبقًا، اختر ملفه. وإلا سينشئ النظام ملف معلم تلقائيًا.</div>
+        </div>
+      </div>
+
+      <div class="user-activation-note">
+        🔐 بعد إنشاء الحساب سيُرسل رابط تفعيل إلى البريد الإلكتروني لتعيين كلمة المرور لأول مرة.
+      </div>
+
+      <div class="student-form-actions" style="margin-top:18px">
+        <button class="secondary-action" type="button" id="cancelUserModal">إلغاء</button>
+        <button class="save-student" type="submit" id="saveUserBtn">إنشاء الحساب</button>
+      </div>
+    </form>
+  </div>
+</div>
 
 <div class="student-modal" id="groupModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
@@ -499,8 +583,11 @@
       try{
         const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
         const authRole=data?.user?.role||data?.role||'';
-        if(activeRole==='admin' && authRole && !String(authRole).includes('super_admin') && !String(authRole).includes('admin')){
+        if(activeRole==='admin' && authRole && !['super_admin','school_manager','academic_admin','finance_admin','reception'].includes(String(authRole))){
           throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
+        }
+        if(activeRole==='teacher' && authRole && String(authRole)!=='teacher'){
+          throw new Error('هذا الحساب ليس حساب معلم.');
         }
         openDashboard();
       }catch(err){
@@ -539,6 +626,133 @@
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
 
 
+
+
+  const userModal=document.getElementById('userModal');
+  const newUserForm=document.getElementById('newUserForm');
+  const userFormMsg=document.getElementById('userFormMsg');
+  const userCreationResult=document.getElementById('userCreationResult');
+  const saveUserBtn=document.getElementById('saveUserBtn');
+  const roleLabels={super_admin:'مدير نظام',school_manager:'مدير',teacher:'معلم',reception:'طاقم إداري'};
+  const roleIcons={super_admin:'🛡️',school_manager:'🏫',teacher:'👨‍🏫',reception:'🗂️'};
+
+  const setTeacherLinkVisibility=()=>{
+    document.getElementById('teacherLinkBox').classList.toggle('show',document.getElementById('nuRole').value==='teacher');
+  };
+  document.getElementById('nuRole').addEventListener('change',setTeacherLinkVisibility);
+
+  const loadUnlinkedTeachers=async()=>{
+    const select=document.getElementById('nuTeacherId');
+    select.innerHTML='<option value="">إنشاء ملف معلم تلقائيًا</option>';
+    try{
+      const data=await dataApiFetch('/rpc/list_unlinked_teachers_admin',{method:'POST',body:'{}'});
+      (data||[]).forEach(t=>{
+        const o=document.createElement('option');
+        o.value=t.teacher_id;
+        o.textContent=(t.full_name||'معلم')+(t.employee_no?' - '+t.employee_no:'')+(t.email?' - '+t.email:'');
+        select.appendChild(o);
+      });
+    }catch{}
+  };
+
+  const openUserModal=async()=>{
+    userModal.classList.add('show');userModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    userFormMsg.className='student-form-msg';userCreationResult.className='registration-result';
+    setTeacherLinkVisibility();await loadUnlinkedTeachers();
+  };
+  const closeUserModal=()=>{userModal.classList.remove('show');userModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('openUserModal').addEventListener('click',openUserModal);
+  document.getElementById('closeUserModal').addEventListener('click',closeUserModal);
+  document.getElementById('cancelUserModal').addEventListener('click',closeUserModal);
+  userModal.addEventListener('click',e=>{if(e.target===userModal)closeUserModal()});
+
+  const roleBadge=role=>'<span class="role-badge role-'+escapeHtml(role)+'">'+(roleIcons[role]||'•')+' '+escapeHtml(roleLabels[role]||role)+'</span>';
+
+  const loadSystemUsers=async()=>{
+    const tbody=document.getElementById('systemUsersRows');
+    tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل المستخدمين...</td></tr>';
+    try{
+      const data=await dataApiFetch('/rpc/list_system_users_admin',{method:'POST',body:'{}'});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد حسابات مستخدمين.</td></tr>';return}
+      tbody.innerHTML=data.map(u=>`<tr data-user-id="${escapeHtml(u.app_user_id)}">
+        <td><strong>${escapeHtml(u.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${roleBadge(u.role)}</span></td>
+        <td>${escapeHtml(u.email||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.phone||'')}</span></td>
+        <td>
+          <select class="form-field user-role-select row-role">
+            <option value="super_admin" ${u.role==='super_admin'?'selected':''}>مدير نظام</option>
+            <option value="school_manager" ${u.role==='school_manager'?'selected':''}>مدير</option>
+            <option value="teacher" ${u.role==='teacher'?'selected':''}>معلم</option>
+            <option value="reception" ${u.role==='reception'?'selected':''}>طاقم إداري</option>
+          </select>
+        </td>
+        <td>${u.employee_no?'<b>'+escapeHtml(u.employee_no)+'</b>':'—'}</td>
+        <td><span class="status ${u.is_active?'active':'watch'}">${u.is_active?'نشط':'موقوف'}</span></td>
+        <td><div class="user-actions">
+          <button class="mini-btn primary save-user-role" type="button">حفظ الصلاحية</button>
+          <button class="mini-btn ${u.is_active?'danger':'primary'} toggle-user-active" type="button" data-active="${u.is_active?'1':'0'}">${u.is_active?'إيقاف':'تفعيل'}</button>
+        </div></td>
+      </tr>`).join('');
+
+      tbody.querySelectorAll('.save-user-role').forEach(btn=>btn.addEventListener('click',async()=>{
+        const tr=btn.closest('tr'),id=tr.dataset.userId,role=tr.querySelector('.row-role').value;
+        btn.disabled=true;btn.textContent='جارٍ الحفظ...';
+        try{
+          await dataApiFetch('/rpc/update_system_user_admin',{method:'POST',body:JSON.stringify({p_app_user_id:id,p_role:role,p_is_active:true,p_teacher_id:null})});
+          await loadSystemUsers();
+        }catch(err){alert(err.message||'تعذر تحديث الصلاحية');btn.disabled=false;btn.textContent='حفظ الصلاحية'}
+      }));
+
+      tbody.querySelectorAll('.toggle-user-active').forEach(btn=>btn.addEventListener('click',async()=>{
+        const tr=btn.closest('tr'),id=tr.dataset.userId,role=tr.querySelector('.row-role').value,current=btn.dataset.active==='1';
+        if(!confirm(current?'هل تريد إيقاف هذا المستخدم؟':'هل تريد تفعيل هذا المستخدم؟'))return;
+        btn.disabled=true;
+        try{
+          await dataApiFetch('/rpc/update_system_user_admin',{method:'POST',body:JSON.stringify({p_app_user_id:id,p_role:role,p_is_active:!current,p_teacher_id:null})});
+          await loadSystemUsers();
+        }catch(err){alert(err.message||'تعذر تحديث حالة المستخدم');btn.disabled=false}
+      }));
+    }catch(err){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(String(err.message||'تعذر تحميل المستخدمين').includes('not_authorized')?'إدارة المستخدمين متاحة لمدير النظام فقط.':(err.message||'تعذر تحميل المستخدمين'))+'</td></tr>';
+    }
+  };
+  document.getElementById('refreshUsers').addEventListener('click',loadSystemUsers);
+
+  newUserForm.addEventListener('submit',async e=>{
+    e.preventDefault();userFormMsg.className='student-form-msg';userCreationResult.className='registration-result';
+    const payload={
+      p_full_name:document.getElementById('nuFullName').value.trim(),
+      p_email:document.getElementById('nuEmail').value.trim().toLowerCase(),
+      p_phone:document.getElementById('nuPhone').value.trim()||null,
+      p_role:document.getElementById('nuRole').value,
+      p_teacher_id:document.getElementById('nuRole').value==='teacher'?(document.getElementById('nuTeacherId').value||null):null
+    };
+    if(!payload.p_full_name||!payload.p_email){userFormMsg.textContent='الاسم والبريد الإلكتروني مطلوبان.';userFormMsg.className='student-form-msg error show';return}
+    saveUserBtn.disabled=true;saveUserBtn.textContent='جارٍ إنشاء الحساب...';
+    try{
+      const result=await dataApiFetch('/rpc/create_system_user_admin',{method:'POST',body:JSON.stringify(payload)});
+      const r=Array.isArray(result)?result[0]:result;
+      let activationSent=false;
+      try{
+        await authPost('/request-password-reset',{email:payload.p_email,redirectTo:location.origin+location.pathname});
+        activationSent=true;
+      }catch{}
+      userCreationResult.innerHTML=`<h4>✓ تم إنشاء المستخدم</h4><div class="result-grid">
+        <div class="result-item"><span>المستخدم</span><b>${escapeHtml(r?.full_name||payload.p_full_name)}</b></div>
+        <div class="result-item"><span>الصلاحية</span><b>${escapeHtml(roleLabels[payload.p_role])}</b></div>
+        <div class="result-item"><span>البريد</span><b>${escapeHtml(payload.p_email)}</b></div>
+        <div class="result-item"><span>التفعيل</span><b>${activationSent?'تم إرسال الرابط':'يستخدم نسيت كلمة المرور'}</b></div>
+      </div>`;
+      userCreationResult.className='registration-result show';
+      userFormMsg.textContent=activationSent?'تم إنشاء الحساب وإرسال رابط تعيين كلمة المرور إلى المستخدم.':'تم إنشاء الحساب. يمكن للمستخدم تعيين كلمة المرور من «نسيت كلمة المرور؟».';
+      userFormMsg.className='student-form-msg success show';
+      await loadSystemUsers();
+      newUserForm.reset();setTeacherLinkVisibility();await loadUnlinkedTeachers();
+    }catch(err){
+      const msg=String(err.message||'');
+      userFormMsg.textContent=msg.includes('email_already_exists')?'هذا البريد الإلكتروني مسجل بالفعل.':(msg.includes('not_authorized')?'إنشاء المستخدمين متاح لمدير النظام فقط.':(err.message||'تعذر إنشاء المستخدم.'));
+      userFormMsg.className='student-form-msg error show';
+    }finally{saveUserBtn.disabled=false;saveUserBtn.textContent='إنشاء الحساب'}
+  });
 
   const groupModal=document.getElementById('groupModal');
   const newGroupForm=document.getElementById('newGroupForm');
@@ -861,7 +1075,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='settings')loadSystemUsers();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
