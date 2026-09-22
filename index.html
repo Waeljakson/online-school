@@ -523,33 +523,26 @@
   const DATA_API='https://ep-jolly-band-b5o7f86y.apirest.c-7.us-east-2.aws.neon.tech/schooldb/rest/v1';
   const NEON_SDK='https://esm.run/@neondatabase/neon-js@0.7.0-beta';
 
-  // Official Neon client: Neon Auth session -> fresh JWT -> Data API automatically.
+  // Neon Auth remains responsible for login only.
+  // Database operations intentionally use the opaque Neon Auth session token
+  // through a single PostgreSQL dispatcher, so they no longer depend on JWT/JWKS.
   const neonReady=import(NEON_SDK).then(({createClient})=>createClient({
     auth:{url:AUTH_BASE},
     dataApi:{url:DATA_API}
   })).catch(err=>{
     console.error('Neon SDK failed to load',err);
-    throw new Error('تعذر تحميل مكوّن الاتصال الآمن. حدّث الصفحة وحاول مرة أخرى.');
+    throw new Error('تعذر تحميل مكوّن تسجيل الدخول. حدّث الصفحة وحاول مرة أخرى.');
   });
 
   const getNeonClient=async()=>await neonReady;
+  let rovenSessionToken='';
 
-  // One-time cleanup after the Neon Auth integration was rebuilt.
-  const AUTH_REPAIR_VERSION='20260923-v2';
-  try{
-    if(localStorage.getItem('roven_auth_repair')!==AUTH_REPAIR_VERSION){
-      fetch(AUTH_BASE+'/sign-out',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:'{}'}).catch(()=>{}).finally(()=>{
-        try{localStorage.setItem('roven_auth_repair',AUTH_REPAIR_VERSION)}catch{}
-      });
-    }
-  }catch{}
-
-  // Kept only for password-reset endpoints; sign-in and Data API use the official SDK.
   const authPost=async(path,body)=>{
     const res=await fetch(AUTH_BASE+path,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       credentials:'include',
+      cache:'no-store',
       body:JSON.stringify(body)
     });
     let data={}; try{data=await res.json()}catch{}
@@ -557,43 +550,74 @@
     return data;
   };
 
-  const dataApiFetch=async(path,options={})=>{
-    const client=await getNeonClient();
+  const getOpaqueSessionToken=async(force=false)=>{
+    if(rovenSessionToken && !force) return rovenSessionToken;
 
+    const res=await fetch(AUTH_BASE+'/get-session',{
+      method:'GET',
+      credentials:'include',
+      cache:'no-store',
+      headers:{'Accept':'application/json'}
+    });
+    let data={}; try{data=await res.json()}catch{}
+
+    if(!res.ok) throw new Error(data?.message||'انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
+
+    const token=data?.session?.token||data?.data?.session?.token||'';
+    if(!token) throw new Error('تعذر قراءة جلسة الدخول. سجل الخروج ثم ادخل مرة أخرى.');
+
+    // This must be Better Auth's opaque session id, not a JWT.
+    if(String(token).split('.').length===3){
+      throw new Error('تعذر استخدام جلسة الدخول الحالية. سجل الخروج ثم ادخل مرة أخرى.');
+    }
+
+    rovenSessionToken=String(token);
+    return rovenSessionToken;
+  };
+
+  const callRovenRpc=async(action,payload={},retry=true)=>{
+    const sessionToken=await getOpaqueSessionToken(!retry);
+    const res=await fetch(DATA_API+'/rpc/roven_rpc',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify({
+        p_action:action,
+        p_session_token:sessionToken,
+        p_payload:payload||{}
+      })
+    });
+
+    let data=null; try{data=await res.json()}catch{}
+    if(res.ok) return data;
+
+    const msg=String(data?.message||data?.details||data?.hint||'تعذر تنفيذ العملية.');
+    if(retry && (msg.includes('invalid_or_expired_session')||msg.includes('app_user_not_active'))){
+      rovenSessionToken='';
+      return callRovenRpc(action,payload,false);
+    }
+
+    throw new Error(
+      msg.includes('invalid_or_expired_session')
+        ? 'انتهت جلسة الدخول. سجل الدخول مرة أخرى.'
+        : msg
+    );
+  };
+
+  const dataApiFetch=async(path,options={})=>{
     if(path.startsWith('/rpc/')){
-      const fn=path.slice('/rpc/'.length).split('?')[0];
-      let args={};
+      const action=path.slice('/rpc/'.length).split('?')[0];
+      let payload={};
       if(options.body){
-        try{args=typeof options.body==='string'?JSON.parse(options.body):options.body}catch{args={}}
+        try{payload=typeof options.body==='string'?JSON.parse(options.body):options.body}catch{payload={}}
       }
-      const {data,error}=await client.rpc(fn,args);
-      if(error) throw new Error(error.message||error.details||error.hint||'تعذر تنفيذ العملية.');
-      return data;
+      return callRovenRpc(action,payload);
     }
 
     const parsed=new URL(path,'https://roven.local');
     const table=parsed.pathname.replace(/^\/+/, '');
-    if(!table) throw new Error('مسار قاعدة البيانات غير صالح.');
+    if(table==='students') return callRovenRpc('list_students_admin',{});
 
-    let query=client.from(table).select(parsed.searchParams.get('select')||'*');
-
-    const order=parsed.searchParams.get('order');
-    if(order){
-      const [column,direction]=order.split('.');
-      if(column) query=query.order(column,{ascending:direction!=='desc'});
-    }
-
-    const limit=Number(parsed.searchParams.get('limit')||0);
-    if(limit>0) query=query.limit(limit);
-
-    for(const [key,value] of parsed.searchParams.entries()){
-      if(['select','order','limit'].includes(key)) continue;
-      if(value.startsWith('eq.')) query=query.eq(key,value.slice(3));
-    }
-
-    const {data,error}=await query;
-    if(error) throw new Error(error.message||error.details||error.hint||'تعذر الاتصال بقاعدة البيانات.');
-    return data;
+    throw new Error('هذه العملية غير مدعومة في الاتصال الآمن الحالي.');
   };
   const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
   const token=new URLSearchParams(location.search).get('token');
@@ -613,7 +637,7 @@
       if(p1.length<8){msg.textContent='كلمة المرور يجب ألا تقل عن 8 أحرف.';msg.classList.add('show');return}
       if(p1!==p2){msg.textContent='كلمتا المرور غير متطابقتين.';msg.classList.add('show');return}
       try{
-        await authPost('/reset-password',{newPassword:p1,token});
+        await authPost('/reset-password',{newPassword:p1,token}); rovenSessionToken='';
         msg.textContent='تم تعيين كلمة المرور بنجاح. سيتم إعادتك إلى تسجيل الدخول.';
         msg.style.background='#eaf8f2';msg.style.color='#147d52';msg.style.borderColor='#ccebdc';msg.classList.add('show');
         setTimeout(()=>location.href=location.origin+location.pathname,1400);
@@ -631,6 +655,7 @@
         const loginResult=await client.auth.signIn.email({email,password:pass,rememberMe:true});
         if(loginResult?.error) throw new Error(loginResult.error.message||'بيانات الدخول غير صحيحة.');
         const data=loginResult?.data||loginResult||{};
+        rovenSessionToken='';
         const authRole=data?.user?.role||data?.role||'';
         if(activeRole==='admin' && authRole && !['super_admin','school_manager','academic_admin','finance_admin','reception'].includes(String(authRole))){
           throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
