@@ -215,7 +215,18 @@
         }
         openDashboard();
       }catch(err){
-        loginError.textContent='بيانات الدخول غير صحيحة أو كلمة المرور لم تُفعّل بعد. استخدم «نسيت كلمة المرور؟» لتعيينها أول مرة.';
+        const adminEmail='waeljaksonstar@gmail.com';
+        if(activeRole==='admin' && email.toLowerCase()===adminEmail){
+          try{
+            await authPost('/request-password-reset',{email,redirectTo:location.origin+location.pathname});
+            loginError.textContent='حساب الإدارة موجود لكنه لم يعيّن كلمة مرور بعد. أرسلنا الآن رابط تفعيل/تعيين كلمة المرور إلى بريدك الإلكتروني. افتح الرسالة، عيّن كلمة المرور، ثم ارجع وسجّل الدخول.';
+            loginError.style.background='#eaf8f2';loginError.style.color='#147d52';loginError.style.borderColor='#ccebdc';
+          }catch{
+            loginError.textContent='حساب الإدارة موجود لكنه لم يعيّن كلمة مرور بعد. اضغط «نسيت كلمة المرور؟» لإرسال رابط التفعيل.';
+          }
+        }else{
+          loginError.textContent='بيانات الدخول غير صحيحة.';
+        }
         loginError.classList.add('show');
       }finally{
         loginSubmit.disabled=false;loginSubmit.textContent=roles[activeRole].button;
