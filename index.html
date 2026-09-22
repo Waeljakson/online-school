@@ -18,12 +18,74 @@
     @media(max-width:1100px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.search.desktop{display:none}}
     @media(max-width:780px){.app{display:block}.sidebar{position:fixed;right:-290px;width:270px;transition:.25s}.sidebar.open{right:0}.overlay.show{display:block;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:35}.menu-btn{display:inline-grid;place-items:center}.topbar{height:72px;padding:0 14px}.topbar h1{font-size:18px}.topbar p{font-size:10px}.content{padding:14px 12px 84px}.welcome{padding:20px;align-items:flex-start;flex-direction:column}.welcome h2{font-size:20px}.year{min-width:auto;width:100%;text-align:right}.stats{grid-template-columns:1fr 1fr;gap:10px}.stat{padding:14px}.stat .value{font-size:19px}.cards3{grid-template-columns:1fr}.mobile-bottom{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;bottom:0;right:0;left:0;background:#fff;border-top:1px solid var(--line);z-index:25;padding:7px 4px}.mobile-bottom button{border:0;background:transparent;color:#708180;font-size:9px;display:grid;gap:2px;place-items:center}.mobile-bottom button.active{color:var(--primary);font-weight:800}.mobile-bottom .m-ico{font-size:17px}.top-actions .round{display:none}}
     @media(max-width:480px){.stats{grid-template-columns:1fr}.welcome p{font-size:12px}.panel{padding:14px}.topbar .avatar{width:38px;height:38px}.top-actions{gap:6px}}
+
+    /* ===== Rivan login gateway ===== */
+    .login-screen{min-height:100vh;background:linear-gradient(135deg,#f6fafc 0%,#eef7f4 55%,#f7fbfc 100%);display:grid;grid-template-columns:minmax(420px,1.05fr) minmax(520px,.95fr);position:relative;overflow:hidden}
+    .login-screen::before,.login-screen::after{content:"";position:absolute;border-radius:50%;filter:blur(1px);pointer-events:none}.login-screen::before{width:520px;height:520px;background:rgba(26,142,185,.08);left:-210px;top:-230px}.login-screen::after{width:480px;height:480px;background:rgba(97,181,64,.08);right:-200px;bottom:-250px}
+    .login-visual{padding:54px 6vw;display:flex;flex-direction:column;justify-content:center;position:relative;z-index:1}.login-brand{display:flex;align-items:center;gap:16px;margin-bottom:36px}.login-brand img{width:84px;height:84px;object-fit:contain;border-radius:20px;background:#fff;box-shadow:0 14px 45px rgba(10,79,108,.12)}.login-brand h1{font-size:34px;line-height:1.15;margin:0;color:#0d5879;letter-spacing:.2px}.login-brand p{margin:8px 0 0;color:#52707e;font-size:14px}.login-copy{max-width:670px}.login-kicker{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;background:#e9f6f1;border:1px solid #d7eee5;color:#2b7d63;border-radius:999px;font-size:12px;font-weight:700}.login-copy h2{font-size:42px;line-height:1.35;margin:18px 0 14px;color:#12394a}.login-copy h2 span{color:#167da4}.login-copy>p{color:#607782;line-height:2;margin:0 0 26px;font-size:15px}.login-points{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:610px}.login-point{background:rgba(255,255,255,.72);border:1px solid rgba(214,231,234,.9);padding:13px 14px;border-radius:15px;display:flex;gap:10px;align-items:center;color:#395763;font-size:13px;box-shadow:0 8px 25px rgba(31,91,107,.04)}.login-point i{font-style:normal;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#eef8f5;color:#2f8567}
+    .login-panel-wrap{padding:34px 5vw 34px 2.5vw;display:flex;align-items:center;justify-content:center;position:relative;z-index:2}.login-panel{width:min(100%,560px);background:rgba(255,255,255,.96);border:1px solid #e2ebee;border-radius:28px;padding:30px;box-shadow:0 28px 80px rgba(33,76,92,.14)}.login-mobile-logo{display:none;text-align:center;margin-bottom:18px}.login-mobile-logo img{width:92px;height:92px;object-fit:contain;border-radius:20px}.login-panel-head h3{margin:0;color:#173b4a;font-size:24px}.login-panel-head p{margin:7px 0 0;color:#71858e;font-size:13px;line-height:1.8}.role-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:22px 0 24px}.role-btn{border:1px solid #e1e9ec;background:#f9fbfc;color:#526970;border-radius:14px;padding:11px 7px;display:grid;place-items:center;gap:5px;min-height:77px;transition:.18s}.role-btn:hover{transform:translateY(-1px);border-color:#b9d8e2}.role-btn.active{background:linear-gradient(145deg,#edf8fb,#edf8f1);border-color:#8bc7d6;color:#0d6687;box-shadow:0 8px 18px rgba(31,120,148,.09)}.role-btn .role-ico{font-size:22px}.role-btn b{font-size:11px}.login-form{display:grid;gap:15px}.field label{display:block;font-size:12px;color:#49636c;margin:0 2px 7px;font-weight:700}.input-wrap{height:50px;border:1px solid #dce7ea;background:#fbfdfd;border-radius:13px;display:flex;align-items:center;padding:0 13px;gap:10px;transition:.18s}.input-wrap:focus-within{border-color:#4ca4be;box-shadow:0 0 0 3px rgba(58,151,180,.09);background:#fff}.input-wrap span{color:#7b9299}.input-wrap input{width:100%;height:100%;border:0;outline:0;background:transparent;color:#183f4d}.toggle-pass{border:0;background:transparent;color:#66818a;font-size:12px;padding:4px}.form-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px}.remember{display:flex;align-items:center;gap:7px;color:#5e747c}.remember input{accent-color:#197d9f}.forgot{color:#0f789b;text-decoration:none}.login-submit{height:52px;border:0;border-radius:14px;background:linear-gradient(135deg,#147b9d,#0b6585);color:#fff;font-weight:800;box-shadow:0 12px 22px rgba(17,113,146,.2);margin-top:2px}.login-submit:hover{filter:brightness(.98)}.login-note{display:flex;gap:8px;align-items:flex-start;background:#f6fafb;border:1px solid #e5edef;border-radius:12px;padding:10px 12px;color:#698087;font-size:11px;line-height:1.7}.login-demo{margin-top:14px;padding-top:14px;border-top:1px solid #edf1f2;text-align:center}.login-demo button{border:0;background:transparent;color:#1680a3;font-size:12px;font-weight:700}.login-footer{margin-top:18px;text-align:center;color:#97a5a9;font-size:10px}.login-error{display:none;background:#fff2f1;color:#a3433e;border:1px solid #f3d1cf;padding:9px 11px;border-radius:11px;font-size:11px}.login-error.show{display:block}.app.is-hidden{display:none!important}
+    .brand-logo-img{width:49px;height:49px;border-radius:13px;object-fit:cover;background:#fff;padding:2px}.top-school-mark{display:flex;align-items:center;gap:9px}.top-school-mark img{width:34px;height:34px;border-radius:9px;object-fit:cover;display:none}
+    @media(max-width:980px){.login-screen{grid-template-columns:1fr}.login-visual{display:none}.login-panel-wrap{padding:28px 18px;min-height:100vh}.login-panel{max-width:590px}.login-mobile-logo{display:block}.login-panel-head{text-align:center}.role-grid{grid-template-columns:repeat(4,1fr)}}
+    @media(max-width:560px){.login-panel{padding:22px 16px;border-radius:22px}.login-panel-wrap{padding:16px 11px}.role-grid{grid-template-columns:repeat(2,1fr);gap:8px}.role-btn{min-height:69px}.login-panel-head h3{font-size:21px}.form-row{align-items:flex-start}.login-mobile-logo img{width:82px;height:82px}.login-points{grid-template-columns:1fr}}
+
   </style>
 </head>
 <body>
-<div class="app">
+
+<div class="login-screen" id="loginScreen">
+  <section class="login-visual">
+    <div class="login-brand">
+      <img src="assets/rivan-logo.jpg" alt="شعار Rivan School" />
+      <div><h1>RIVAN</h1><p>Online School • مدرسة ريفان أونلاين</p></div>
+    </div>
+    <div class="login-copy">
+      <span class="login-kicker">✦ منصة تعليمية وإدارية متكاملة</span>
+      <h2>كل ما يخص رحلة الطالب<br><span>في مكان واحد.</span></h2>
+      <p>دخول موحد وآمن للطلاب وأولياء الأمور والمعلمين والإدارة، مع متابعة الدراسة والحضور والاختبارات والمدفوعات.</p>
+      <div class="login-points">
+        <div class="login-point"><i>✓</i><span>متابعة الحضور والغياب والحصص</span></div>
+        <div class="login-point"><i>▦</i><span>الاختبارات والدرجات والتقارير</span></div>
+        <div class="login-point"><i>₤</i><span>الاشتراكات والسداد والإيصالات</span></div>
+        <div class="login-point"><i>◉</i><span>متابعة ولي الأمر لحظة بلحظة</span></div>
+      </div>
+    </div>
+  </section>
+  <section class="login-panel-wrap">
+    <div class="login-panel">
+      <div class="login-mobile-logo"><img src="assets/rivan-logo.jpg" alt="شعار مدرسة ريفان" /></div>
+      <div class="login-panel-head">
+        <h3>تسجيل الدخول</h3>
+        <p id="loginSubtitle">اختر نوع الحساب ثم أدخل بياناتك للوصول إلى منصة ريفان.</p>
+      </div>
+      <div class="role-grid" id="roleGrid">
+        <button class="role-btn active" type="button" data-role="student"><span class="role-ico">🎓</span><b>طالب</b></button>
+        <button class="role-btn" type="button" data-role="parent"><span class="role-ico">👨‍👩‍👧</span><b>ولي أمر</b></button>
+        <button class="role-btn" type="button" data-role="teacher"><span class="role-ico">👨‍🏫</span><b>معلم</b></button>
+        <button class="role-btn" type="button" data-role="admin"><span class="role-ico">🛡️</span><b>الإدارة</b></button>
+      </div>
+      <form class="login-form" id="loginForm" novalidate>
+        <div class="field">
+          <label id="identityLabel" for="identity">رقم الطالب أو البريد الإلكتروني</label>
+          <div class="input-wrap"><span>👤</span><input id="identity" autocomplete="username" placeholder="أدخل رقم الطالب أو البريد" /></div>
+        </div>
+        <div class="field">
+          <label for="password">كلمة المرور</label>
+          <div class="input-wrap"><span>🔒</span><input id="password" type="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" /><button class="toggle-pass" id="togglePass" type="button">إظهار</button></div>
+        </div>
+        <div class="form-row"><label class="remember"><input type="checkbox" /> تذكرني على هذا الجهاز</label><a class="forgot" href="#" id="forgotLink">نسيت كلمة المرور؟</a></div>
+        <div class="login-error" id="loginError"></div>
+        <button class="login-submit" id="loginSubmit" type="submit">دخول الطالب</button>
+        <div class="login-note"><span>🔐</span><span>واجهة الدخول جاهزة. سيتم ربط التحقق الفعلي بالحسابات مع Neon Auth عند إنشاء حسابات المستخدمين.</span></div>
+      </form>
+      <div class="login-demo"><button type="button" id="previewDashboard">معاينة لوحة الإدارة الحالية ←</button></div>
+      <div class="login-footer">© 2026 Rivan Online School • جميع الحقوق محفوظة</div>
+    </div>
+  </section>
+</div>
+
+<div class="app is-hidden" id="mainApp">
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><div class="brand-logo">R</div><div><strong>Rivan School</strong><span>ريفان سكول • الإدارة المتكاملة</span></div></div>
+    <div class="brand"><img class="brand-logo-img" src="assets/rivan-logo.jpg" alt="شعار ريفان"><div><strong>Rivan School</strong><span>مدرسة ريفان أونلاين • الإدارة المتكاملة</span></div></div>
     <nav class="nav" id="nav">
       <button class="active" data-section="dashboard" data-title="لوحة التحكم"><span class="ico">⌂</span>لوحة التحكم</button>
       <button data-section="students" data-title="الطلاب وأولياء الأمور"><span class="ico">👥</span>الطلاب وأولياء الأمور</button>
@@ -38,7 +100,7 @@
   </aside>
   <button class="overlay" id="overlay" aria-label="إغلاق القائمة"></button>
   <main class="main">
-    <header class="topbar"><div style="display:flex;gap:10px;align-items:center"><button class="round menu-btn" id="menu">☰</button><div><h1 id="pageTitle">لوحة التحكم</h1><p>Rivan School • العام الدراسي 2026 / 2027</p></div></div><div class="top-actions"><div class="search desktop">⌕ <input placeholder="بحث سريع..." /></div><button class="round">🔔</button><div class="avatar">م</div></div></header>
+    <header class="topbar"><div style="display:flex;gap:10px;align-items:center"><button class="round menu-btn" id="menu">☰</button><div><h1 id="pageTitle">لوحة التحكم</h1><p>مدرسة ريفان أونلاين • العام الدراسي 2026 / 2027</p></div></div><div class="top-actions"><div class="search desktop">⌕ <input placeholder="بحث سريع..." /></div><button class="round">🔔</button><div class="avatar">م</div></div></header>
     <div class="content">
       <section class="module active" id="dashboard">
         <div class="welcome"><div><div class="tag">نظرة عامة</div><h2>إدارة ريفان سكول التعليمية والمالية من مكان واحد</h2><p>من تسجيل الطالب والاشتراك والسداد إلى الحضور والحصص والاختبارات وتقارير ولي الأمر.</p></div><div class="year"><span>العام الدراسي</span><strong>2026 / 2027</strong></div></div>
@@ -67,6 +129,20 @@
 </div>
 <script>
 (function(){
+  const roles={
+    student:{label:'رقم الطالب أو البريد الإلكتروني',placeholder:'أدخل رقم الطالب أو البريد',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
+    parent:{label:'رقم الجوال أو البريد الإلكتروني',placeholder:'أدخل رقم الجوال أو البريد',button:'دخول ولي الأمر',subtitle:'تابع حضور الأبناء ونتائجهم ومدفوعاتهم من حساب واحد.'},
+    teacher:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل البريد أو رقم الجوال',button:'دخول المعلم',subtitle:'إدارة الحصص والحضور والواجبات والاختبارات والمجموعات.'},
+    admin:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل بيانات حساب الإدارة',button:'دخول الإدارة',subtitle:'الوصول إلى الإدارة التعليمية والمالية والتقارير والصلاحيات.'}
+  };
+  let activeRole='student';
+  const roleGrid=document.getElementById('roleGrid'),identityLabel=document.getElementById('identityLabel'),identity=document.getElementById('identity'),loginSubmit=document.getElementById('loginSubmit'),loginSubtitle=document.getElementById('loginSubtitle'),password=document.getElementById('password'),loginError=document.getElementById('loginError');
+  roleGrid.querySelectorAll('.role-btn').forEach(btn=>btn.addEventListener('click',()=>{activeRole=btn.dataset.role;roleGrid.querySelectorAll('.role-btn').forEach(x=>x.classList.toggle('active',x===btn));const r=roles[activeRole];identityLabel.textContent=r.label;identity.placeholder=r.placeholder;loginSubmit.textContent=r.button;loginSubtitle.textContent=r.subtitle;loginError.classList.remove('show');}));
+  document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
+  document.getElementById('loginForm').addEventListener('submit',e=>{e.preventDefault();loginError.textContent='تم تجهيز واجهة الدخول. الخطوة التالية هي إنشاء حسابات '+({'student':'الطلاب','parent':'أولياء الأمور','teacher':'المعلمين','admin':'الإدارة'}[activeRole])+' وربطها بالمصادقة الفعلية في Neon Auth.';loginError.classList.add('show')});
+  document.getElementById('forgotLink').addEventListener('click',e=>{e.preventDefault();loginError.textContent='سيتم تفعيل استعادة كلمة المرور مع ربط Neon Auth.';loginError.classList.add('show')});
+  document.getElementById('previewDashboard').addEventListener('click',()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)});
+
   // Remove any service worker/cache from previous broken Vite deployment.
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
