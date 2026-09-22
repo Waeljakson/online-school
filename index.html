@@ -521,67 +521,68 @@
   document.getElementById('togglePass').addEventListener('click',e=>{const show=password.type==='password';password.type=show?'text':'password';e.currentTarget.textContent=show?'إخفاء':'إظهار'});
   const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
   const DATA_API='https://ep-jolly-band-b5o7f86y.apirest.c-7.us-east-2.aws.neon.tech/schooldb/rest/v1';
-  let authJwt='';
-  try{sessionStorage.removeItem('roven_jwt')}catch{}
+  const NEON_SDK='https://esm.run/@neondatabase/neon-js@0.7.0-beta';
+
+  // Official Neon client: Neon Auth session -> fresh JWT -> Data API automatically.
+  const neonReady=import(NEON_SDK).then(({createClient})=>createClient({
+    auth:{url:AUTH_BASE},
+    dataApi:{url:DATA_API}
+  })).catch(err=>{
+    console.error('Neon SDK failed to load',err);
+    throw new Error('تعذر تحميل مكوّن الاتصال الآمن. حدّث الصفحة وحاول مرة أخرى.');
+  });
+
+  const getNeonClient=async()=>await neonReady;
+
+  // Kept only for password-reset endpoints; sign-in and Data API use the official SDK.
   const authPost=async(path,body)=>{
-    const res=await fetch(AUTH_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify(body)});
-    const headerJwt=res.headers.get('set-auth-jwt');
+    const res=await fetch(AUTH_BASE+path,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'include',
+      body:JSON.stringify(body)
+    });
     let data={}; try{data=await res.json()}catch{}
-    if(headerJwt && String(headerJwt).split('.').length===3) authJwt=headerJwt;
-    if(data?.token && String(data.token).split('.').length===3) authJwt=data.token;
     if(!res.ok) throw new Error(data?.message||data?.error?.message||'تعذر إتمام الطلب');
     return data;
   };
-  const getAuthJwt=async(forceRefresh=false)=>{
-    if(authJwt && !forceRefresh) return authJwt;
 
-    const tokenRes=await fetch(AUTH_BASE+'/token',{method:'GET',credentials:'include',cache:'no-store'});
-    if(tokenRes.ok){
-      const data=await tokenRes.json().catch(()=>({}));
-      if(data?.token && String(data.token).split('.').length===3){
-        authJwt=data.token;
-        return authJwt;
-      }
-    }
-
-    const sessionRes=await fetch(AUTH_BASE+'/get-session',{method:'GET',credentials:'include',cache:'no-store'});
-    const headerJwt=sessionRes.headers.get('set-auth-jwt');
-    if(headerJwt && String(headerJwt).split('.').length===3){
-      authJwt=headerJwt;
-      return authJwt;
-    }
-
-    throw new Error('انتهت جلسة الدخول. سجل الدخول مرة أخرى.');
-  };
   const dataApiFetch=async(path,options={})=>{
-    const request=async(jwt)=>{
-      const res=await fetch(DATA_API+path,{...options,headers:{'Content-Type':'application/json','Authorization':'Bearer '+jwt,'Accept':'application/json',...(options.headers||{})}});
-      let data=null; try{data=await res.json()}catch{}
-      return {res,data};
-    };
+    const client=await getNeonClient();
 
-    let jwt=await getAuthJwt();
-    let {res,data}=await request(jwt);
-
-    const errText=String(data?.message||data?.hint||data?.details||'').toLowerCase();
-    const authKeyError=res.status===401 || errText.includes('jwk') || errText.includes('jwt') || errText.includes('key not found');
-
-    if(!res.ok && authKeyError){
-      authJwt='';
-      jwt=await getAuthJwt(true);
-      ({res,data}=await request(jwt));
-    }
-
-    if(!res.ok){
-      const finalMessage=data?.message||data?.hint||data?.details||'تعذر الاتصال بقاعدة البيانات';
-      const finalText=String(finalMessage).toLowerCase();
-      if(finalText.includes('jwk') || finalText.includes('jwt') || finalText.includes('key not found')){
-        authJwt='';
-        try{await fetch(AUTH_BASE+'/sign-out',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:'{}'})}catch{}
-        throw new Error('تم تحديث مفاتيح الأمان. أعد تسجيل الدخول مرة واحدة ثم حاول الحفظ من جديد.');
+    if(path.startsWith('/rpc/')){
+      const fn=path.slice('/rpc/'.length).split('?')[0];
+      let args={};
+      if(options.body){
+        try{args=typeof options.body==='string'?JSON.parse(options.body):options.body}catch{args={}}
       }
-      throw new Error(finalMessage);
+      const {data,error}=await client.rpc(fn,args);
+      if(error) throw new Error(error.message||error.details||error.hint||'تعذر تنفيذ العملية.');
+      return data;
     }
+
+    const parsed=new URL(path,'https://roven.local');
+    const table=parsed.pathname.replace(/^\/+/, '');
+    if(!table) throw new Error('مسار قاعدة البيانات غير صالح.');
+
+    let query=client.from(table).select(parsed.searchParams.get('select')||'*');
+
+    const order=parsed.searchParams.get('order');
+    if(order){
+      const [column,direction]=order.split('.');
+      if(column) query=query.order(column,{ascending:direction!=='desc'});
+    }
+
+    const limit=Number(parsed.searchParams.get('limit')||0);
+    if(limit>0) query=query.limit(limit);
+
+    for(const [key,value] of parsed.searchParams.entries()){
+      if(['select','order','limit'].includes(key)) continue;
+      if(value.startsWith('eq.')) query=query.eq(key,value.slice(3));
+    }
+
+    const {data,error}=await query;
+    if(error) throw new Error(error.message||error.details||error.hint||'تعذر الاتصال بقاعدة البيانات.');
     return data;
   };
   const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
@@ -616,7 +617,10 @@
       if(!email||!pass){loginError.textContent='أدخل البريد الإلكتروني وكلمة المرور.';loginError.classList.add('show');return}
       loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
       try{
-        const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
+        const client=await getNeonClient();
+        const loginResult=await client.auth.signIn.email({email,password:pass,rememberMe:true});
+        if(loginResult?.error) throw new Error(loginResult.error.message||'بيانات الدخول غير صحيحة.');
+        const data=loginResult?.data||loginResult||{};
         const authRole=data?.user?.role||data?.role||'';
         if(activeRole==='admin' && authRole && !['super_admin','school_manager','academic_admin','finance_admin','reception'].includes(String(authRole))){
           throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
@@ -633,7 +637,7 @@
             loginError.textContent='حساب الإدارة موجود لكنه لم يعيّن كلمة مرور بعد. أرسلنا الآن رابط تفعيل/تعيين كلمة المرور إلى بريدك الإلكتروني. افتح الرسالة، عيّن كلمة المرور، ثم ارجع وسجّل الدخول.';
             loginError.style.background='#eaf8f2';loginError.style.color='#147d52';loginError.style.borderColor='#ccebdc';
           }catch{
-            loginError.textContent='حساب الإدارة موجود لكنه لم يعيّن كلمة مرور بعد. اضغط «نسيت كلمة المرور؟» لإرسال رابط التفعيل.';
+            loginError.textContent=err?.message||'تعذر تسجيل الدخول. تأكد من البريد وكلمة المرور.';
           }
         }else{
           loginError.textContent='بيانات الدخول غير صحيحة.';
