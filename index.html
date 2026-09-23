@@ -1439,6 +1439,207 @@
     }finally{btn.disabled=false;btn.textContent='حفظ التعديلات'}
   });
 
+  // ===== ROVEN communications, rooms and personal profile =====
+  const fileToBase64=file=>new Promise((resolve,reject)=>{
+    if(!file){resolve({name:null,mime:null,base64:null});return}
+    if(file.size>3*1024*1024){reject(new Error('حجم الملف أكبر من 3 MB.'));return}
+    const reader=new FileReader();
+    reader.onload=()=>resolve({name:file.name,mime:file.type||'application/octet-stream',base64:String(reader.result).split(',')[1]||''});
+    reader.onerror=()=>reject(new Error('تعذر قراءة الملف.'));
+    reader.readAsDataURL(file);
+  });
+  const attachmentLink=(name,mime,b64)=>{
+    if(!name||!b64)return '—';
+    const safeName=escapeHtml(name),safeMime=escapeHtml(mime||'application/octet-stream');
+    return `<a class="file-pill" download="${safeName}" href="data:${safeMime};base64,${b64}">📎 ${safeName}</a>`;
+  };
+
+  let currentRoomGroupId=null;
+  const groupRoomModal=document.getElementById('groupRoomModal');
+  const closeGroupRoom=()=>{groupRoomModal.classList.remove('show');groupRoomModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeGroupRoomModal').addEventListener('click',closeGroupRoom);
+  groupRoomModal.addEventListener('click',e=>{if(e.target===groupRoomModal)closeGroupRoom()});
+
+  const loadGroupChat=async()=>{
+    if(!currentRoomGroupId)return;
+    const box=document.getElementById('groupChatMessages');
+    box.innerHTML='<div class="students-empty">جارٍ تحميل الرسائل...</div>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_group_chat_list',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId})});
+      if(!Array.isArray(data)||!data.length){box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';return}
+      box.innerHTML=data.map(m=>`<div class="chat-msg">
+        ${m.sender_photo?`<img class="platform-avatar" src="${escapeHtml(m.sender_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((m.sender_name||'?')[0])}</span>`}
+        <div class="bubble"><div class="meta"><b>${escapeHtml(m.sender_name||'مستخدم')}</b> • ${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}</div>
+        <div>${escapeHtml(m.body||'')}</div>${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):''}</div>
+      </div>`).join('');
+      box.scrollTop=box.scrollHeight;
+    }catch(err){box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الشات')+'</div>'}
+  };
+
+  const openGroupRoom=async(group)=>{
+    currentRoomGroupId=group.group_id||group.id;
+    document.getElementById('groupRoomTitle').textContent='قاعة '+(group.group_name||group.name||'المجموعة');
+    document.getElementById('roomProvider').value=group.meeting_provider||'zoom';
+    document.getElementById('roomMeetingUrl').value=group.meeting_url||'';
+    const link=document.getElementById('openRoomLink');
+    if(group.meeting_url){link.href=group.meeting_url;link.style.display='inline-flex'}else{link.removeAttribute('href');link.style.display='none'}
+    const canEdit=!currentPlatformAccount||['teacher','staff','admin'].includes(String(currentPlatformAccount?.account_type||'admin'));
+    document.getElementById('roomProvider').disabled=!canEdit;
+    document.getElementById('roomMeetingUrl').disabled=!canEdit;
+    document.getElementById('saveRoomLink').style.display=canEdit?'':'none';
+    groupRoomModal.classList.add('show');groupRoomModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    await loadGroupChat();
+  };
+
+  document.getElementById('saveRoomLink').addEventListener('click',async()=>{
+    if(!currentRoomGroupId)return;
+    const provider=document.getElementById('roomProvider').value;
+    const url=document.getElementById('roomMeetingUrl').value.trim();
+    try{
+      await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:url})});
+      const link=document.getElementById('openRoomLink');
+      if(url){link.href=url;link.style.display='inline-flex'}else link.style.display='none';
+      await Promise.allSettled([loadPlatformGroups(),loadGroups()]);
+    }catch(err){alert(err.message||'تعذر حفظ رابط القاعة')}
+  });
+
+  document.getElementById('sendGroupChat').addEventListener('click',async()=>{
+    if(!currentRoomGroupId)return;
+    const body=document.getElementById('groupChatBody').value.trim();
+    const input=document.getElementById('groupChatFile');
+    try{
+      const file=await fileToBase64(input.files?.[0]||null);
+      if(!body&&!file.base64){alert('اكتب رسالة أو اختر ملفًا.');return}
+      await dataApiFetch('/rpc/platform_group_chat_send',{method:'POST',body:JSON.stringify({
+        p_group_id:currentRoomGroupId,p_body:body,p_attachment_name:file.name,p_attachment_mime:file.mime,p_attachment_base64:file.base64
+      })});
+      document.getElementById('groupChatBody').value='';input.value='';
+      await loadGroupChat();
+    }catch(err){alert(err.message||'تعذر إرسال الرسالة')}
+  });
+
+  document.getElementById('groupsRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.room-chat-btn');
+    if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
+  });
+  document.getElementById('platformGroupsRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.platform-room-btn');
+    if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
+  });
+
+  const loadPlatformGroups=async()=>{
+    const tbody=document.getElementById('platformGroupsRows');
+    tbody.innerHTML='<tr><td colspan="5" class="students-empty">جارٍ تحميل المجموعات...</td></tr>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد مجموعات مرتبطة بهذا الحساب.</td></tr>';return}
+      tbody.innerHTML=data.map(g=>`<tr>
+        <td><b>${escapeHtml(g.group_name)}</b></td><td>${escapeHtml(g.subject_name||'—')}</td><td>${escapeHtml(g.teacher_name||'—')}</td>
+        <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener">دخول ${escapeHtml((g.meeting_provider||'zoom').replace('_',' '))} ↗</a>`:'لم يضع المعلم رابطًا بعد'}</td>
+        <td><button class="secondary-action platform-room-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">فتح الشات والقاعة</button></td>
+      </tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
+  };
+  document.getElementById('refreshPlatformGroups').addEventListener('click',loadPlatformGroups);
+
+  let mailFolder='inbox';
+  const loadMailbox=async(folder=mailFolder)=>{
+    mailFolder=folder;
+    const tbody=document.getElementById('mailRows');
+    tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل البريد...</td></tr>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
+      tbody.innerHTML=data.map(m=>{
+        const person=folder==='sent'?(m.recipient_name+' • '+m.recipient_email):(m.sender_name+' • '+m.sender_email);
+        const unread=folder!=='sent'&&!m.read_at;
+        return `<tr class="mail-row ${unread?'unread':''}">
+          <td>${escapeHtml(person||'—')}</td>
+          <td><div class="mail-subject">${escapeHtml(m.subject||'(بدون موضوع)')}</div><span style="font-size:10px;color:var(--muted)">${escapeHtml((m.body||'').slice(0,100))}</span></td>
+          <td>${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):'—'}</td>
+          <td>${escapeHtml(new Date(m.sent_at).toLocaleString('ar-EG'))}</td>
+        </tr>`;
+      }).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="4" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل البريد')+'</td></tr>'}
+  };
+  document.getElementById('showInbox').addEventListener('click',()=>loadMailbox('inbox'));
+  document.getElementById('showSent').addEventListener('click',()=>loadMailbox('sent'));
+
+  const composeMailModal=document.getElementById('composeMailModal');
+  const closeComposeMail=()=>{composeMailModal.classList.remove('show');composeMailModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeComposeMail').addEventListener('click',closeComposeMail);
+  document.getElementById('cancelComposeMail').addEventListener('click',closeComposeMail);
+  composeMailModal.addEventListener('click',e=>{if(e.target===composeMailModal)closeComposeMail()});
+  document.getElementById('openComposeMail').addEventListener('click',async()=>{
+    const select=document.getElementById('mailRecipient');
+    select.innerHTML='<option value="">جارٍ تحميل المستخدمين...</option>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
+      select.innerHTML='<option value="">اختر المستخدم</option>'+(data||[]).map(a=>`<option value="${escapeHtml(a.internal_email)}">${escapeHtml(a.display_name)} — ${escapeHtml(a.internal_email)}</option>`).join('');
+      composeMailModal.classList.add('show');composeMailModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    }catch(err){alert(err.message||'تعذر تحميل دليل المستخدمين')}
+  });
+  document.getElementById('composeMailForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('composeMailMsg');msg.className='student-form-msg';
+    try{
+      const file=await fileToBase64(document.getElementById('mailAttachment').files?.[0]||null);
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:document.getElementById('mailRecipient').value,
+        p_subject:document.getElementById('mailSubject').value.trim(),
+        p_body:document.getElementById('mailBody').value.trim(),
+        p_attachment_name:file.name,p_attachment_mime:file.mime,p_attachment_base64:file.base64
+      })});
+      msg.textContent='تم إرسال الرسالة بنجاح.';msg.className='student-form-msg success show';
+      document.getElementById('composeMailForm').reset();
+      await loadMailbox('sent');
+      setTimeout(closeComposeMail,700);
+    }catch(err){msg.textContent=err.message||'تعذر إرسال الرسالة';msg.className='student-form-msg error show'}
+  });
+
+  let pendingProfilePhoto=null;
+  const loadProfile=async()=>{
+    const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
+    try{
+      const p=await dataApiFetch('/rpc/platform_my_profile',{method:'POST',body:'{}'});
+      currentPlatformAccount={...(currentPlatformAccount||{}),...p};
+      document.getElementById('profileDisplayName').value=p?.display_name||'';
+      document.getElementById('profileAccountCode').value=p?.account_code||'';
+      document.getElementById('profileUsername').value=p?.username||'';
+      document.getElementById('profileInternalEmail').value=p?.internal_email||'';
+      const img=document.getElementById('profilePhotoPreview');
+      if(p?.profile_photo){img.src=p.profile_photo}else{img.removeAttribute('src');img.alt=(p?.display_name||'م')[0]||'م'}
+      const topAvatar=document.querySelector('.top-actions .avatar');
+      if(topAvatar){
+        topAvatar.innerHTML=p?.profile_photo?`<img src="${escapeHtml(p.profile_photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:escapeHtml((p?.display_name||'م')[0]);
+      }
+    }catch(err){msg.textContent=err.message||'تعذر تحميل الحساب';msg.className='student-form-msg error show'}
+  };
+  document.getElementById('profilePhotoFile').addEventListener('change',e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    if(file.size>700*1024){alert('الصورة الشخصية يجب ألا تتجاوز 700 KB.');e.target.value='';return}
+    const reader=new FileReader();reader.onload=()=>{pendingProfilePhoto=String(reader.result);document.getElementById('profilePhotoPreview').src=pendingProfilePhoto};reader.readAsDataURL(file);
+  });
+  document.getElementById('saveProfile').addEventListener('click',async()=>{
+    const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
+    const oldPass=document.getElementById('profileOldPassword').value;
+    const newPass=document.getElementById('profileNewPassword').value;
+    if(newPass&&newPass.length<8){msg.textContent='كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف.';msg.className='student-form-msg error show';return}
+    try{
+      await dataApiFetch('/rpc/platform_update_profile',{method:'POST',body:JSON.stringify({
+        p_profile_photo:pendingProfilePhoto,p_old_password:oldPass||null,p_new_password:newPass||null
+      })});
+      pendingProfilePhoto=null;document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
+      msg.textContent=newPass?'تم حفظ الصورة وتغيير كلمة المرور. استخدم كلمة المرور الجديدة في الدخول القادم.':'تم حفظ الصورة الشخصية.';
+      msg.className='student-form-msg success show';
+      await loadProfile();
+    }catch(err){
+      const m=String(err.message||'');
+      msg.textContent=m.includes('old_password_incorrect')?'كلمة المرور الحالية غير صحيحة.':(m.includes('password_too_short')?'كلمة المرور الجديدة قصيرة.':m);
+      msg.className='student-form-msg error show';
+    }
+  });
+
     const students=[
     {name:'أحمد محمد علي',grade:'أول ثانوي',attendance:'96%',balance:'مسدد',status:'نشط'},
     {name:'سارة محمود حسن',grade:'ثالث إعدادي',attendance:'89%',balance:'450 ج',status:'نشط'},
@@ -1449,7 +1650,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='settings')loadSystemUsers();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
