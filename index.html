@@ -196,6 +196,8 @@
     .teacher-private-note,.teacher-private-scope-note{font-size:10px;line-height:1.7;padding:9px 11px;border-radius:11px;background:#fff8e5;border:1px solid #f0dfa4;color:#775b00}.teacher-roster-section{border:1px solid #e5edf4;border-radius:14px;padding:12px;background:#fbfdff}.teacher-roster-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.teacher-roster-title b{display:block;font-size:13px}.teacher-roster-title span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.readonly-pill{padding:4px 8px!important;border-radius:999px;background:#eef3f8;color:#5b6f82!important;font-size:9px!important;font-weight:800;white-space:nowrap}.private-student-code{font-family:monospace;direction:ltr;display:inline-block}.private-student-action{white-space:nowrap}@media(max-width:650px){.teacher-roster-title{align-items:flex-start;flex-direction:column}}
 
     .teacher-private-finance-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.teacher-private-finance-summary>div{background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px;padding:10px 12px}.teacher-private-finance-summary span{display:block;font-size:9px;color:var(--muted)}.teacher-private-finance-summary b{display:block;font-size:16px;margin-top:4px}.private-attendance-toolbar{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;padding:10px;background:#f8fbfd;border-radius:12px}.private-attendance-status{min-width:120px}.private-money-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:700px){.teacher-private-finance-summary{grid-template-columns:repeat(2,1fr)}}
+
+    .room-owner-badge{display:inline-flex!important;width:auto!important;margin:0!important;padding:3px 7px;border-radius:999px;font-size:8px!important;font-weight:800}.room-owner-badge.roven{background:#eef4fb;color:#35526f!important}.room-owner-badge.private{background:#fff4d8;color:#8a6500!important}
 </style>
 </head>
 <body>
@@ -2555,15 +2557,22 @@
   const renderTeacherHubGroups=(groups,studentCountByGroup,privateCountByGroup)=>{
     const box=document.getElementById('teacherHubGroups');
     if(!groups.length){box.innerHTML='<div class="students-empty">لا توجد قاعات مسندة لك حتى الآن.</div>';return}
-    box.innerHTML=groups.map(g=>`<div class="teacher-hub-group">
-      <div><b>${escapeHtml(g.group_name)}</b><span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب ROVEN • ${Number(privateCountByGroup.get(String(g.group_id))||0)} طالب خاص • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span></div>
-      <div class="room-actions">
-        ${g.meeting_url?`<a class="secondary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة ↗</a>`:''}
-        <button class="secondary-action teacher-students-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}">الطلاب</button>
-        <button class="secondary-action teacher-attendance-btn" type="button" data-group-id="${escapeHtml(g.group_id)}">الحضور</button>
-        <button class="secondary-action teacher-open-room" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">إدارة القاعة</button>
-      </div>
-    </div>`).join('');
+    box.innerHTML=groups.map(g=>{
+      const isPrivate=teacherPrivateGroupIds.has(String(g.group_id));
+      return `<div class="teacher-hub-group">
+        <div>
+          <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap"><b>${escapeHtml(g.group_name)}</b><span class="room-owner-badge ${isPrivate?'private':'roven'}">${isPrivate?'قاعة خاصة':'قاعة ROVEN'}</span></div>
+          <span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب ROVEN • ${Number(privateCountByGroup.get(String(g.group_id))||0)} طالب خاص • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span>
+        </div>
+        <div class="room-actions">
+          ${g.meeting_url?`<a class="secondary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة ↗</a>`:''}
+          <button class="secondary-action teacher-students-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}">الطلاب</button>
+          <button class="secondary-action teacher-attendance-btn" type="button" data-group-id="${escapeHtml(g.group_id)}">حضور ROVEN</button>
+          ${isPrivate?`<button class="secondary-action teacher-private-attendance-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}">حضور طلابي</button>`:''}
+          <button class="secondary-action teacher-open-room" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">إدارة القاعة</button>
+        </div>
+      </div>`;
+    }).join('');
   };
 
   const renderTeacherFinance=(entries)=>{
@@ -3057,6 +3066,8 @@
     if(students){openTeacherStudents(students.dataset.groupId,students.dataset.groupName);return}
     const attendance=e.target.closest('.teacher-attendance-btn');
     if(attendance){openAttendanceForTeacherGroup(attendance.dataset.groupId);return}
+    const privateAttendance=e.target.closest('.teacher-private-attendance-btn');
+    if(privateAttendance){openTeacherStudents(privateAttendance.dataset.groupId,privateAttendance.dataset.groupName);return}
   });
   document.getElementById('teacherUpcomingLessons').addEventListener('click',e=>{
     const attendance=e.target.closest('.upcoming-attendance-btn');
