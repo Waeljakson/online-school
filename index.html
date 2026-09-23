@@ -1390,21 +1390,27 @@
     const isAdmin=type==='admin';
     let allowed;
     if(type==='admin'){
-      allowed=new Set(['dashboard','students','education','attendance','rewards','finance','expenses','reports','mygroups','directchat','mail','profile','settings']);
+      allowed=new Set(['dashboard','students','education','attendance','rewards','assessments','certificates','materials','whatsapp','finance','expenses','reports','mygroups','directchat','mail','profile','settings']);
     }else if(type==='staff' && role==='academic_admin'){
-      allowed=new Set(['dashboard','education','attendance','rewards','mygroups','directchat','mail','profile']);
+      allowed=new Set(['dashboard','education','attendance','rewards','assessments','certificates','materials','whatsapp','mygroups','directchat','mail','profile']);
     }else if(type==='staff' && role==='secretary'){
-      allowed=new Set(['dashboard','students','education','attendance','rewards','mygroups','directchat','mail','profile']);
+      allowed=new Set(['dashboard','students','education','attendance','rewards','certificates','materials','whatsapp','mygroups','directchat','mail','profile']);
     }else if(type==='staff' && role==='finance_admin'){
-      allowed=new Set(['dashboard','finance','expenses','reports','directchat','mail','profile']);
+      allowed=new Set(['dashboard','materials','finance','expenses','reports','directchat','mail','profile']);
     }else if(type==='staff'){
-      allowed=new Set(['dashboard','students','finance','directchat','mail','profile']);
+      allowed=new Set(['dashboard','students','materials','finance','whatsapp','directchat','mail','profile']);
     }else if(type==='teacher'){
-      allowed=new Set(['teacherhub','attendance','rewards','mygroups','directchat','mail','profile']);
+      allowed=new Set(['teacherhub','attendance','rewards','assessments','certificates','materials','whatsapp','mygroups','directchat','mail','profile']);
     }else if(type==='parent'){
-      allowed=new Set(['dashboard','mail','profile']);
+      allowed=new Set(['parenthub','certificates','mail','profile']);
+    }else if(type==='private_parent'){
+      allowed=new Set(['parenthub','certificates','mail','profile']);
+    }else if(type==='student'||type==='private_student'){
+      allowed=new Set(['dashboard','assessments','certificates','rewards','mygroups','mail','profile']);
+    }else if(type==='teacher_assistant'){
+      allowed=new Set(['teacherhub','attendance','materials','whatsapp','mygroups','mail','profile']);
     }else{
-      allowed=new Set(['dashboard','rewards','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','mail','profile']);
     }
 
     document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=allowed.has(btn.dataset.section)?'':'none'});
@@ -1412,7 +1418,7 @@
     document.querySelectorAll('.module').forEach(m=>m.classList.remove('active'));
     const dash=document.getElementById('dashboard');
     dash.classList.add('active');
-    const typeLabel=type==='teacher'?'المعلم':type==='parent'?'ولي الأمر':type==='student'?'الطالب':'المستخدم';
+    const typeLabel=type==='teacher'?'المعلم':(type==='parent'||type==='private_parent')?'ولي الأمر':(type==='student'||type==='private_student')?'الطالب':type==='teacher_assistant'?'مساعد المعلم':'المستخدم';
     document.getElementById('pageTitle').textContent='بوابة '+typeLabel;
     dash.innerHTML=`<div class="welcome"><div><div class="tag">بوابة ${escapeHtml(typeLabel)}</div><h2>مرحبًا، ${escapeHtml(data?.display_name||data?.full_name||'مستخدم ROVEN')}</h2><p>حسابك الشخصي في مدرسة روفين أونلاين.</p></div><div class="year"><span>كود المستخدم</span><strong>${escapeHtml(data?.account_code||data?.student_no||data?.employee_no||'—')}</strong></div></div>
       <div class="portal-grid">
@@ -1422,6 +1428,10 @@
       </div>`;
     if(type==='teacher'){
       setTimeout(()=>switchTo('teacherhub','لوحة المعلم'),80);
+    }else if(type==='parent'||type==='private_parent'){
+      setTimeout(()=>switchTo('parenthub','متابعة الأبناء'),80);
+    }else if(type==='teacher_assistant'){
+      setTimeout(()=>switchTo('teacherhub','لوحة مساعد المعلم'),80);
     }
 
   };
@@ -4034,7 +4044,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
