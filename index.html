@@ -2038,6 +2038,294 @@
     }catch(err){alert(err.message||'تعذر إضافة المكافأة')}
   });
 
+  // ===== Dedicated teacher workspace =====
+  const teacherSafeJson=value=>{try{return JSON.parse(String(value||'{}'))}catch{return null}};
+  const teacherPricingLabel={monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'};
+  const teacherRoomStatusLabel={pending:'قيد المراجعة',approved:'تمت الموافقة',rejected:'مرفوض'};
+  let adminRoomRequestCache=new Map();
+
+  const parseScheduleSessions=schedule=>{
+    let value=schedule;
+    if(typeof value==='string'){try{value=JSON.parse(value)}catch{value={}}}
+    return Array.isArray(value?.sessions)?value.sessions:[];
+  };
+
+  const markInternalTeacherMailRead=async rows=>{
+    const internal=(rows||[]).filter(m=>{
+      const s=String(m.subject||'');
+      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]'));
+    });
+    await Promise.allSettled(internal.map(m=>dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:m.message_id})})));
+  };
+
+  const renderTeacherHubGroups=(groups,studentCountByGroup)=>{
+    const box=document.getElementById('teacherHubGroups');
+    if(!groups.length){box.innerHTML='<div class="students-empty">لا توجد قاعات مسندة لك حتى الآن.</div>';return}
+    box.innerHTML=groups.map(g=>`<div class="teacher-hub-group">
+      <div><b>${escapeHtml(g.group_name)}</b><span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span></div>
+      <div class="room-actions">
+        ${g.meeting_url?`<a class="secondary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة ↗</a>`:''}
+        <button class="secondary-action teacher-open-room" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">إدارة القاعة</button>
+      </div>
+    </div>`).join('');
+  };
+
+  const renderTeacherFinance=(entries)=>{
+    const income=entries.filter(x=>x.type==='income').reduce((s,x)=>s+Number(x.amount||0),0);
+    const expense=entries.filter(x=>x.type==='expense').reduce((s,x)=>s+Number(x.amount||0),0);
+    document.getElementById('teacherIncomeTotal').textContent=income.toFixed(2);
+    document.getElementById('teacherExpenseTotal').textContent=expense.toFixed(2);
+    document.getElementById('teacherNetTotal').textContent=(income-expense).toFixed(2);
+    const tbody=document.getElementById('teacherFinanceRows');
+    if(!entries.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد حركات مالية بعد.</td></tr>';return}
+    tbody.innerHTML=entries.slice(0,50).map(x=>`<tr>
+      <td>${escapeHtml(x.date||'—')}</td>
+      <td><span class="status ${x.type==='income'?'active':'watch'}">${x.type==='income'?'إيراد':'مصروف'}</span></td>
+      <td>${escapeHtml(x.category||'أخرى')}</td>
+      <td>${escapeHtml(x.note||'—')}</td>
+      <td><b class="${x.type==='income'?'paid':'due'}">${Number(x.amount||0).toFixed(2)}</b></td>
+    </tr>`).join('');
+  };
+
+  const loadTeacherHub=async()=>{
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher'){
+      document.getElementById('teacherHubGroups').innerHTML='<div class="students-empty">هذه اللوحة مخصصة لحساب المعلم.</div>';
+      return;
+    }
+
+    document.getElementById('teacherHubName').textContent='أ/ '+(ctx.display_name||'المعلم');
+    document.getElementById('teacherHubCode').textContent=ctx.account_code||ctx.username||'—';
+    document.getElementById('teacherFinanceDate').value=document.getElementById('teacherFinanceDate').value||new Date().toISOString().slice(0,10);
+
+    const [groupsResult,inboxResult,sentResult,directoryResult]=await Promise.allSettled([
+      dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})}),
+      dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'sent'})}),
+      dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+    ]);
+
+    const groups=groupsResult.status==='fulfilled'&&Array.isArray(groupsResult.value)?groupsResult.value:[];
+    const inbox=inboxResult.status==='fulfilled'&&Array.isArray(inboxResult.value)?inboxResult.value:[];
+    const sent=sentResult.status==='fulfilled'&&Array.isArray(sentResult.value)?sentResult.value:[];
+    const directory=directoryResult.status==='fulfilled'&&Array.isArray(directoryResult.value)?directoryResult.value:[];
+
+    markInternalTeacherMailRead(inbox).catch(()=>{});
+
+    const rosterResults=await Promise.allSettled(groups.slice(0,40).map(g=>
+      dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:g.group_id,p_on_date:new Date().toISOString().slice(0,10)})})
+    ));
+    const uniqueStudents=new Set(),studentCountByGroup=new Map();
+    rosterResults.forEach((res,i)=>{
+      const rows=res.status==='fulfilled'&&Array.isArray(res.value)?res.value:[];
+      studentCountByGroup.set(String(groups[i]?.group_id||''),rows.length);
+      rows.forEach(s=>{if(s.student_id)uniqueStudents.add(String(s.student_id))});
+    });
+
+    const weekly=groups.reduce((sum,g)=>sum+parseScheduleSessions(g.schedule_json).length,0);
+    const lessonMarkers=inbox.filter(m=>String(m.subject||'').startsWith('[TAUGHT_LESSON]')).map(m=>teacherSafeJson(m.body)).filter(Boolean);
+    const taughtKeys=new Set(lessonMarkers.map(x=>String(x.group_id||'')+'|'+String(x.date||'')));
+    document.getElementById('teacherTaughtCount').textContent=String([...taughtKeys].filter(x=>x!=='|').length);
+    document.getElementById('teacherStudentsCount').textContent=String(uniqueStudents.size);
+    document.getElementById('teacherGroupsCount').textContent=String(groups.length);
+    document.getElementById('teacherWeeklyCount').textContent=String(weekly);
+    renderTeacherHubGroups(groups,studentCountByGroup);
+
+    const financeEntries=inbox
+      .filter(m=>String(m.subject||'').startsWith('[TEACHER_FINANCE]'))
+      .map(m=>({...teacherSafeJson(m.body),sent_at:m.sent_at}))
+      .filter(x=>x&&Number(x.amount)>0)
+      .sort((a,b)=>new Date(b.date||b.sent_at||0)-new Date(a.date||a.sent_at||0));
+    renderTeacherFinance(financeEntries);
+
+    const adminSelect=document.getElementById('teacherRoomAdmin');
+    const management=directory.filter(a=>['admin','staff'].includes(String(a.account_type||'')));
+    adminSelect.innerHTML='<option value="">اختر الإدارة</option>'+management.map(a=>`<option value="${escapeHtml(a.internal_email)}">${escapeHtml(a.display_name)} — ${escapeHtml(a.internal_email)}</option>`).join('');
+
+    const requests=sent.filter(m=>String(m.subject||'').startsWith('[ROOM_REQUEST]')).map(m=>({...teacherSafeJson(m.body),sent_at:m.sent_at})).filter(x=>x?.request_id);
+    const responseMap=new Map();
+    inbox.filter(m=>String(m.subject||'').startsWith('[ROOM_RESPONSE]')).forEach(m=>{
+      const x=teacherSafeJson(m.body);if(x?.request_id&&!responseMap.has(x.request_id))responseMap.set(x.request_id,x);
+    });
+    const tbody=document.getElementById('teacherRoomRequestsRows');
+    if(!requests.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد طلبات قاعات حتى الآن.</td></tr>'}
+    else{
+      tbody.innerHTML=requests.map(r=>{
+        const response=responseMap.get(r.request_id);
+        const status=response?.status||'pending';
+        return `<tr><td><b>${escapeHtml(r.room_name||'—')}</b></td><td>${escapeHtml(r.subject||'—')}</td><td>${r.proposed_price?Number(r.proposed_price).toFixed(2)+' • '+escapeHtml(teacherPricingLabel[r.pricing_basis]||''): '—'}</td><td>${response?.agreed_price!==undefined?Number(response.agreed_price||0).toFixed(2)+' • '+escapeHtml(teacherPricingLabel[response.pricing_basis]||''):'—'}</td><td><span class="room-request-status ${status}">${escapeHtml(teacherRoomStatusLabel[status]||status)}</span>${response?.note?'<div style="font-size:9px;color:var(--muted);margin-top:4px">'+escapeHtml(response.note)+'</div>':''}</td></tr>`;
+      }).join('');
+    }
+  };
+
+  document.getElementById('refreshTeacherHub').addEventListener('click',loadTeacherHub);
+  document.getElementById('teacherHubGroups').addEventListener('click',e=>{
+    const btn=e.target.closest('.teacher-open-room');
+    if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
+  });
+
+  document.getElementById('teacherRoomRequestForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('teacherRoomMsg');msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher'){msg.textContent='هذا الإجراء متاح للمعلم فقط.';msg.className='student-form-msg error show';return}
+    const requestId='RR-'+Date.now().toString(36).toUpperCase();
+    const payload={
+      request_id:requestId,
+      teacher_id:ctx.teacher_id||null,
+      teacher_name:ctx.display_name||'',
+      teacher_code:ctx.account_code||'',
+      room_name:document.getElementById('teacherRoomName').value.trim(),
+      subject:document.getElementById('teacherRoomSubject').value.trim(),
+      stage:document.getElementById('teacherRoomStage').value||null,
+      grade:document.getElementById('teacherRoomGrade').value.trim()||null,
+      proposed_price:Number(document.getElementById('teacherRoomPrice').value)||0,
+      pricing_basis:document.getElementById('teacherRoomPricing').value,
+      notes:document.getElementById('teacherRoomNotes').value.trim()||null,
+      requested_at:new Date().toISOString()
+    };
+    const recipient=document.getElementById('teacherRoomAdmin').value;
+    if(!recipient||!payload.room_name||!payload.subject){msg.textContent='اختر الإدارة واكتب اسم القاعة والمادة.';msg.className='student-form-msg error show';return}
+    try{
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:recipient,p_subject:'[ROOM_REQUEST] '+requestId,p_body:JSON.stringify(payload)
+      })});
+      msg.textContent='تم إرسال طلب القاعة للإدارة. ستظهر نتيجة المراجعة هنا فور الرد.';
+      msg.className='student-form-msg success show';
+      document.getElementById('teacherRoomRequestForm').reset();
+      document.getElementById('teacherRoomPricing').value='monthly';
+      await loadTeacherHub();
+    }catch(err){msg.textContent=err.message||'تعذر إرسال طلب القاعة';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('teacherFinanceForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('teacherFinanceMsg');msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher'||!ctx?.internal_email){msg.textContent='تعذر تحديد حساب المعلم.';msg.className='student-form-msg error show';return}
+    const entry={
+      entry_id:'TF-'+Date.now().toString(36).toUpperCase(),
+      type:document.getElementById('teacherFinanceType').value,
+      amount:Number(document.getElementById('teacherFinanceAmount').value)||0,
+      category:document.getElementById('teacherFinanceCategory').value,
+      date:document.getElementById('teacherFinanceDate').value||new Date().toISOString().slice(0,10),
+      note:document.getElementById('teacherFinanceNote').value.trim()||null,
+      created_at:new Date().toISOString()
+    };
+    if(entry.amount<=0){msg.textContent='أدخل مبلغًا صحيحًا.';msg.className='student-form-msg error show';return}
+    try{
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:ctx.internal_email,p_subject:'[TEACHER_FINANCE] '+entry.entry_id,p_body:JSON.stringify(entry)
+      })});
+      msg.textContent='تم حفظ الحركة في دفترك المالي الشخصي.';
+      msg.className='student-form-msg success show';
+      document.getElementById('teacherFinanceAmount').value='';
+      document.getElementById('teacherFinanceNote').value='';
+      await loadTeacherHub();
+    }catch(err){msg.textContent=err.message||'تعذر حفظ الحركة';msg.className='student-form-msg error show'}
+  });
+
+  const teacherRoomReviewModal=document.getElementById('teacherRoomReviewModal');
+  const closeTeacherRoomReview=()=>{teacherRoomReviewModal.classList.remove('show');teacherRoomReviewModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeTeacherRoomReview').addEventListener('click',closeTeacherRoomReview);
+  document.getElementById('cancelTeacherRoomReview').addEventListener('click',closeTeacherRoomReview);
+  teacherRoomReviewModal.addEventListener('click',e=>{if(e.target===teacherRoomReviewModal)closeTeacherRoomReview()});
+
+  const loadTeacherRoomRequestsAdmin=async()=>{
+    const panel=document.getElementById('teacherRoomAdminPanel');
+    const ctx=await hydratePlatformContext();
+    const role=String(ctx?.role||'');
+    const allowed=ctx?.account_type==='admin'||(ctx?.account_type==='staff'&&['academic_admin','secretary'].includes(role));
+    panel.style.display=allowed?'':'none';
+    if(!allowed)return;
+    const tbody=document.getElementById('teacherRoomAdminRows');
+    tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
+    try{
+      const [inbox,sent]=await Promise.all([
+        dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})}),
+        dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'sent'})})
+      ]);
+      const responses=new Map();
+      (sent||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_RESPONSE]')).forEach(m=>{
+        const x=teacherSafeJson(m.body);if(x?.request_id&&!responses.has(x.request_id))responses.set(x.request_id,x);
+      });
+      const requests=(inbox||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_REQUEST]')).map(m=>{
+        const x=teacherSafeJson(m.body);return x?{...x,sender_email:m.sender_email,sender_name:m.sender_name,message_id:m.message_id,sent_at:m.sent_at}:null
+      }).filter(x=>x?.request_id);
+      adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,x]));
+      if(!requests.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
+      tbody.innerHTML=requests.map(r=>{
+        const response=responses.get(r.request_id),status=response?.status||'pending';
+        return `<tr>
+          <td><b>${escapeHtml(r.teacher_name||r.sender_name||'معلم')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.teacher_code||r.sender_email||'')}</span></td>
+          <td><b>${escapeHtml(r.room_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.subject||'')} ${r.grade?'• '+escapeHtml(r.grade):''}</span></td>
+          <td>${Number(r.proposed_price||0).toFixed(2)}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(teacherPricingLabel[r.pricing_basis]||'')}</span></td>
+          <td>${response?Number(response.agreed_price||0).toFixed(2):'—'}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(response?teacherPricingLabel[response.pricing_basis]||'':'')}</span></td>
+          <td><span class="room-request-status ${status}">${escapeHtml(teacherRoomStatusLabel[status]||status)}</span></td>
+          <td><div class="teacher-room-actions">
+            <button class="secondary-action review-teacher-room" type="button" data-request-id="${escapeHtml(r.request_id)}">مراجعة</button>
+            ${status==='approved'?`<button class="primary-action create-group-from-room" type="button" data-request-id="${escapeHtml(r.request_id)}">إنشاء القاعة</button>`:''}
+          </div></td>
+        </tr>`;
+      }).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلبات القاعات')+'</td></tr>'}
+  };
+
+  document.getElementById('refreshTeacherRoomAdmin').addEventListener('click',loadTeacherRoomRequestsAdmin);
+  document.getElementById('teacherRoomAdminRows').addEventListener('click',async e=>{
+    const review=e.target.closest('.review-teacher-room');
+    if(review){
+      const r=adminRoomRequestCache.get(review.dataset.requestId);if(!r)return;
+      document.getElementById('reviewRoomRequestId').value=r.request_id;
+      document.getElementById('reviewRoomRecipient').value=r.sender_email||'';
+      document.getElementById('teacherRoomReviewTitle').textContent=(r.teacher_name||'المعلم')+' — '+(r.room_name||'القاعة');
+      document.getElementById('reviewRoomAgreedPrice').value=Number(r.proposed_price||0);
+      document.getElementById('reviewRoomPricing').value=r.pricing_basis||'monthly';
+      document.getElementById('reviewRoomStatus').value='approved';
+      document.getElementById('reviewRoomNote').value='';
+      document.getElementById('teacherRoomReviewMsg').className='student-form-msg';
+      teacherRoomReviewModal.classList.add('show');teacherRoomReviewModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+      return;
+    }
+    const create=e.target.closest('.create-group-from-room');
+    if(create){
+      const r=adminRoomRequestCache.get(create.dataset.requestId);if(!r)return;
+      await openGroupModal();
+      document.getElementById('ngName').value=r.room_name||'';
+      document.getElementById('ngTeacher').value=r.teacher_id||'';
+      document.getElementById('ngSubject').value=r.subject||'';
+      document.getElementById('ngStage').value=r.stage||'';
+      document.getElementById('ngGrade').value=r.grade||'';
+      document.getElementById('ngMeetingProvider').value='zoom';
+      groupFormMsg.textContent='تم تعبئة بيانات طلب القاعة. أضف المواعيد والطلاب ثم احفظ المجموعة.';
+      groupFormMsg.className='student-form-msg success show';
+    }
+  });
+
+  document.getElementById('teacherRoomReviewForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('teacherRoomReviewMsg');msg.className='student-form-msg';
+    const requestId=document.getElementById('reviewRoomRequestId').value;
+    const recipient=document.getElementById('reviewRoomRecipient').value;
+    const response={
+      request_id:requestId,
+      status:document.getElementById('reviewRoomStatus').value,
+      agreed_price:Number(document.getElementById('reviewRoomAgreedPrice').value)||0,
+      pricing_basis:document.getElementById('reviewRoomPricing').value,
+      note:document.getElementById('reviewRoomNote').value.trim()||null,
+      reviewed_at:new Date().toISOString()
+    };
+    if(!recipient){msg.textContent='تعذر تحديد حساب المعلم.';msg.className='student-form-msg error show';return}
+    try{
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:recipient,p_subject:'[ROOM_RESPONSE] '+requestId,p_body:JSON.stringify(response)
+      })});
+      msg.textContent=response.status==='approved'?'تم اعتماد الطلب وإرسال السعر للمعلم.':'تم رفض الطلب وإبلاغ المعلم.';
+      msg.className='student-form-msg success show';
+      setTimeout(async()=>{closeTeacherRoomReview();await loadTeacherRoomRequestsAdmin()},600);
+    }catch(err){msg.textContent=err.message||'تعذر حفظ القرار';msg.className='student-form-msg error show'}
+  });
+
   // ===== ROVEN communications, rooms and personal profile =====
   const fileToBase64=file=>new Promise((resolve,reject)=>{
     if(!file){resolve({name:null,mime:null,base64:null});return}
