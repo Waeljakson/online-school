@@ -1959,11 +1959,30 @@
     if(btn)openAccountCredentials(btn.dataset.accountId);
   });
 
-  document.getElementById('teachersRows').addEventListener('click',e=>{
-    const btn=e.target.closest('.teacher-edit-btn');
-    if(!btn)return;
-    if(!btn.dataset.accountId){alert('هذا المعلم لا يملك حساب دخول مرتبطًا حتى الآن.');return}
-    openAccountCredentials(btn.dataset.accountId);
+  document.getElementById('teachersRows').addEventListener('click',async e=>{
+    const edit=e.target.closest('.teacher-edit-btn');
+    if(edit){
+      if(!edit.dataset.accountId){alert('هذا المعلم لا يملك حساب دخول مرتبطًا حتى الآن.');return}
+      openAccountCredentials(edit.dataset.accountId);return;
+    }
+    const state=e.target.closest('.teacher-state-btn');
+    if(state){
+      const next=state.dataset.active!=='1';
+      if(!confirm(next?'إعادة تفعيل المعلم وحسابه؟':'إيقاف المعلم وحساب دخوله؟'))return;
+      state.disabled=true;
+      try{await adminSetEntityActive('teacher',state.dataset.teacherId,next);await Promise.allSettled([loadTeachers(),loadAccountDirectory()])}
+      catch(err){alert(entityActionError(err))}
+      finally{state.disabled=false}
+      return;
+    }
+    const del=e.target.closest('.delete-teacher-btn');
+    if(del){
+      if(!confirm('حذف المعلم «'+(del.dataset.name||'')+'» من التشغيل؟\nسيتم إيقاف الحساب وإخفاء المعلم مع الاحتفاظ بالسجلات السابقة.'))return;
+      del.disabled=true;
+      try{await adminDeleteEntity('teacher',del.dataset.teacherId);await Promise.allSettled([loadTeachers(),loadAccountDirectory(),loadGroups()])}
+      catch(err){alert(entityActionError(err))}
+      finally{del.disabled=false}
+    }
   });
 
   document.getElementById('accountCredentialsForm').addEventListener('submit',async e=>{
@@ -2117,12 +2136,22 @@
     return sessions.map(s=>`<span class="schedule-chip">${escapeHtml(daysAr[s.day]||s.day)} ${escapeHtml(s.time||'')} • ${escapeHtml(s.duration||60)} د</span>`).join('');
   };
 
+  let groupsAdminCache=[];
   const loadGroups=async()=>{
     const tbody=document.getElementById('groupsRows');
     tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل المجموعات...</td></tr>';
     try{
-      const data=await dataApiFetch('/rpc/list_study_groups_admin',{method:'POST',body:'{}'});
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا توجد مجموعات دراسية بعد.</td></tr>';return}
+      const [activeData,allData]=await Promise.all([
+        dataApiFetch('/rpc/list_study_groups_admin',{method:'POST',body:'{}'}).catch(()=>[]),
+        adminListWithFallback('admin_groups_all','list_study_groups_admin').catch(()=>[])
+      ]);
+      const detailMap=new Map((Array.isArray(activeData)?activeData:[]).map(x=>[String(x.group_id),x]));
+      const data=(Array.isArray(allData)?allData:[]).map(x=>{
+        const detail=detailMap.get(String(x.group_id))||{};
+        return {...x,...detail,is_active:x.is_active??detail.is_active};
+      });
+      groupsAdminCache=data;
+      if(!data.length){tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا توجد مجموعات دراسية بعد.</td></tr>';return}
       tbody.innerHTML=data.map(g=>`<tr>
         <td><b>${escapeHtml(g.group_name)}</b></td>
         <td>${escapeHtml(g.teacher_name||'—')}</td>
@@ -2131,7 +2160,11 @@
         <td>${scheduleLabel(g.schedule_json)}</td>
         <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml((g.meeting_provider||'zoom').replace('_',' '))} ↗</a>`:'—'}</td>
         <td><span class="status ${g.is_active?'active':'watch'}">${g.is_active?'نشطة':'متوقفة'}</span></td>
-        <td><button class="secondary-action room-chat-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">القاعة / الشات</button></td>
+        <td><div class="admin-row-actions">
+          <button class="secondary-action room-chat-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">القاعة / الشات</button>
+          <button class="secondary-action group-state-btn ${g.is_active?'inactive-action':'activate-action'}" type="button" data-group-id="${escapeHtml(g.group_id)}" data-active="${g.is_active?'1':'0'}">${g.is_active?'إيقاف':'تفعيل'}</button>
+          <button class="secondary-action danger-action delete-group-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-name="${escapeHtml(g.group_name||'القاعة')}">حذف</button>
+        </div></td>
       </tr>`).join('');
     }catch(err){tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
   };
@@ -2240,8 +2273,16 @@
     const tbody=document.getElementById('teachersRows');
     tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل المعلمين...</td></tr>';
     try{
-      const data=await dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'});
-      if(!Array.isArray(data)||!data.length){teachersAdminCache=[];tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
+      const [activeData,allData]=await Promise.all([
+        dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'}).catch(()=>[]),
+        adminListWithFallback('admin_teachers_all','list_teachers_admin').catch(()=>[])
+      ]);
+      const detailMap=new Map((Array.isArray(activeData)?activeData:[]).map(x=>[String(x.teacher_id),x]));
+      const data=(Array.isArray(allData)?allData:[]).map(x=>{
+        const detail=detailMap.get(String(x.teacher_id))||{};
+        return {...x,...detail,status:x.status||detail.status,account_active:x.account_active??detail.account_active};
+      });
+      if(!data.length){teachersAdminCache=[];tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
       teachersAdminCache=data;
       tbody.innerHTML=data.map(t=>`<tr>
         <td><b>${escapeHtml(t.account_code||t.employee_no||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.employee_no||'')}</span></td>
@@ -2250,8 +2291,12 @@
         <td>${escapeHtml(t.specialization||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.subjects||'')}</span></td>
         <td>${escapeHtml(t.phone||'—')}</td>
         <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
-        <td><span class="status ${t.status==='active'?'active':'watch'}">${t.status==='active'?'نشط':'غير نشط'}</span></td>
-        <td><button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل المعلم</button></td>
+        <td><span class="status ${t.status==='active'&&t.account_active!==false?'active':'watch'}">${t.status==='active'&&t.account_active!==false?'نشط':'غير نشط'}</span></td>
+        <td><div class="admin-row-actions">
+          <button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل</button>
+          <button class="secondary-action teacher-state-btn ${t.status==='active'&&t.account_active!==false?'inactive-action':'activate-action'}" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-active="${t.status==='active'&&t.account_active!==false?'1':'0'}">${t.status==='active'&&t.account_active!==false?'إيقاف':'تفعيل'}</button>
+          <button class="secondary-action danger-action delete-teacher-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-name="${escapeHtml(t.full_name||'المعلم')}">حذف</button>
+        </div></td>
       </tr>`).join('');
     }catch(err){tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المعلمين')+'</td></tr>'}
   };
@@ -5535,9 +5580,27 @@
     }catch(err){alert(err.message||'تعذر إرسال الرسالة')}
   });
 
-  document.getElementById('groupsRows').addEventListener('click',e=>{
-    const btn=e.target.closest('.room-chat-btn');
-    if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
+  document.getElementById('groupsRows').addEventListener('click',async e=>{
+    const room=e.target.closest('.room-chat-btn');
+    if(room){openGroupRoom({group_id:room.dataset.groupId,group_name:room.dataset.groupName,meeting_provider:room.dataset.provider,meeting_url:room.dataset.url});return}
+    const state=e.target.closest('.group-state-btn');
+    if(state){
+      const next=state.dataset.active!=='1';
+      if(!confirm(next?'إعادة تفعيل القاعة؟':'إيقاف القاعة من الإدارة؟ لن تظهر كقاعة نشطة للمستخدمين.'))return;
+      state.disabled=true;
+      try{await adminSetEntityActive('group',state.dataset.groupId,next);await loadGroups()}
+      catch(err){alert(entityActionError(err))}
+      finally{state.disabled=false}
+      return;
+    }
+    const del=e.target.closest('.delete-group-btn');
+    if(del){
+      if(!confirm('حذف القاعة «'+(del.dataset.name||'')+'» من التشغيل؟\nستُخفى القاعة مع الاحتفاظ بسجلات الطلاب والحضور السابقة.'))return;
+      del.disabled=true;
+      try{await adminDeleteEntity('group',del.dataset.groupId);await loadGroups()}
+      catch(err){alert(entityActionError(err))}
+      finally{del.disabled=false}
+    }
   });
   document.getElementById('platformGroupsRows').addEventListener('click',e=>{
     const btn=e.target.closest('.platform-room-btn');
