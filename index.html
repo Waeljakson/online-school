@@ -565,6 +565,12 @@
                 <div class="form-field"><label>العنوان</label><input id="examTitle"></div>
                 <div class="form-field"><label>المجموعة</label><select id="examGroup"><option value="">اختر المجموعة</option></select></div>
                 <div class="form-field"><label>المدة بالدقائق</label><input id="examDuration" type="number" min="1" placeholder="فارغ = مفتوح"></div>
+                <div class="form-field"><label>عدد المحاولات</label><select id="examAttempts"><option value="1">محاولة واحدة</option><option value="2">محاولتان</option><option value="3">3 محاولات</option></select></div>
+                <div class="form-field"><label>يفتح في</label><input id="examOpenAt" type="datetime-local"></div>
+                <div class="form-field"><label>يغلق في</label><input id="examCloseAt" type="datetime-local"></div>
+                <div class="form-field"><label>نسبة النجاح %</label><input id="examPassPercent" type="number" min="0" max="100" value="50"></div>
+                <div class="form-field"><label>إظهار النتيجة</label><select id="examResultMode"><option value="after_grading">بعد اعتماد المعلم</option><option value="immediate">فور التسليم (الاختيار من متعدد)</option></select></div>
+                <div class="form-field"><label>ترتيب الأسئلة</label><select id="examShuffle"><option value="no">بالترتيب</option><option value="yes">عشوائي لكل طالب</option></select></div>
                 <div class="form-field"><label>تعليمات</label><input id="examInstructions"></div>
               </div>
               <div id="examQuestionsBuilder" style="margin-top:12px"></div>
@@ -3802,6 +3808,12 @@
     currentExamDraftId=null;
     document.getElementById('examTitle').value='';
     document.getElementById('examDuration').value='';
+    document.getElementById('examAttempts').value='1';
+    document.getElementById('examOpenAt').value='';
+    document.getElementById('examCloseAt').value='';
+    document.getElementById('examPassPercent').value='50';
+    document.getElementById('examResultMode').value='after_grading';
+    document.getElementById('examShuffle').value='no';
     document.getElementById('examInstructions').value='';
     document.getElementById('examQuestionsBuilder').innerHTML='';
     addExamQuestionCard('mcq');
@@ -3844,7 +3856,7 @@
     const rows=teacherExamDefs.filter(x=>x.status!=='deleted').sort((a,b)=>new Date(b.updated_at||b.created_at||0)-new Date(a.updated_at||a.created_at||0));
     box.innerHTML=rows.length?rows.map(ex=>`<div class="exam-list-item">
       <b>📝 ${escapeHtml(ex.title)}</b>
-      <span>${escapeHtml(ex.group_name||'')} • ${ex.duration_minutes?Number(ex.duration_minutes)+' دقيقة':'وقت مفتوح'} • ${(ex.questions||[]).length} سؤال • ${ex.status==='published'?'منشور':'مسودة'}</span>
+      <span>${escapeHtml(ex.group_name||'')} • ${ex.duration_minutes?Number(ex.duration_minutes)+' دقيقة':'وقت مفتوح'} • ${(ex.questions||[]).length} سؤال • ${Number(ex.max_attempts||1)} محاولة • نجاح ${Number(ex.pass_percent??50)}% • ${ex.status==='published'?'منشور':'مسودة'}</span>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
         <button class="secondary-action exam-edit-btn" data-id="${escapeHtml(ex.exam_id)}" type="button">تعديل</button>
         <button class="primary-action exam-publish-btn" data-id="${escapeHtml(ex.exam_id)}" type="button">${ex.status==='published'?'إعادة النشر':'نشر للطلاب'}</button>
@@ -3898,10 +3910,21 @@
       msg.textContent='اكتب عنوان الاختبار واختر المجموعة وأكمل جميع الأسئلة والاختيارات.';
       msg.className='student-form-msg error show';return;
     }
+    const openValue=document.getElementById('examOpenAt').value,closeValue=document.getElementById('examCloseAt').value;
+    if(openValue&&closeValue&&new Date(closeValue)<=new Date(openValue)){
+      msg.textContent='موعد إغلاق الاختبار يجب أن يكون بعد موعد الفتح.';
+      msg.className='student-form-msg error show';return;
+    }
     const ex={
       exam_id:currentExamDraftId||examId(),title,group_id:groupId,group_name:groupName,
       instructions:document.getElementById('examInstructions').value.trim()||null,
       duration_minutes:document.getElementById('examDuration').value?Number(document.getElementById('examDuration').value):null,
+      max_attempts:Math.max(1,Number(document.getElementById('examAttempts').value)||1),
+      opens_at:document.getElementById('examOpenAt').value?new Date(document.getElementById('examOpenAt').value).toISOString():null,
+      closes_at:document.getElementById('examCloseAt').value?new Date(document.getElementById('examCloseAt').value).toISOString():null,
+      pass_percent:Math.min(100,Math.max(0,Number(document.getElementById('examPassPercent').value)||0)),
+      result_mode:document.getElementById('examResultMode').value||'after_grading',
+      shuffle_questions:document.getElementById('examShuffle').value==='yes',
       questions,status:'draft',
       teacher_name:ctx?.display_name||'المعلم',
       teacher_internal_email:ctx?.internal_email||null,
@@ -3927,6 +3950,12 @@
       document.getElementById('examTitle').value=ex.title||'';
       document.getElementById('examGroup').value=ex.group_id||'';
       document.getElementById('examDuration').value=ex.duration_minutes||'';
+      document.getElementById('examAttempts').value=String(ex.max_attempts||1);
+      document.getElementById('examOpenAt').value=ex.opens_at?new Date(ex.opens_at).toISOString().slice(0,16):'';
+      document.getElementById('examCloseAt').value=ex.closes_at?new Date(ex.closes_at).toISOString().slice(0,16):'';
+      document.getElementById('examPassPercent').value=Number(ex.pass_percent??50);
+      document.getElementById('examResultMode').value=ex.result_mode||'after_grading';
+      document.getElementById('examShuffle').value=ex.shuffle_questions?'yes':'no';
       document.getElementById('examInstructions').value=ex.instructions||'';
       document.getElementById('examQuestionsBuilder').innerHTML='';
       (ex.questions||[]).forEach(q=>addExamQuestionCard(q.type,q));
@@ -3951,11 +3980,14 @@
           const acct=dir.find(a=>String(a.username||'')===String(s.student_no||''))||
                      dir.find(a=>a.account_type==='student'&&String(a.display_name||'')===String(s.student_name||''));
           if(!acct?.internal_email)continue;
+          const assignedQuestions=ex.shuffle_questions?[...safeQuestions].sort(()=>Math.random()-.5):safeQuestions;
           const assignment={
             assignment_id:ex.exam_id+'-'+String(s.student_id),
             exam_id:ex.exam_id,exam_title:ex.title,group_id:ex.group_id,group_name:ex.group_name,
             instructions:ex.instructions,duration_minutes:ex.duration_minutes,
-            questions:safeQuestions,teacher_name:ctx.display_name,teacher_internal_email:ctx.internal_email,
+            max_attempts:Number(ex.max_attempts||1),opens_at:ex.opens_at||null,closes_at:ex.closes_at||null,
+            pass_percent:Number(ex.pass_percent??50),result_mode:ex.result_mode||'after_grading',
+            questions:assignedQuestions,teacher_name:ctx.display_name,teacher_internal_email:ctx.internal_email,
             student_id:s.student_id,student_name:s.student_name,
             assigned_at:new Date().toISOString()
           };
