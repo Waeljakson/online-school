@@ -96,7 +96,10 @@
     @media(max-width:900px){#settings .cards3{grid-template-columns:1fr 1fr!important}}
     @media(max-width:560px){#settings .cards3{grid-template-columns:1fr!important}}
 
-  </style>
+  
+  .platform-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:#eef4fb;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:var(--primary)}
+  .platform-card{display:grid;grid-template-columns:90px 1fr;gap:18px;align-items:start}.platform-photo{width:90px;height:90px;border-radius:22px;object-fit:cover;background:#eef4fb;border:1px solid #dce7f3}.mail-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mail-row.unread{background:#f5f9ff;font-weight:700}.mail-subject{max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.room-actions{display:flex;gap:6px;flex-wrap:wrap}.chat-shell{display:grid;grid-template-rows:auto 1fr auto;min-height:520px}.chat-messages{height:360px;overflow:auto;background:#f8fafc;border:1px solid #e5edf5;border-radius:14px;padding:12px}.chat-msg{display:flex;gap:9px;margin-bottom:12px;align-items:flex-start}.chat-msg .bubble{background:white;border:1px solid #e5edf5;border-radius:12px;padding:9px 11px;max-width:75%;box-shadow:0 2px 8px rgba(0,0,0,.03)}.chat-msg .meta{font-size:10px;color:var(--muted);margin-bottom:4px}.chat-compose{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:10px}.internal-email{direction:ltr;display:inline-block;font-family:monospace}.file-pill{display:inline-block;padding:5px 8px;border-radius:8px;background:#eef4fb;margin-top:6px;font-size:11px}.portal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.portal-card{background:#fff;border:1px solid #e5edf5;border-radius:16px;padding:16px}.portal-card h3{margin:0 0 6px}.portal-card p{margin:0;color:var(--muted);font-size:12px}@media(max-width:760px){.platform-card{grid-template-columns:1fr}.portal-grid{grid-template-columns:1fr}.chat-messages{height:300px}}
+</style>
 </head>
 <body>
 
@@ -180,6 +183,9 @@
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
+      <button data-section="mygroups" data-title="مجموعاتي والقاعات"><span class="ico">💬</span>مجموعاتي والقاعات</button>
+      <button data-section="mail" data-title="بريد روفين"><span class="ico">✉</span>بريد روفين</button>
+      <button data-section="profile" data-title="حسابي"><span class="ico">👤</span>حسابي</button>
       <button data-section="settings" data-title="الإعدادات والصلاحيات"><span class="ico">⚙</span>الإعدادات والصلاحيات</button>
     </nav>
     <div class="side-bottom"><div class="db-status"><span class="dot"></span><span>ROVEN School • Neon backend ready</span></div></div>
@@ -234,7 +240,7 @@
           <div class="panel-head"><div><h3>المعلمون المسجلون</h3><p>البيانات الوظيفية والمالية الحالية</p></div><button class="link-btn" id="refreshTeachers" type="button">تحديث</button></div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>الرقم الوظيفي</th><th>المعلم</th><th>التخصص / المواد</th><th>الجوال</th><th>تاريخ الالتحاق</th><th>المرتب</th><th>الحالة</th></tr></thead>
+              <thead><tr><th>كود المعلم</th><th>المعلم</th><th>اسم المستخدم</th><th>التخصص / المواد</th><th>الجوال</th><th>المرتب</th><th>الحالة</th></tr></thead>
               <tbody id="teachersRows"><tr><td colspan="7" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المعلمين.</td></tr></tbody>
             </table>
           </div>
@@ -246,8 +252,8 @@
           </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>المجموعة</th><th>المعلم</th><th>المادة / الصف</th><th>عدد الطلاب</th><th>المواعيد</th><th>رابط الحصة</th><th>الحالة</th></tr></thead>
-              <tbody id="groupsRows"><tr><td colspan="7" class="students-empty">لا توجد مجموعات معروضة بعد.</td></tr></tbody>
+              <thead><tr><th>المجموعة</th><th>المعلم</th><th>المادة / الصف</th><th>عدد الطلاب</th><th>المواعيد</th><th>رابط الحصة</th><th>الحالة</th><th>إدارة</th></tr></thead>
+              <tbody id="groupsRows"><tr><td colspan="8" class="students-empty">لا توجد مجموعات معروضة بعد.</td></tr></tbody>
             </table>
           </div>
         </article>
@@ -256,6 +262,33 @@
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
+      <section class="module" id="mygroups">
+        <div class="section-toolbar"><div><h2>مجموعاتي والقاعات</h2><p>الدخول إلى قاعة الحصة وشات المجموعة وتبادل الملفات.</p></div><button class="link-btn" id="refreshPlatformGroups" type="button">تحديث</button></div>
+        <article class="panel"><div class="table-wrap"><table class="table"><thead><tr><th>المجموعة</th><th>المادة</th><th>المعلم</th><th>القاعة</th><th>التواصل</th></tr></thead><tbody id="platformGroupsRows"><tr><td colspan="5" class="students-empty">سجّل الدخول لعرض مجموعاتك.</td></tr></tbody></table></div></article>
+      </section>
+      <section class="module" id="mail">
+        <div class="section-toolbar"><div><h2>بريد روفين الداخلي</h2><p>رسائل خاصة وملفات بين مستخدمي المنصة.</p></div><div class="mail-toolbar"><button class="secondary-action" id="showInbox" type="button">الوارد</button><button class="secondary-action" id="showSent" type="button">المرسل</button><button class="primary-action" id="openComposeMail" type="button">＋ رسالة جديدة</button></div></div>
+        <article class="panel"><div class="table-wrap"><table class="table"><thead><tr><th>من / إلى</th><th>الموضوع</th><th>الملف</th><th>التاريخ</th></tr></thead><tbody id="mailRows"><tr><td colspan="4" class="students-empty">لا توجد رسائل معروضة.</td></tr></tbody></table></div></article>
+      </section>
+      <section class="module" id="profile">
+        <div class="section-toolbar"><div><h2>حسابي</h2><p>الصورة الشخصية وبيانات الحساب وتغيير كلمة المرور.</p></div></div>
+        <article class="panel"><div class="platform-card">
+          <div><img id="profilePhotoPreview" class="platform-photo" alt="الصورة الشخصية"></div>
+          <div>
+            <div class="form-grid">
+              <div class="form-field"><label>الاسم</label><input id="profileDisplayName" disabled></div>
+              <div class="form-field"><label>كود المستخدم</label><input id="profileAccountCode" disabled></div>
+              <div class="form-field"><label>اسم المستخدم</label><input id="profileUsername" disabled></div>
+              <div class="form-field"><label>بريد روفين الداخلي</label><input id="profileInternalEmail" disabled></div>
+              <div class="form-field"><label>الصورة الشخصية</label><input id="profilePhotoFile" type="file" accept="image/*"></div>
+              <div class="form-field"><label>كلمة المرور الحالية</label><input id="profileOldPassword" type="password"></div>
+              <div class="form-field"><label>كلمة المرور الجديدة</label><input id="profileNewPassword" type="password" placeholder="8 أحرف على الأقل"></div>
+            </div>
+            <div class="student-form-msg" id="profileMsg"></div>
+            <div style="margin-top:12px"><button class="primary-action" id="saveProfile" type="button">حفظ الحساب</button></div>
+          </div>
+        </div></article>
+      </section>
       <section class="module" id="settings">
         <div class="section-toolbar">
           <div><h2>المستخدمون والصلاحيات</h2><p>إنشاء حسابات النظام وتحديد الدور والصلاحية الأساسية لكل مستخدم.</p></div>
@@ -276,7 +309,7 @@
           </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>المستخدم</th><th>البريد / الجوال</th><th>الصلاحية</th><th>ملف المعلم</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <thead><tr><th>المستخدم</th><th>كود المنصة</th><th>اسم المستخدم</th><th>الصلاحية</th><th>الحالة</th><th>إجراء</th></tr></thead>
               <tbody id="systemUsersRows"><tr><td colspan="6" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المستخدمين.</td></tr></tbody>
             </table>
           </div>
@@ -306,6 +339,8 @@
           <div class="form-field"><label>الاسم بالكامل <span class="required">*</span></label><input id="nuFullName" required /></div>
           <div class="form-field"><label>البريد الإلكتروني <span class="required">*</span></label><input id="nuEmail" type="email" required placeholder="name@example.com" /></div>
           <div class="form-field"><label>رقم الجوال</label><input id="nuPhone" inputmode="tel" /></div>
+          <div class="form-field"><label>اسم المستخدم</label><input id="nuUsername" placeholder="اختياري - يولد النظام كودًا تلقائيًا" /></div>
+          <div class="form-field"><label>كلمة المرور <span class="required">*</span></label><div style="display:flex;gap:8px"><input id="nuPassword" required autocomplete="off" /><button class="secondary-action" type="button" id="generateUserPassword">توليد عشوائي</button></div></div>
           <div class="form-field"><label>الصلاحية <span class="required">*</span></label>
             <select id="nuRole">
               <option value="super_admin">مدير نظام</option>
@@ -327,7 +362,7 @@
       </div>
 
       <div class="user-activation-note">
-        🔐 بعد إنشاء الحساب سيُرسل رابط تفعيل إلى البريد الإلكتروني لتعيين كلمة المرور لأول مرة.
+        🔐 يتم إنشاء كود مستخدم وبريد ROVEN داخلي فورًا، ويمكن تسليم اسم المستخدم وكلمة المرور للمستخدم مباشرة.
       </div>
 
       <div class="student-form-actions" style="margin-top:18px">
@@ -357,7 +392,8 @@
           <div class="form-field"><label>المرحلة</label><select id="ngStage"><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
           <div class="form-field"><label>الصف الدراسي</label><input id="ngGrade" placeholder="مثال: أول ثانوي" /></div>
           <div class="form-field"><label>الحد الأقصى للطلاب</label><input id="ngCapacity" type="number" min="1" placeholder="اختياري" /></div>
-          <div class="form-field" style="grid-column:1/-1"><label>رابط الحصة / Zoom / Meet</label><input id="ngMeetingUrl" type="url" placeholder="https://..." /></div>
+          <div class="form-field"><label>نوع القاعة</label><select id="ngMeetingProvider"><option value="zoom">Zoom</option><option value="google_meet">Google Meet</option><option value="microsoft_teams">Microsoft Teams</option><option value="other">رابط آخر</option></select></div>
+          <div class="form-field"><label>رابط القاعة</label><input id="ngMeetingUrl" type="url" placeholder="https://..." /></div>
         </div>
       </div>
 
@@ -414,6 +450,14 @@
           <div class="form-field"><label>التخصص</label><input id="ntSpecialization" placeholder="مثال: رياضيات" /></div>
           <div class="form-field"><label>تاريخ الالتحاق <span class="required">*</span></label><input id="ntHireDate" type="date" required /></div>
           <div class="form-field" style="grid-column:1/-1"><label>المواد التي يدرسها</label><input id="ntSubjects" placeholder="مثال: رياضيات، إحصاء، جبر" /><div class="form-hint">افصل بين المواد بفاصلة.</div></div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">🔐 حساب المعلم على المنصة</div>
+        <div class="form-grid">
+          <div class="form-field"><label>اسم المستخدم</label><input id="ntUsername" placeholder="اختياري - يولد النظام كود المعلم تلقائيًا"></div>
+          <div class="form-field"><label>كلمة المرور <span class="required">*</span></label><div style="display:flex;gap:8px"><input id="ntPassword" required autocomplete="off"><button class="secondary-action" type="button" id="generateTeacherPassword">توليد عشوائي</button></div></div>
         </div>
       </div>
 
@@ -512,6 +556,34 @@
         <button class="secondary-action" type="button" id="cancelStudentModal">إلغاء</button>
         <button class="save-student" type="submit" id="saveStudentBtn">حفظ الطالب</button>
       </div>
+    </form>
+  </div>
+</div>
+
+<div class="student-modal" id="groupRoomModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:900px">
+    <div class="student-dialog-head"><div><h3 id="groupRoomTitle">قاعة المجموعة</h3><p>رابط الحصة وشات المجموعة والملفات.</p></div><button class="close-modal" type="button" id="closeGroupRoomModal">×</button></div>
+    <div class="student-form chat-shell">
+      <div class="form-section"><div class="form-grid">
+        <div class="form-field"><label>نوع القاعة</label><select id="roomProvider"><option value="zoom">Zoom</option><option value="google_meet">Google Meet</option><option value="microsoft_teams">Microsoft Teams</option><option value="other">رابط آخر</option></select></div>
+        <div class="form-field"><label>رابط القاعة</label><input id="roomMeetingUrl" type="url" placeholder="https://..."></div>
+      </div><div class="room-actions"><button class="secondary-action" id="saveRoomLink" type="button">حفظ الرابط</button><a class="primary-action" id="openRoomLink" target="_blank" rel="noopener" style="text-decoration:none;display:none">دخول القاعة ↗</a></div></div>
+      <div class="chat-messages" id="groupChatMessages"><div class="students-empty">لا توجد رسائل بعد.</div></div>
+      <div><div class="chat-compose"><textarea id="groupChatBody" placeholder="اكتب رسالة للمجموعة..."></textarea><button class="primary-action" id="sendGroupChat" type="button">إرسال</button></div><input id="groupChatFile" type="file" style="margin-top:8px"><div class="form-hint">يمكن إرفاق ملف حتى 3 MB.</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="student-modal" id="composeMailModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:760px">
+    <div class="student-dialog-head"><div><h3>رسالة جديدة</h3><p>بريد داخلي لمستخدمي ROVEN.</p></div><button class="close-modal" type="button" id="closeComposeMail">×</button></div>
+    <form class="student-form" id="composeMailForm">
+      <div class="student-form-msg" id="composeMailMsg"></div>
+      <div class="form-field"><label>إلى</label><select id="mailRecipient" required><option value="">اختر المستخدم</option></select></div>
+      <div class="form-field"><label>الموضوع</label><input id="mailSubject" required></div>
+      <div class="form-field"><label>الرسالة</label><textarea id="mailBody" rows="7"></textarea></div>
+      <div class="form-field"><label>ملف مرفق</label><input id="mailAttachment" type="file"><div class="form-hint">الحد الأقصى 3 MB.</div></div>
+      <div class="student-form-actions"><button class="secondary-action" id="cancelComposeMail" type="button">إلغاء</button><button class="save-student" type="submit">إرسال</button></div>
     </form>
   </div>
 </div>
