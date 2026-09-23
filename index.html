@@ -572,7 +572,7 @@
                 <div class="form-field"><label>يفتح في</label><input id="examOpenAt" type="datetime-local"></div>
                 <div class="form-field"><label>يغلق في</label><input id="examCloseAt" type="datetime-local"></div>
                 <div class="form-field"><label>نسبة النجاح %</label><input id="examPassPercent" type="number" min="0" max="100" value="50"></div>
-                <div class="form-field"><label>إظهار النتيجة</label><select id="examResultMode"><option value="after_grading">بعد اعتماد المعلم</option><option value="immediate">فور التسليم (الاختيار من متعدد)</option></select></div>
+                <div class="form-field"><label>إظهار النتيجة</label><select id="examResultMode"><option value="after_grading">بعد اعتماد المعلم</option></select><div class="form-hint">التصحيح الفوري سيُفعّل لاحقًا من الخادم حتى لا ينكشف مفتاح الإجابة للطالب.</div></div>
                 <div class="form-field"><label>ترتيب الأسئلة</label><select id="examShuffle"><option value="no">بالترتيب</option><option value="yes">عشوائي لكل طالب</option></select></div>
                 <div class="form-field"><label>تعليمات</label><input id="examInstructions"></div>
               </div>
@@ -2849,12 +2849,11 @@
         account_id:r?.account_id||null,
         account_code:r?.account_code||null,
         username:r?.username||username,
-        initial_password:password,
         activated_at:new Date().toISOString()
       };
       if(!payload.assistant_internal_email)throw new Error('تعذر إنشاء البريد الداخلي للمساعد.');
       await sendStructuredMail(request.teacher_internal_email,'ASSISTANT_CREATED',request.request_id,payload);
-      await sendStructuredMail(payload.assistant_internal_email,'ASSISTANT_LINK',request.request_id,{...payload,initial_password:undefined});
+      await sendStructuredMail(payload.assistant_internal_email,'ASSISTANT_LINK',request.request_id,payload);
       const me=await hydratePlatformContext();
       if(me?.internal_email)await sendStructuredMail(me.internal_email,'ASSISTANT_CREATED_ADMIN',request.request_id,payload);
       alert('تم إنشاء حساب المساعد. اسم المستخدم: '+payload.username+'\nكلمة المرور المؤقتة: '+password);
@@ -2893,7 +2892,7 @@
       if(existing?.assistant_internal_email){
         const updated={...existing,...request,status:'active',assistant_internal_email:existing.assistant_internal_email,account_id:existing.account_id,account_code:existing.account_code,username:existing.username,updated_at:new Date().toISOString()};
         await sendStructuredMail(ctx.internal_email,'ASSISTANT_CREATED',request.request_id,updated);
-        await sendStructuredMail(existing.assistant_internal_email,'ASSISTANT_LINK',request.request_id,{...updated,initial_password:undefined});
+        await sendStructuredMail(existing.assistant_internal_email,'ASSISTANT_LINK',request.request_id,updated);
         msg.textContent='تم تحديث قاعات وصلاحيات المساعد فورًا.';
       }else{
         await sendStructuredMail(adminEmail,'ASSISTANT_REQUEST',request.request_id,request);
