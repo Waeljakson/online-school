@@ -1864,7 +1864,8 @@
       updateAccountDirectoryCounts();
       renderAccountDirectory();
     }catch(err){
-      tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(String(err.message||'تعذر تحميل دليل الحسابات'))+'</td></tr>';
+      const m=String(err.message||'تعذر تحميل دليل الحسابات');
+      tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(isUnknownAdminAction(err)?'تعذر تحميل الحسابات من نسخة الاتصال الحالية. تم تحديث الواجهة، أعد فتح الصفحة وحاول مرة أخرى.':m)+'</td></tr>';
     }
   };
   document.getElementById('refreshAccountDirectory').addEventListener('click',loadAccountDirectory);
@@ -2409,13 +2410,17 @@
   ['nsFee','nsDiscount','nsFirstPayment'].forEach(id=>document.getElementById(id).addEventListener('input',updateMoneySummary));
 
   const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
-  const isUnknownAdminAction=err=>/unknown_custom_action|not supported|غير مدعوم/i.test(String(err?.message||err||''));
+  const isUnknownAdminAction=err=>/unknown_custom_action|unsupported_action|unsupported action|not supported|غير مدعوم/i.test(String(err?.message||err||''));
   const adminListWithFallback=async(action,fallbackAction)=>{
     try{
       const data=await dataApiFetch('/rpc/'+action,{method:'POST',body:'{}'});
       if(Array.isArray(data))return data;
-    }catch(err){if(!isUnknownAdminAction(err))throw err}
-    return await dataApiFetch('/rpc/'+fallbackAction,{method:'POST',body:'{}'});
+      if(data&&Array.isArray(data.rows))return data.rows;
+    }catch(err){
+      if(!isUnknownAdminAction(err))throw err;
+    }
+    const fallback=await dataApiFetch('/rpc/'+fallbackAction,{method:'POST',body:'{}'});
+    return Array.isArray(fallback)?fallback:(Array.isArray(fallback?.rows)?fallback.rows:[]);
   };
   const adminSetEntityActive=async(type,id,active)=>{
     if(!id)throw new Error('لا يوجد معرّف لهذا العنصر.');
