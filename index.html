@@ -1823,7 +1823,11 @@
       <td><span class="internal-email">${escapeHtml(a.internal_email||'—')}</span></td>
       <td><span class="account-password-mask">••••••••</span><br><span style="font-size:9px;color:var(--muted)">غير قابلة للعرض</span></td>
       <td><span class="status ${a.is_active===false?'watch':'active'}">${a.is_active===false?'موقوف':'نشط'}</span></td>
-      <td><button class="secondary-action manage-account-credentials" type="button" data-account-id="${escapeHtml(a.account_id||'')}">إدارة الدخول</button></td>
+      <td><div class="admin-row-actions">
+        <button class="secondary-action manage-account-credentials" type="button" data-account-id="${escapeHtml(a.account_id||'')}">إدارة الدخول</button>
+        <button class="secondary-action account-state-btn ${a.is_active===false?'activate-action':'inactive-action'}" type="button" data-account-id="${escapeHtml(a.account_id||'')}" data-active="${a.is_active===false?'0':'1'}" ${String(a.account_id||'')===String(currentPlatformAccount?.account_id||'')?'disabled title="حسابك الحالي"':''}>${a.is_active===false?'تفعيل':'إيقاف'}</button>
+        <button class="secondary-action danger-action delete-account-btn" type="button" data-account-id="${escapeHtml(a.account_id||'')}" data-name="${escapeHtml(a.display_name||'المستخدم')}" ${String(a.account_id||'')===String(currentPlatformAccount?.account_id||'')?'disabled title="لا يمكن حذف حسابك الحالي"':''}>حذف</button>
+      </div></td>
     </tr>`).join('');
   };
 
@@ -1843,12 +1847,12 @@
     try{
       const [profile,directory]=await Promise.all([
         dataApiFetch('/rpc/platform_my_profile',{method:'POST',body:'{}'}),
-        dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+        adminListWithFallback('admin_accounts_all','platform_list_directory')
       ]);
 
       const combined=[];
-      if(profile?.account_id)combined.push({...profile,is_active:true});
       (directory||[]).forEach(a=>combined.push({...a,is_active:a.is_active!==false}));
+      if(profile?.account_id&&!combined.some(a=>String(a.account_id)===String(profile.account_id)))combined.push({...profile,is_active:true});
 
       const dedup=new Map();
       combined.forEach(a=>{
@@ -1876,7 +1880,7 @@
     const tbody=document.getElementById('systemUsersRows');
     tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل المستخدمين...</td></tr>';
     try{
-      const data=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
+      const data=await adminListWithFallback('admin_accounts_all','platform_list_directory');
       const rows=(Array.isArray(data)?data:[]).filter(u=>['admin','staff','teacher'].includes(String(u.account_type||'')));
       if(!rows.length){
         tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد حسابات إدارية أو تعليمية معروضة.</td></tr>';
@@ -1890,9 +1894,11 @@
           u.account_type==='teacher'?'teacher':
           u.account_type==='admin'?'school_manager':'reception'
         ))}</td>
-        <td><span class="status active">نشط</span></td>
+        <td><span class="status ${u.is_active===false?'watch':'active'}">${u.is_active===false?'غير نشط':'نشط'}</span></td>
         <td><div class="user-actions">
           <button class="mini-btn primary open-directory-credentials" type="button" data-account-id="${escapeHtml(u.account_id||'')}">إدارة الدخول</button>
+          <button class="mini-btn system-account-state" type="button" data-account-id="${escapeHtml(u.account_id||'')}" data-active="${u.is_active===false?'0':'1'}">${u.is_active===false?'تفعيل':'إيقاف'}</button>
+          <button class="mini-btn system-account-delete" type="button" data-account-id="${escapeHtml(u.account_id||'')}" data-name="${escapeHtml(u.display_name||'المستخدم')}" style="color:#b42318">حذف</button>
         </div></td>
       </tr>`).join('');
     }catch(err){
@@ -1954,9 +1960,27 @@
     document.getElementById('credentialsGeneratePassword').checked=false;
   });
 
-  document.getElementById('accountDirectoryRows').addEventListener('click',e=>{
-    const btn=e.target.closest('.manage-account-credentials');
-    if(btn)openAccountCredentials(btn.dataset.accountId);
+  document.getElementById('accountDirectoryRows').addEventListener('click',async e=>{
+    const manage=e.target.closest('.manage-account-credentials');
+    if(manage){openAccountCredentials(manage.dataset.accountId);return}
+    const state=e.target.closest('.account-state-btn');
+    if(state){
+      const next=state.dataset.active!=='1';
+      if(!confirm(next?'إعادة تفعيل هذا الحساب؟':'إيقاف هذا الحساب ومنع صاحبه من الدخول للمنصة؟'))return;
+      state.disabled=true;
+      try{await adminSetEntityActive('account',state.dataset.accountId,next);await Promise.allSettled([loadAccountDirectory(),loadSystemUsers()])}
+      catch(err){alert(entityActionError(err))}
+      finally{state.disabled=false}
+      return;
+    }
+    const del=e.target.closest('.delete-account-btn');
+    if(del){
+      if(!confirm('حذف حساب «'+(del.dataset.name||'')+'» من المنصة؟\nسيُوقف الدخول ويختفي الحساب من دليل المستخدمين، مع الاحتفاظ بالسجلات المرتبطة.'))return;
+      del.disabled=true;
+      try{await adminDeleteEntity('account',del.dataset.accountId);await Promise.allSettled([loadAccountDirectory(),loadSystemUsers()])}
+      catch(err){alert(entityActionError(err))}
+      finally{del.disabled=false}
+    }
   });
 
   document.getElementById('teachersRows').addEventListener('click',async e=>{
