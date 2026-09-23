@@ -2090,6 +2090,8 @@
       <div><b>${escapeHtml(g.group_name)}</b><span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span></div>
       <div class="room-actions">
         ${g.meeting_url?`<a class="secondary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة ↗</a>`:''}
+        <button class="secondary-action teacher-students-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}">الطلاب</button>
+        <button class="secondary-action teacher-attendance-btn" type="button" data-group-id="${escapeHtml(g.group_id)}">الحضور</button>
         <button class="secondary-action teacher-open-room" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">إدارة القاعة</button>
       </div>
     </div>`).join('');
@@ -2110,6 +2112,43 @@
       <td>${escapeHtml(x.note||'—')}</td>
       <td><b class="${x.type==='income'?'paid':'due'}">${Number(x.amount||0).toFixed(2)}</b></td>
     </tr>`).join('');
+  };
+
+  const teacherDayIndex={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+  const getUpcomingTeacherSessions=(groups,limit=8)=>{
+    const now=new Date(),items=[];
+    (groups||[]).forEach(g=>{
+      parseScheduleSessions(g.schedule_json).forEach(s=>{
+        if(teacherDayIndex[s.day]===undefined||!s.time)return;
+        const [hh,mm]=String(s.time).split(':').map(Number);
+        const when=new Date(now);
+        let delta=(teacherDayIndex[s.day]-now.getDay()+7)%7;
+        when.setHours(Number.isFinite(hh)?hh:0,Number.isFinite(mm)?mm:0,0,0);
+        if(delta===0&&when<=now)delta=7;
+        when.setDate(now.getDate()+delta);
+        items.push({...s,group:g,when});
+      });
+    });
+    return items.sort((a,b)=>a.when-b.when).slice(0,limit);
+  };
+
+  const renderTeacherUpcoming=(groups)=>{
+    const box=document.getElementById('teacherUpcomingLessons');
+    const items=getUpcomingTeacherSessions(groups,8);
+    if(!items.length){box.innerHTML='<div class="students-empty">لا توجد مواعيد قادمة في جداول القاعات.</div>';return}
+    const today=new Date().toDateString();
+    box.innerHTML='<div class="teacher-upcoming-list">'+items.map(x=>{
+      const isToday=x.when.toDateString()===today;
+      const dayLabel=isToday?'اليوم':(daysAr[x.day]||x.day);
+      return `<div class="teacher-upcoming-item">
+        <div class="teacher-upcoming-time">${escapeHtml(dayLabel)}<span>${escapeHtml(x.time)}</span></div>
+        <div><b>${escapeHtml(x.group.group_name)}</b><span>${escapeHtml(x.group.subject_name||'بدون مادة')} • ${Number(x.duration||60)} دقيقة</span></div>
+        <div class="teacher-upcoming-actions">
+          <button class="secondary-action upcoming-attendance-btn" type="button" data-group-id="${escapeHtml(x.group.group_id)}">الحضور</button>
+          ${x.group.meeting_url?`<a class="primary-action" href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة</a>`:''}
+        </div>
+      </div>`;
+    }).join('')+'</div>';
   };
 
   const loadTeacherHub=async()=>{
@@ -2154,6 +2193,7 @@
     document.getElementById('teacherStudentsCount').textContent=String(uniqueStudents.size);
     document.getElementById('teacherGroupsCount').textContent=String(groups.length);
     document.getElementById('teacherWeeklyCount').textContent=String(weekly);
+    renderTeacherUpcoming(groups);
     renderTeacherHubGroups(groups,studentCountByGroup);
 
     const financeEntries=inbox
@@ -2184,9 +2224,42 @@
   };
 
   document.getElementById('refreshTeacherHub').addEventListener('click',loadTeacherHub);
+  const teacherStudentsModal=document.getElementById('teacherStudentsModal');
+  const closeTeacherStudentsModal=()=>{teacherStudentsModal.classList.remove('show');teacherStudentsModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeTeacherStudentsModal').addEventListener('click',closeTeacherStudentsModal);
+  teacherStudentsModal.addEventListener('click',e=>{if(e.target===teacherStudentsModal)closeTeacherStudentsModal()});
+
+  const openTeacherStudents=async(groupId,groupName)=>{
+    teacherStudentsModal.classList.add('show');teacherStudentsModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    document.getElementById('teacherStudentsModalTitle').textContent='طلاب '+(groupName||'القاعة');
+    const tbody=document.getElementById('teacherStudentsModalRows');
+    tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
+    try{
+      const rows=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})});
+      if(!Array.isArray(rows)||!rows.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا يوجد طلاب في هذه القاعة.</td></tr>';return}
+      tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(s.student_name)}</b></td><td>${escapeHtml(s.student_no||'—')}</td><td><span class="teacher-student-status">${escapeHtml(attendanceStatusLabel[s.status]||'لم يسجل بعد')}</span></td></tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="4" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلاب')+'</td></tr>'}
+  };
+
+  const openAttendanceForTeacherGroup=async groupId=>{
+    switchTo('attendance','الحضور والغياب');
+    await loadAttendanceGroups();
+    document.getElementById('attendanceGroup').value=groupId;
+    document.getElementById('attendanceDate').value=new Date().toISOString().slice(0,10);
+    await loadAttendanceRoster();
+  };
+
   document.getElementById('teacherHubGroups').addEventListener('click',e=>{
-    const btn=e.target.closest('.teacher-open-room');
-    if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
+    const room=e.target.closest('.teacher-open-room');
+    if(room){openGroupRoom({group_id:room.dataset.groupId,group_name:room.dataset.groupName,meeting_provider:room.dataset.provider,meeting_url:room.dataset.url});return}
+    const students=e.target.closest('.teacher-students-btn');
+    if(students){openTeacherStudents(students.dataset.groupId,students.dataset.groupName);return}
+    const attendance=e.target.closest('.teacher-attendance-btn');
+    if(attendance){openAttendanceForTeacherGroup(attendance.dataset.groupId);return}
+  });
+  document.getElementById('teacherUpcomingLessons').addEventListener('click',e=>{
+    const attendance=e.target.closest('.upcoming-attendance-btn');
+    if(attendance)openAttendanceForTeacherGroup(attendance.dataset.groupId);
   });
 
   document.getElementById('teacherRoomRequestForm').addEventListener('submit',async e=>{
@@ -2278,6 +2351,22 @@
         const x=teacherSafeJson(m.body);return x?{...x,sender_email:m.sender_email,sender_name:m.sender_name,message_id:m.message_id,sent_at:m.sent_at}:null
       }).filter(x=>x?.request_id);
       adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,x]));
+      let pendingCount=0,approvedCount=0,monthlyTotal=0,sessionTotal=0;
+      requests.forEach(r=>{
+        const response=responses.get(r.request_id);
+        const status=response?.status||'pending';
+        if(status==='pending')pendingCount++;
+        if(status==='approved'){
+          approvedCount++;
+          const price=Number(response?.agreed_price||0);
+          if(response?.pricing_basis==='monthly')monthlyTotal+=price;
+          if(response?.pricing_basis==='per_session')sessionTotal+=price;
+        }
+      });
+      document.getElementById('roomPendingCount').textContent=String(pendingCount);
+      document.getElementById('roomApprovedCount').textContent=String(approvedCount);
+      document.getElementById('roomMonthlyTotal').textContent=monthlyTotal.toFixed(2);
+      document.getElementById('roomSessionTotal').textContent=sessionTotal.toFixed(2);
       if(!requests.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
       tbody.innerHTML=requests.map(r=>{
         const response=responses.get(r.request_id),status=response?.status||'pending';
@@ -2601,7 +2690,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
