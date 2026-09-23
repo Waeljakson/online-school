@@ -3876,7 +3876,8 @@
     }
     const inbox=await structuredMail('inbox');
     const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
-    const certs=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id');
+    const parentRevoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED_PARENT','certificate_id').map(x=>String(x.certificate_id)));
+    const certs=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!parentRevoked.has(String(x.certificate_id)));
     const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
     const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
     const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
@@ -3995,6 +3996,16 @@
       try{await sendStructuredMail(link.parent_internal_email,'PARENT_POINTS',ev.event_id,{...ev,student_name:ev.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
     }
 
+    const revokedCerts=latestStructuredBy(inbox,'CERTIFICATE_REVOKED','certificate_id');
+    for(const r of revokedCerts){
+      const key='roven_forward_cert_revoke_'+String(ctx.account_id||ctx.username||'')+'_'+String(r.certificate_id);
+      if(localStorage.getItem(key))continue;
+      try{
+        await sendStructuredMail(link.parent_internal_email,'CERTIFICATE_REVOKED_PARENT',r.certificate_id,{...r,student_name:r.student_name||link.student_name});
+        localStorage.setItem(key,'1');
+      }catch{}
+    }
+
     const results=latestStructuredBy(inbox,'EXAM_RESULT','result_id');
     for(const r of results){
       const key='roven_forward_result_'+String(ctx.account_id||ctx.username||'')+'_'+String(r.result_id);
@@ -4014,15 +4025,28 @@
     await forwardStudentArtifactsToParent(inbox);
     const sent=await structuredMail('sent');
     let rows=[];
-    if(['student','private_student'].includes(String(ctx?.account_type||'')))rows=latestStructuredBy(inbox,'CERTIFICATE','certificate_id');
-    else if(['parent','private_parent'].includes(String(ctx?.account_type||'')))rows=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id');
-    else rows=latestStructuredBy(inbox.concat(sent),'CERTIFICATE_ISSUED','certificate_id');
+    let canRevoke=false;
+    const all=inbox.concat(sent);
+    if(['student','private_student'].includes(String(ctx?.account_type||''))){
+      const revoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED','certificate_id').map(x=>String(x.certificate_id)));
+      rows=latestStructuredBy(inbox,'CERTIFICATE','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+    }else if(['parent','private_parent'].includes(String(ctx?.account_type||''))){
+      const revoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED_PARENT','certificate_id').map(x=>String(x.certificate_id)));
+      rows=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+    }else{
+      const revoked=new Set(latestStructuredBy(all,'CERTIFICATE_REVOKED','certificate_id').map(x=>String(x.certificate_id)));
+      rows=latestStructuredBy(all,'CERTIFICATE_ISSUED','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+      canRevoke=true;
+    }
 
     document.getElementById('certificatesList').innerHTML=rows.length?rows.map(c=>`<div class="certificate-list-item">
       <b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b>
       <span>${escapeHtml(c.student_name||c.private_student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleString('ar-EG'))}</span>
       <p style="font-size:11px;margin:6px 0">${escapeHtml(c.body||'')}</p>
-      <button class="secondary-action print-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}">طباعة</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="secondary-action print-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}">طباعة</button>
+        ${canRevoke?`<button class="secondary-action revoke-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}" style="color:#b42318">إلغاء الشهادة</button>`:''}
+      </div>
     </div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
   };
 
@@ -4034,6 +4058,7 @@
     const cert={
       certificate_id:'CERT-'+Date.now().toString(36).toUpperCase(),
       target_kind:target.kind,target_id:target.id,student_name:target.name,
+      student_internal_email:target.internal_email||null,
       title:document.getElementById('certificateTitle').value.trim()||certificateTypeLabel[document.getElementById('certificateType').value]||'شهادة تقدير',
       type:document.getElementById('certificateType').value,
       body:document.getElementById('certificateBody').value.trim()||'تقديرًا لتميزه وجهده.',
@@ -4049,7 +4074,22 @@
     }catch(err){msg.textContent=err.message||'تعذر إصدار الشهادة';msg.className='student-form-msg error show'}
   });
   document.getElementById('refreshCertificates').addEventListener('click',loadCertificates);
-  document.getElementById('certificatesList').addEventListener('click',e=>{
+  document.getElementById('certificatesList').addEventListener('click',async e=>{
+    const revoke=e.target.closest('.revoke-certificate-btn');
+    if(revoke){
+      if(!confirm('إلغاء هذه الشهادة؟ ستختفي من السجل النشط للطالب وولي الأمر مع الاحتفاظ بسجل الإلغاء.'))return;
+      const ctx=await hydratePlatformContext();
+      const all=(await structuredMail('inbox')).concat(await structuredMail('sent'));
+      const cert=latestStructuredBy(all,'CERTIFICATE_ISSUED','certificate_id').find(x=>String(x.certificate_id)===String(revoke.dataset.certificateId));
+      if(!cert)return;
+      const rec={certificate_id:cert.certificate_id,student_name:cert.student_name,revoked_at:new Date().toISOString(),reason:'ألغيت بواسطة جهة الإصدار'};
+      try{
+        await sendStructuredMail(ctx.internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec);
+        if(cert.student_internal_email)await sendStructuredMail(cert.student_internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec);
+        await loadCertificates();
+      }catch(err){alert(err.message||'تعذر إلغاء الشهادة')}
+      return;
+    }
     const btn=e.target.closest('.print-certificate-btn');if(!btn)return;
     const preview=document.getElementById('certificatePreview').innerHTML;
     const w=window.open('','_blank','width=900,height=650');
@@ -4432,7 +4472,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -4696,7 +4736,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
