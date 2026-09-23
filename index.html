@@ -186,6 +186,8 @@
     .notification-wrap{position:relative}.notification-bell{position:relative}.notification-count{position:absolute;top:-5px;left:-5px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#dc2626;color:#fff;font-size:10px;font-weight:800;display:none;align-items:center;justify-content:center;border:2px solid #fff}.notification-count.show{display:flex}.notification-popover{position:absolute;top:50px;left:0;width:min(390px,88vw);max-height:520px;background:#fff;border:1px solid #e3eaf1;border-radius:16px;box-shadow:0 18px 48px rgba(15,23,42,.16);z-index:80;display:none;overflow:hidden}.notification-popover.show{display:block}.notification-popover-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:13px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff}.notification-popover-head b{display:block;font-size:14px}.notification-popover-head span{display:block;font-size:10px;color:var(--muted);margin-top:2px}.notification-list{max-height:430px;overflow:auto}.notification-item{width:100%;display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:0;border-bottom:1px solid #edf2f7;background:#fff;text-align:right;cursor:pointer}.notification-item:hover{background:#f8fbfd}.notification-icon{width:34px;height:34px;border-radius:10px;background:#edf8f6;display:flex;align-items:center;justify-content:center;flex:0 0 34px}.notification-body{min-width:0;flex:1}.notification-body b{display:block;font-size:12px;margin-bottom:3px}.notification-body span{display:block;font-size:10px;color:var(--muted);line-height:1.55}.notification-time{font-size:9px;color:#94a3b8;white-space:nowrap}.nav-notify{margin-right:auto;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}.browser-notification-enabled{color:#0f766e!important;border-color:#99d7cb!important;background:#eefaf7!important}@media(max-width:780px){.notification-popover{position:fixed;top:68px;left:12px;right:12px;width:auto;max-height:70dvh}}
 
     .logout-top{height:38px;border:1px solid #dbe5ec;background:#fff;color:#9f2f2f;border-radius:11px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:.18s}.logout-top:hover{background:#fff2f2;border-color:#f0c7c7}.sidebar-logout{width:100%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;border-radius:11px;padding:10px 12px;display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;margin-bottom:9px}.sidebar-logout:hover{background:rgba(220,38,38,.2);border-color:rgba(248,113,113,.35)}@media(max-width:780px){.logout-top{width:38px;padding:0;justify-content:center}.logout-text{display:none}.sidebar-logout{min-height:42px}}
+
+    .teacher-hero{background:linear-gradient(135deg,#0f766e,#163e63);color:#fff;border-radius:22px;padding:22px 24px;display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:16px;box-shadow:0 16px 36px rgba(15,118,110,.18)}.teacher-hero h2{margin:5px 0 5px;font-size:24px}.teacher-hero p{margin:0;color:rgba(255,255,255,.8);font-size:12px}.teacher-kicker{font-size:10px;font-weight:800;letter-spacing:.12em;color:#bff5e9}.teacher-hero-code{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);padding:11px 14px;border-radius:14px;min-width:150px}.teacher-hero-code span{display:block;font-size:9px;color:rgba(255,255,255,.7)}.teacher-hero-code b{display:block;margin-top:3px;direction:ltr;font-size:15px}.teacher-hub-grid{align-items:stretch}.teacher-hub-group{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:11px 0;border-bottom:1px solid #edf2f7}.teacher-hub-group:last-child{border-bottom:0}.teacher-hub-group b{display:block}.teacher-hub-group span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.teacher-money-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.teacher-money-row>div{background:#f8fbfd;border:1px solid #e7eef4;border-radius:13px;padding:12px}.teacher-money-row span{display:block;color:var(--muted);font-size:10px}.teacher-money-row b{display:block;font-size:18px;margin-top:5px}.teacher-finance-mini-note{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.7}.room-request-status{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800}.room-request-status.pending{background:#fff7dd;color:#8a6500}.room-request-status.approved{background:#e8f7f1;color:#137a59}.room-request-status.rejected{background:#fff0f0;color:#b23c3c}.teacher-room-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:780px){.teacher-hero{align-items:flex-start;flex-direction:column}.teacher-hub-grid{grid-template-columns:1fr}.teacher-money-row{grid-template-columns:1fr}.teacher-hub-stats{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -271,6 +273,7 @@
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
+      <button data-section="teacherhub" data-title="لوحة المعلم"><span class="ico">👨‍🏫</span>لوحة المعلم</button>
       <button data-section="mygroups" data-title="مجموعاتي والقاعات"><span class="ico">💬</span>مجموعاتي والقاعات</button>
       <button data-section="directchat" data-title="شات الإدارة والمعلمين"><span class="ico">💬</span>شات الإدارة والمعلمين</button>
       <button data-section="mail" data-title="بريد روفين"><span class="ico">✉</span>بريد روفين</button>
@@ -355,6 +358,13 @@
             </table>
           </div>
         </article>
+        <article class="panel" id="teacherRoomAdminPanel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>طلبات فتح قاعات المعلمين</h3><p>راجع الطلب، اتفق على السعر، ثم أنشئ القاعة للمعلم مباشرة.</p></div><button class="link-btn" id="refreshTeacherRoomAdmin" type="button">تحديث</button></div>
+          <div class="table-wrap"><table class="table" style="min-width:900px">
+            <thead><tr><th>المعلم</th><th>القاعة / المادة</th><th>السعر المقترح</th><th>السعر المتفق</th><th>الحالة</th><th>إجراء</th></tr></thead>
+            <tbody id="teacherRoomAdminRows"><tr><td colspan="6" class="students-empty">لا توجد طلبات معروضة.</td></tr>
+          </table></div>
+        </article>
       </section>
       <section class="module" id="attendance">
         <div class="section-toolbar">
@@ -435,6 +445,78 @@
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
+      <section class="module" id="teacherhub">
+        <div class="teacher-hero">
+          <div><span class="teacher-kicker">ROVEN Teacher Workspace</span><h2 id="teacherHubName">لوحة المعلم</h2><p>كل ما يخص حصصك وطلابك وقاعاتك وحساباتك الخاصة في مكان واحد.</p></div>
+          <div class="teacher-hero-code"><span>كود المعلم</span><b id="teacherHubCode">—</b></div>
+        </div>
+
+        <div class="stats teacher-hub-stats">
+          <div class="stat"><div class="stat-head"><span>الحصص المنفذة</span><span class="stat-icon">🎯</span></div><div class="value" id="teacherTaughtCount">0</div><div class="sub">من سجلات الحضور المحفوظة</div></div>
+          <div class="stat"><div class="stat-head"><span>الطلاب الملحقون</span><span class="stat-icon">👥</span></div><div class="value" id="teacherStudentsCount">0</div><div class="sub">طلاب مجموعاتك النشطة</div></div>
+          <div class="stat"><div class="stat-head"><span>القاعات والمجموعات</span><span class="stat-icon">🏫</span></div><div class="value" id="teacherGroupsCount">0</div><div class="sub">القاعات المسندة لك</div></div>
+          <div class="stat"><div class="stat-head"><span>حصص أسبوعية</span><span class="stat-icon">📅</span></div><div class="value" id="teacherWeeklyCount">0</div><div class="sub">حسب جداول مجموعاتك</div></div>
+        </div>
+
+        <div class="grid teacher-hub-grid">
+          <article class="panel">
+            <div class="panel-head"><div><h3>قاعاتي التعليمية</h3><p>المادة والطلاب والجدول ورابط الحصة.</p></div><button class="link-btn" id="refreshTeacherHub" type="button">تحديث</button></div>
+            <div id="teacherHubGroups"><div class="students-empty">جارٍ تحميل القاعات...</div></div>
+          </article>
+          <article class="panel teacher-finance-summary">
+            <div class="panel-head"><div><h3>ملخص مالي شخصي</h3><p>دفتر خاص بالمعلم ولا يغيّر مالية المدرسة.</p></div><span>💼</span></div>
+            <div class="teacher-money-row"><div><span>إجمالي الإيرادات</span><b class="paid" id="teacherIncomeTotal">0.00</b></div><div><span>إجمالي المصروفات</span><b class="due" id="teacherExpenseTotal">0.00</b></div><div><span>الصافي</span><b id="teacherNetTotal">0.00</b></div></div>
+            <div class="teacher-finance-mini-note">تقدر تسجل أجر حصص، اشتراك قاعة، إنترنت، أدوات، تسويق أو أي حركة مالية خاصة بك.</div>
+          </article>
+        </div>
+
+        <div class="grid teacher-hub-grid" style="margin-top:15px">
+          <article class="panel">
+            <div class="panel-head"><div><h3>طلب فتح قاعة خاصة</h3><p>ارسل الطلب للإدارة وحدد السعر المقترح، والإدارة تعتمد السعر قبل إنشاء القاعة.</p></div><span>＋🏫</span></div>
+            <form id="teacherRoomRequestForm">
+              <div class="form-grid">
+                <div class="form-field"><label>الإدارة المستلمة <span class="required">*</span></label><select id="teacherRoomAdmin" required><option value="">اختر الإدارة</option></select></div>
+                <div class="form-field"><label>اسم القاعة <span class="required">*</span></label><input id="teacherRoomName" required placeholder="مثال: فيزياء أول ثانوي - أ/ أحمد"></div>
+                <div class="form-field"><label>المادة <span class="required">*</span></label><input id="teacherRoomSubject" required></div>
+                <div class="form-field"><label>المرحلة</label><select id="teacherRoomStage"><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
+                <div class="form-field"><label>الصف</label><input id="teacherRoomGrade"></div>
+                <div class="form-field"><label>السعر المقترح</label><input id="teacherRoomPrice" type="number" min="0" step="0.01" placeholder="اختياري"></div>
+                <div class="form-field"><label>طريقة الحساب</label><select id="teacherRoomPricing"><option value="monthly">شهري</option><option value="per_student">لكل طالب</option><option value="per_session">لكل حصة</option><option value="fixed">مبلغ ثابت</option><option value="custom">حسب الاتفاق</option></select></div>
+                <div class="form-field"><label>ملاحظات</label><input id="teacherRoomNotes" placeholder="تفاصيل أو شروط الاتفاق"></div>
+              </div>
+              <div class="student-form-msg" id="teacherRoomMsg"></div>
+              <button class="primary-action" type="submit" style="margin-top:10px">إرسال طلب فتح القاعة</button>
+            </form>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><h3>حالة طلبات القاعات</h3><p>تابع موافقة الإدارة والسعر المتفق عليه.</p></div><span>📋</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:620px"><thead><tr><th>القاعة</th><th>المادة</th><th>سعري المقترح</th><th>سعر الاتفاق</th><th>الحالة</th></tr></thead><tbody id="teacherRoomRequestsRows"><tr><td colspan="5" class="students-empty">لا توجد طلبات بعد.</td></tr></tbody></table></div>
+          </article>
+        </div>
+
+        <div class="grid teacher-hub-grid" style="margin-top:15px">
+          <article class="panel">
+            <div class="panel-head"><div><h3>إضافة حركة مالية</h3><p>دفتر مالي شخصي محفوظ في حسابك.</p></div><span>＋💰</span></div>
+            <form id="teacherFinanceForm">
+              <div class="form-grid">
+                <div class="form-field"><label>النوع</label><select id="teacherFinanceType"><option value="income">إيراد</option><option value="expense">مصروف</option></select></div>
+                <div class="form-field"><label>المبلغ <span class="required">*</span></label><input id="teacherFinanceAmount" type="number" min="0.01" step="0.01" required></div>
+                <div class="form-field"><label>التصنيف</label><select id="teacherFinanceCategory"><option>أجر حصص</option><option>اشتراك قاعة</option><option>إنترنت واتصالات</option><option>أدوات وتجهيزات</option><option>تسويق وإعلانات</option><option>تحصيل من طلاب</option><option>أخرى</option></select></div>
+                <div class="form-field"><label>التاريخ</label><input id="teacherFinanceDate" type="date"></div>
+                <div class="form-field" style="grid-column:1/-1"><label>البيان</label><input id="teacherFinanceNote" placeholder="وصف مختصر للحركة"></div>
+              </div>
+              <div class="student-form-msg" id="teacherFinanceMsg"></div>
+              <button class="primary-action" type="submit" style="margin-top:10px">حفظ الحركة</button>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>آخر الحركات المالية</h3><p>الإيرادات والمصروفات الخاصة بك.</p></div><span>🧾</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:620px"><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody id="teacherFinanceRows"><tr><td colspan="5" class="students-empty">لا توجد حركات مالية بعد.</td></tr></tbody></table></div>
+          </article>
+        </div>
+      </section>
+
       <section class="module" id="mygroups">
         <div class="section-toolbar"><div><h2>مجموعاتي والقاعات</h2><p>الدخول إلى قاعة الحصة وشات المجموعة وتبادل الملفات.</p></div><button class="link-btn" id="refreshPlatformGroups" type="button">تحديث</button></div>
         <article class="panel"><div class="table-wrap"><table class="table"><thead><tr><th>المجموعة</th><th>المادة</th><th>المعلم</th><th>القاعة</th><th>التواصل</th></tr></thead><tbody id="platformGroupsRows"><tr><td colspan="5" class="students-empty">سجّل الدخول لعرض مجموعاتك.</td></tr></tbody></table></div></article>
@@ -524,6 +606,23 @@
 
 
 
+
+<div class="student-modal" id="teacherRoomReviewModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:720px">
+    <div class="student-dialog-head"><div><h3>مراجعة طلب القاعة</h3><p id="teacherRoomReviewTitle">تحديد السعر والقرار.</p></div><button class="close-modal" type="button" id="closeTeacherRoomReview">×</button></div>
+    <form class="student-form" id="teacherRoomReviewForm">
+      <input type="hidden" id="reviewRoomRequestId"><input type="hidden" id="reviewRoomRecipient">
+      <div class="form-grid">
+        <div class="form-field"><label>السعر المتفق عليه <span class="required">*</span></label><input id="reviewRoomAgreedPrice" type="number" min="0" step="0.01" required></div>
+        <div class="form-field"><label>طريقة الحساب</label><select id="reviewRoomPricing"><option value="monthly">شهري</option><option value="per_student">لكل طالب</option><option value="per_session">لكل حصة</option><option value="fixed">مبلغ ثابت</option><option value="custom">حسب الاتفاق</option></select></div>
+        <div class="form-field"><label>القرار</label><select id="reviewRoomStatus"><option value="approved">موافقة</option><option value="rejected">رفض</option></select></div>
+        <div class="form-field"><label>ملاحظة الإدارة</label><input id="reviewRoomNote"></div>
+      </div>
+      <div class="student-form-msg" id="teacherRoomReviewMsg"></div>
+      <div class="student-form-actions"><button class="secondary-action" type="button" id="cancelTeacherRoomReview">إلغاء</button><button class="save-student" type="submit">حفظ وإرسال القرار</button></div>
+    </form>
+  </div>
+</div>
 
 <div class="student-modal" id="userModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="userModalTitle" style="max-width:760px">
