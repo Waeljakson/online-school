@@ -180,6 +180,8 @@
 
   
     .attendance-status{min-width:130px}.attendance-note{min-width:170px}.reward-card{position:relative}.reward-cost{display:inline-flex;margin-top:9px;padding:5px 9px;border-radius:999px;background:#fff7d9;color:#8a6500;font-weight:800;font-size:11px}.level-badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#edf8f6;color:var(--primary);font-size:10px;font-weight:800}.reward-actions{margin-top:10px}
+
+    .direct-chat-shell{display:grid;grid-template-columns:300px 1fr;min-height:620px;padding:0;overflow:hidden}.direct-chat-contacts{border-left:1px solid #e5edf5;background:#fbfdff;min-height:620px;overflow:auto}.direct-chat-search{padding:12px;border-bottom:1px solid #e5edf5;position:sticky;top:0;background:#fbfdff;z-index:2}.direct-chat-search input{width:100%;padding:10px 12px;border:1px solid #dfe8f1;border-radius:11px;font:inherit}.direct-contact{width:100%;border:0;background:transparent;display:flex;gap:10px;align-items:center;padding:12px;text-align:right;border-bottom:1px solid #edf2f7;cursor:pointer}.direct-contact:hover,.direct-contact.active{background:#eef8f6}.direct-contact-info{min-width:0;flex:1}.direct-contact-info b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.direct-contact-info span{display:block;font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}.direct-contact-meta{display:flex;flex-direction:column;gap:5px;align-items:flex-end}.direct-unread{min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#0f766e;color:white;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center}.direct-chat-main{display:grid;grid-template-rows:auto 1fr auto;min-width:0}.direct-chat-head{padding:14px 16px;border-bottom:1px solid #e5edf5;background:white}.direct-chat-head h3{margin:0;font-size:16px}.direct-chat-head p{margin:4px 0 0;color:var(--muted);font-size:11px}.direct-chat-messages{padding:16px;overflow:auto;background:#f7fafc;height:430px}.direct-message{display:flex;gap:8px;margin-bottom:12px;align-items:flex-end}.direct-message.mine{flex-direction:row-reverse}.direct-message .direct-bubble{max-width:72%;background:white;border:1px solid #e5edf5;border-radius:14px;padding:9px 11px;box-shadow:0 2px 8px rgba(0,0,0,.03)}.direct-message.mine .direct-bubble{background:#e8f7f4;border-color:#cdece5}.direct-message .direct-meta{font-size:9px;color:var(--muted);margin-top:5px}.direct-chat-compose{padding:12px;border-top:1px solid #e5edf5;background:white}.direct-chat-compose textarea{width:100%;min-height:70px;resize:vertical;border:1px solid #dfe8f1;border-radius:12px;padding:10px;font:inherit}.direct-chat-compose-actions{display:flex;gap:8px;align-items:center;margin-top:8px}.direct-chat-compose-actions input{flex:1;min-width:0}@media(max-width:780px){.direct-chat-shell{grid-template-columns:1fr;min-height:0}.direct-chat-contacts{min-height:0;max-height:260px;border-left:0;border-bottom:1px solid #e5edf5}.direct-chat-messages{height:360px}.direct-message .direct-bubble{max-width:86%}}
 </style>
 </head>
 <body>
@@ -266,6 +268,7 @@
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
       <button data-section="mygroups" data-title="مجموعاتي والقاعات"><span class="ico">💬</span>مجموعاتي والقاعات</button>
+      <button data-section="directchat" data-title="شات الإدارة والمعلمين"><span class="ico">💬</span>شات الإدارة والمعلمين</button>
       <button data-section="mail" data-title="بريد روفين"><span class="ico">✉</span>بريد روفين</button>
       <button data-section="profile" data-title="حسابي"><span class="ico">👤</span>حسابي</button>
       <button data-section="settings" data-title="الإعدادات والصلاحيات"><span class="ico">⚙</span>الإعدادات والصلاحيات</button>
@@ -422,6 +425,34 @@
       <section class="module" id="mygroups">
         <div class="section-toolbar"><div><h2>مجموعاتي والقاعات</h2><p>الدخول إلى قاعة الحصة وشات المجموعة وتبادل الملفات.</p></div><button class="link-btn" id="refreshPlatformGroups" type="button">تحديث</button></div>
         <article class="panel"><div class="table-wrap"><table class="table"><thead><tr><th>المجموعة</th><th>المادة</th><th>المعلم</th><th>القاعة</th><th>التواصل</th></tr></thead><tbody id="platformGroupsRows"><tr><td colspan="5" class="students-empty">سجّل الدخول لعرض مجموعاتك.</td></tr></tbody></table></div></article>
+      </section>
+      <section class="module" id="directchat">
+        <div class="section-toolbar">
+          <div><h2>شات الإدارة والمعلمين</h2><p>محادثات مباشرة بين الإدارة والمعلمين مع مرفقات وحالة القراءة.</p></div>
+          <button class="link-btn" id="refreshDirectChat" type="button">تحديث</button>
+        </div>
+        <article class="panel direct-chat-shell">
+          <aside class="direct-chat-contacts">
+            <div class="direct-chat-search"><input id="directChatSearch" placeholder="بحث باسم المعلم أو الإدارة..."></div>
+            <div id="directChatContacts"><div class="students-empty">جارٍ تحميل جهات الاتصال...</div></div>
+          </aside>
+          <div class="direct-chat-main">
+            <div class="direct-chat-head" id="directChatHead">
+              <div><h3>اختر محادثة</h3><p>اختر معلمًا أو أحد أعضاء الإدارة لبدء الشات.</p></div>
+            </div>
+            <div class="direct-chat-messages" id="directChatMessages">
+              <div class="students-empty">لا توجد محادثة مفتوحة.</div>
+            </div>
+            <div class="direct-chat-compose">
+              <textarea id="directChatBody" placeholder="اكتب رسالة..." disabled></textarea>
+              <div class="direct-chat-compose-actions">
+                <input id="directChatFile" type="file" disabled>
+                <button class="primary-action" id="sendDirectChat" type="button" disabled>إرسال</button>
+              </div>
+              <div class="form-hint">يمكن إرفاق ملف حتى 3 MB.</div>
+            </div>
+          </div>
+        </article>
       </section>
       <section class="module" id="mail">
         <div class="section-toolbar"><div><h2>بريد روفين الداخلي</h2><p>رسائل خاصة وملفات بين مستخدمي المنصة.</p></div><div class="mail-toolbar"><button class="secondary-action" id="showInbox" type="button">الوارد</button><button class="secondary-action" id="showSent" type="button">المرسل</button><button class="primary-action" id="openComposeMail" type="button">＋ رسالة جديدة</button></div></div>
@@ -912,17 +943,17 @@
     const isAdmin=type==='admin';
     let allowed;
     if(type==='admin'){
-      allowed=new Set(['dashboard','students','education','attendance','rewards','finance','expenses','reports','mygroups','mail','profile','settings']);
+      allowed=new Set(['dashboard','students','education','attendance','rewards','finance','expenses','reports','mygroups','directchat','mail','profile','settings']);
     }else if(type==='staff' && role==='academic_admin'){
-      allowed=new Set(['dashboard','education','attendance','rewards','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','education','attendance','rewards','mygroups','directchat','mail','profile']);
     }else if(type==='staff' && role==='secretary'){
-      allowed=new Set(['dashboard','students','education','attendance','rewards','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','students','education','attendance','rewards','mygroups','directchat','mail','profile']);
     }else if(type==='staff' && role==='finance_admin'){
-      allowed=new Set(['dashboard','finance','expenses','reports','mail','profile']);
+      allowed=new Set(['dashboard','finance','expenses','reports','directchat','mail','profile']);
     }else if(type==='staff'){
-      allowed=new Set(['dashboard','students','finance','mail','profile']);
+      allowed=new Set(['dashboard','students','finance','directchat','mail','profile']);
     }else if(type==='teacher'){
-      allowed=new Set(['dashboard','attendance','rewards','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','attendance','rewards','mygroups','directchat','mail','profile']);
     }else if(type==='parent'){
       allowed=new Set(['dashboard','mail','profile']);
     }else{
@@ -2052,7 +2083,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
