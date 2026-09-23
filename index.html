@@ -203,6 +203,7 @@
 .exam-timer{display:inline-flex;padding:6px 10px;border-radius:999px;background:#fff3dc;color:#8a6500;font-weight:800;font-size:11px}.exam-answer-block{border:1px solid #e5edf4;border-radius:13px;padding:12px;margin-bottom:10px}.exam-answer-block h4{margin:0 0 9px;font-size:13px}.exam-answer-block label{display:block;margin:6px 0;font-size:12px}
 .room-owner-badge.managed{background:#e8f7f1;color:#137a59!important}
 .managed-room-teacher{font-size:10px;color:var(--muted);display:block;margin-top:3px}.managed-fee-chip{display:inline-flex;padding:4px 8px;border-radius:999px;background:#e8f7f1;color:#137a59;font-size:9px;font-weight:800}
+.assistant-permissions{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;padding:10px;background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px}.assistant-permissions label{font-size:11px;display:flex;gap:6px;align-items:center}.assistant-perm-chip{display:inline-flex;padding:3px 7px;border-radius:999px;background:#eef4fb;color:#35526f;font-size:9px;font-weight:800}
 </style>
 </head>
 <body>
@@ -294,6 +295,7 @@
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
       <button data-section="teacherhub" data-title="لوحة المعلم" style="display:none"><span class="ico">👨‍🏫</span>لوحة المعلم</button>
+      <button data-section="assistanthub" data-title="لوحة مساعد المعلم" style="display:none"><span class="ico">🧑‍💼</span>لوحة مساعد المعلم</button>
       <button data-section="mygroups" data-title="مجموعاتي والقاعات"><span class="ico">💬</span>مجموعاتي والقاعات</button>
       <button data-section="directchat" data-title="شات الإدارة والمعلمين"><span class="ico">💬</span>شات الإدارة والمعلمين</button>
       <button data-section="mail" data-title="بريد روفين"><span class="ico">✉</span>بريد روفين</button>
@@ -393,6 +395,11 @@
             <tbody id="teacherRoomAdminRows"><tr><td colspan="7" class="students-empty">لا توجد طلبات معروضة.</td></tr>
           </table></div>
         </article>
+        <article class="panel" id="teacherAssistantRequestsPanel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>طلبات مساعدي المعلمين</h3><p>إنشاء حساب مساعد خاص لا يحمل صلاحيات سكرتير المدرسة.</p></div><button class="link-btn" id="refreshTeacherAssistantRequests" type="button">تحديث</button></div>
+          <div class="table-wrap"><table class="table" style="min-width:900px"><thead><tr><th>المعلم</th><th>المساعد</th><th>القاعات</th><th>الصلاحيات</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="teacherAssistantRequestsRows"><tr><td colspan="6" class="students-empty">لا توجد طلبات.</td></tr></tbody></table></div>
+        </article>
+
         <article class="panel" id="managedTeacherRoomsPanel" style="margin-top:15px">
           <div class="panel-head"><div><h3>قاعات خاصة تديرها ROVEN</h3><p>القاعات التي اختار المعلم إسناد الحضور والتحصيل والمتابعة فيها للمنصة.</p></div><button class="link-btn" id="refreshManagedTeacherRooms" type="button">تحديث</button></div>
           <div class="table-wrap"><table class="table" style="min-width:850px">
@@ -627,6 +634,26 @@
           </div>
         </article>
 
+        <article class="panel" id="teacherAssistantsPanel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>مساعدي / سكرتيري الخاص</h3><p>مساعد خاص بالمعلم فقط، لا يملك صلاحيات على طلاب ROVEN أو قاعات المدرسة.</p></div><span>🧑‍💼</span></div>
+          <div class="teacher-private-note">المساعد لا يُنشأ كـ«سكرتير مدرسة». أنت تحدد له القاعات الخاصة والصلاحيات، والإدارة تعتمد إنشاء الحساب.</div>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="form-field"><label>الإدارة التي تنشئ الحساب</label><select id="assistantRequestAdmin"><option value="">اختر الإدارة</option></select></div>
+            <div class="form-field"><label>اسم المساعد</label><input id="assistantRequestName"></div>
+            <div class="form-field"><label>البريد الإلكتروني</label><input id="assistantRequestEmail" type="email" placeholder="assistant@example.com"></div>
+            <div class="form-field"><label>القاعات الخاصة</label><select id="assistantRequestGroups" multiple size="4"></select></div>
+          </div>
+          <div class="assistant-permissions">
+            <label><input id="assistantPermStudents" type="checkbox" checked> إدارة الطلاب الخاصين</label>
+            <label><input id="assistantPermAttendance" type="checkbox" checked> تسجيل الحضور</label>
+            <label><input id="assistantPermCollections" type="checkbox"> تسجيل التحصيل</label>
+            <label><input id="assistantPermChat" type="checkbox" checked> متابعة التواصل</label>
+          </div>
+          <div class="student-form-msg" id="assistantRequestMsg"></div>
+          <button class="primary-action" id="sendAssistantRequest" type="button" style="margin-top:10px">طلب إنشاء حساب المساعد</button>
+          <div class="table-wrap" style="margin-top:14px"><table class="table"><thead><tr><th>المساعد</th><th>القاعات</th><th>الصلاحيات</th><th>الحالة</th><th>بيانات الدخول</th></tr></thead><tbody id="teacherAssistantsRows"><tr><td colspan="5" class="students-empty">لا يوجد مساعدين.</td></tr></tbody></table></div>
+        </article>
+
         <div class="grid teacher-hub-grid" style="margin-top:15px">
           <article class="panel">
             <div class="panel-head"><div><h3>طلب فتح قاعة خاصة</h3><p>ارسل الطلب للإدارة وحدد السعر المقترح، والإدارة تعتمد السعر قبل إنشاء القاعة.</p></div><span>＋🏫</span></div>
@@ -673,6 +700,19 @@
             <div class="table-wrap"><table class="table" style="min-width:620px"><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody id="teacherFinanceRows"><tr><td colspan="5" class="students-empty">لا توجد حركات مالية بعد.</td></tr></tbody></table></div>
           </article>
         </div>
+      </section>
+
+      <section class="module" id="assistanthub">
+        <div class="teacher-hero">
+          <div><span class="teacher-kicker">ROVEN Private Assistant</span><h2 id="assistantHubName">لوحة مساعد المعلم</h2><p id="assistantHubOwner">إدارة القاعات الخاصة المسندة لك فقط.</p></div>
+          <div class="teacher-hero-code"><span>نوع الحساب</span><b>مساعد معلم</b></div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="stat-head"><span>القاعات المسندة</span><span class="stat-icon">🏫</span></div><div class="value" id="assistantGroupsCount">0</div><div class="sub">قاعات خاصة فقط</div></div>
+          <div class="stat"><div class="stat-head"><span>الطلاب الخاصون</span><span class="stat-icon">👥</span></div><div class="value" id="assistantStudentsCount">0</div><div class="sub">ضمن القاعات المسندة</div></div>
+          <div class="stat"><div class="stat-head"><span>المحصل هذا الشهر</span><span class="stat-icon">💰</span></div><div class="value" id="assistantCollectedMonth">0.00</div><div class="sub">إذا كانت صلاحية التحصيل مفعلة</div></div>
+        </div>
+        <article class="panel"><div class="panel-head"><div><h3>القاعات المسندة لي</h3><p>لا تظهر هنا أي قاعة أو طالب تابع للمدرسة.</p></div><button class="link-btn" id="refreshAssistantHub" type="button">تحديث</button></div><div id="assistantGroupsList"><div class="students-empty">جارٍ التحميل...</div></div></article>
       </section>
 
       <section class="module" id="mygroups">
