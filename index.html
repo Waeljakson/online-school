@@ -273,7 +273,7 @@
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
-      <button data-section="teacherhub" data-title="لوحة المعلم"><span class="ico">👨‍🏫</span>لوحة المعلم</button>
+      <button data-section="teacherhub" data-title="لوحة المعلم" style="display:none"><span class="ico">👨‍🏫</span>لوحة المعلم</button>
       <button data-section="mygroups" data-title="مجموعاتي والقاعات"><span class="ico">💬</span>مجموعاتي والقاعات</button>
       <button data-section="directchat" data-title="شات الإدارة والمعلمين"><span class="ico">💬</span>شات الإدارة والمعلمين</button>
       <button data-section="mail" data-title="بريد روفين"><span class="ico">✉</span>بريد روفين</button>
@@ -1105,7 +1105,7 @@
     }else if(type==='staff'){
       allowed=new Set(['dashboard','students','finance','directchat','mail','profile']);
     }else if(type==='teacher'){
-      allowed=new Set(['dashboard','attendance','rewards','mygroups','directchat','mail','profile']);
+      allowed=new Set(['teacherhub','attendance','rewards','mygroups','directchat','mail','profile']);
     }else if(type==='parent'){
       allowed=new Set(['dashboard','mail','profile']);
     }else{
@@ -1125,6 +1125,10 @@
         <div class="portal-card"><h3>✉ بريد روفين</h3><p>رسائل خاصة وملفات بين مستخدمي المنصة.</p></div>
         <div class="portal-card"><h3>👤 حسابي</h3><p>${escapeHtml(data?.internal_email||'')} — الصورة الشخصية وتغيير كلمة المرور.</p></div>
       </div>`;
+    if(type==='teacher'){
+      setTimeout(()=>switchTo('teacherhub','لوحة المعلم'),80);
+    }
+
   };
 
   const dataApiFetch=async(path,options={})=>{
@@ -1895,6 +1899,16 @@
       const r=await dataApiFetch('/rpc/platform_save_attendance',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:date,p_records:records})});
       msg.textContent=`تم حفظ حضور ${Number(r?.saved||0)} طالب — حاضر ${Number(r?.present||0)}، غائب ${Number(r?.absent||0)}، متأخر ${Number(r?.late||0)}.`;
       msg.className='student-form-msg success show';
+      try{
+        const ctx=await hydratePlatformContext();
+        if(ctx?.account_type==='teacher' && ctx?.internal_email){
+          await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+            p_recipient:ctx.internal_email,
+            p_subject:'[TAUGHT_LESSON] '+groupId+'|'+date,
+            p_body:JSON.stringify({group_id:groupId,date,saved:Number(r?.saved||0),recorded_at:new Date().toISOString()})
+          })});
+        }
+      }catch{}
     }catch(err){msg.textContent=err.message||'تعذر حفظ الحضور';msg.className='student-form-msg error show'}
     finally{btn.disabled=false;btn.textContent='حفظ الحضور'}
   });
@@ -2272,8 +2286,12 @@
     tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل البريد...</td></tr>';
     try{
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
-      tbody.innerHTML=data.map(m=>{
+      const visible=(Array.isArray(data)?data:[]).filter(m=>{
+        const s=String(m.subject||'');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]');
+      });
+      if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
+      tbody.innerHTML=visible.map(m=>{
         const person=folder==='sent'?(m.recipient_name+' • '+m.recipient_email):(m.sender_name+' • '+m.sender_email);
         const unread=folder!=='sent'&&!m.read_at;
         return `<tr class="mail-row ${unread?'unread':''}" data-message-id="${escapeHtml(m.message_id||'')}" data-unread="${unread?'1':'0'}">
@@ -2523,7 +2541,10 @@
       // Internal mail unread.
       try{
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
-        (inbox||[]).filter(m=>!m.read_at).slice(0,20).forEach(m=>{
+        (inbox||[]).filter(m=>{
+          const s=String(m.subject||'');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]');
+        }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
             title:'بريد جديد من '+(m.sender_name||'مستخدم'),
@@ -2636,7 +2657,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
