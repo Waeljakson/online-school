@@ -999,7 +999,12 @@
 
     throw new Error('هذه العملية غير مدعومة في الاتصال الحالي.');
   };
-  const openDashboard=()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)};
+  const openDashboard=()=>{
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('mainApp').classList.remove('is-hidden');
+    window.scrollTo(0,0);
+    setTimeout(()=>{try{refreshNotifications(true)}catch{}},700);
+  };
   const token=new URLSearchParams(location.search).get('token');
   const resetError=new URLSearchParams(location.search).get('error');
   if(token){
