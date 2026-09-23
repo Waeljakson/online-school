@@ -1346,6 +1346,7 @@
   document.getElementById('ntSalaryType').addEventListener('change',e=>{document.getElementById('ntSalaryAmountLabel').textContent=salaryLabels[e.target.value]||'قيمة المرتب';});
 
   const salaryText=t=>{
+    if(t.salary_type==null&&t.base_salary==null&&t.rate_value==null)return '—';
     const type=t.salary_type||'monthly',base=Number(t.base_salary||0),rate=Number(t.rate_value||0);
     if(type==='monthly') return base.toFixed(2)+' ج / شهر';
     if(type==='per_lesson') return rate.toFixed(2)+' ج / حصة';
@@ -1631,6 +1632,210 @@
     }finally{btn.disabled=false;btn.textContent='حفظ التعديلات'}
   });
 
+  // ===== Attendance + rewards =====
+  const hydratePlatformContext=async()=>{
+    try{
+      const p=await dataApiFetch('/rpc/platform_my_profile',{method:'POST',body:'{}'});
+      currentPlatformAccount={...(currentPlatformAccount||{}),...(p||{})};
+      return currentPlatformAccount;
+    }catch{return currentPlatformAccount}
+  };
+
+  const attendanceStatusLabel={present:'حاضر',absent:'غائب',late:'متأخر',excused:'بعذر',left_early:'غادر مبكرًا'};
+  const attendanceStatusOptions=status=>Object.entries(attendanceStatusLabel).map(([v,l])=>`<option value="${v}" ${status===v?'selected':''}>${l}</option>`).join('');
+
+  const loadAttendanceGroups=async()=>{
+    const select=document.getElementById('attendanceGroup');
+    const pointsSelect=document.getElementById('pointsGroup');
+    if(select)select.innerHTML='<option value="">جارٍ التحميل...</option>';
+    if(pointsSelect)pointsSelect.innerHTML='<option value="">جارٍ التحميل...</option>';
+    try{
+      await hydratePlatformContext();
+      const data=await dataApiFetch('/rpc/platform_attendance_groups',{method:'POST',body:'{}'});
+      const options='<option value="">اختر المجموعة</option>'+((data||[]).map(g=>`<option value="${escapeHtml(g.group_id)}">${escapeHtml(g.group_name)} — ${escapeHtml(g.teacher_name||'')}${g.grade_name?' — '+escapeHtml(g.grade_name):''}</option>`).join(''));
+      if(select)select.innerHTML=options;
+      if(pointsSelect)pointsSelect.innerHTML=options;
+      return Array.isArray(data)?data:[];
+    }catch(err){
+      if(select)select.innerHTML='<option value="">لا توجد مجموعات متاحة</option>';
+      if(pointsSelect)pointsSelect.innerHTML='<option value="">لا توجد مجموعات متاحة</option>';
+      return [];
+    }
+  };
+
+  const loadAttendanceRoster=async()=>{
+    const groupId=document.getElementById('attendanceGroup').value;
+    const date=document.getElementById('attendanceDate').value;
+    const tbody=document.getElementById('attendanceRows');
+    const msg=document.getElementById('attendanceMsg');
+    msg.className='student-form-msg';
+    if(!groupId||!date){msg.textContent='اختر المجموعة والتاريخ أولًا.';msg.className='student-form-msg error show';return}
+    tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:date})});
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا يوجد طلاب في هذه المجموعة.</td></tr>';return}
+      tbody.innerHTML=data.map(s=>`<tr data-student-id="${escapeHtml(s.student_id)}">
+        <td><b>${escapeHtml(s.student_name)}</b><br><span style="font-size:10px;color:var(--muted)">${escapeHtml(s.student_no||'')}</span></td>
+        <td><select class="attendance-status">${attendanceStatusOptions(s.status||'present')}</select></td>
+        <td><input class="attendance-late" type="number" min="0" value="${Number(s.minutes_late||0)}" style="width:90px"></td>
+        <td><input class="attendance-note" value="${escapeHtml(s.note||'')}" placeholder="اختياري"></td>
+      </tr>`).join('');
+    }catch(err){tbody.innerHTML='<tr><td colspan="4" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الحضور')+'</td></tr>'}
+  };
+
+  document.getElementById('attendanceDate').value=new Date().toISOString().slice(0,10);
+  document.getElementById('refreshAttendanceGroups').addEventListener('click',loadAttendanceGroups);
+  document.getElementById('loadAttendance').addEventListener('click',loadAttendanceRoster);
+  document.getElementById('attendanceGroup').addEventListener('change',()=>{document.getElementById('attendanceRows').innerHTML='<tr><td colspan="4" class="students-empty">اضغط «عرض الطلاب».</td></tr>'});
+  document.getElementById('markAllPresent').addEventListener('click',()=>{
+    document.querySelectorAll('#attendanceRows .attendance-status').forEach(x=>x.value='present');
+    document.querySelectorAll('#attendanceRows .attendance-late').forEach(x=>x.value='0');
+  });
+  document.getElementById('saveAttendance').addEventListener('click',async()=>{
+    const groupId=document.getElementById('attendanceGroup').value,date=document.getElementById('attendanceDate').value;
+    const msg=document.getElementById('attendanceMsg');
+    if(!groupId||!date){msg.textContent='اختر المجموعة والتاريخ.';msg.className='student-form-msg error show';return}
+    const records=[...document.querySelectorAll('#attendanceRows tr[data-student-id]')].map(tr=>({
+      student_id:tr.dataset.studentId,
+      status:tr.querySelector('.attendance-status').value,
+      minutes_late:Number(tr.querySelector('.attendance-late').value)||0,
+      note:tr.querySelector('.attendance-note').value.trim()||null
+    }));
+    if(!records.length){msg.textContent='لا توجد بيانات حضور للحفظ.';msg.className='student-form-msg error show';return}
+    const btn=document.getElementById('saveAttendance');btn.disabled=true;btn.textContent='جارٍ الحفظ...';
+    try{
+      const r=await dataApiFetch('/rpc/platform_save_attendance',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:date,p_records:records})});
+      msg.textContent=`تم حفظ حضور ${Number(r?.saved||0)} طالب — حاضر ${Number(r?.present||0)}، غائب ${Number(r?.absent||0)}، متأخر ${Number(r?.late||0)}.`;
+      msg.className='student-form-msg success show';
+    }catch(err){msg.textContent=err.message||'تعذر حفظ الحضور';msg.className='student-form-msg error show'}
+    finally{btn.disabled=false;btn.textContent='حفظ الحضور'}
+  });
+
+  const rewardLevelIcon=level=>({ماسي:'💎',ذهبي:'🥇',فضي:'🥈',برونزي:'🥉',مبتدئ:'⭐'}[level]||'⭐');
+
+  const loadPointStudents=async()=>{
+    const groupId=document.getElementById('pointsGroup').value;
+    const studentSelect=document.getElementById('pointsStudent');
+    studentSelect.innerHTML='<option value="">جارٍ التحميل...</option>';
+    if(!groupId){studentSelect.innerHTML='<option value="">اختر المجموعة أولًا</option>';return}
+    try{
+      const data=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})});
+      studentSelect.innerHTML='<option value="">اختر الطالب</option>'+((data||[]).map(s=>`<option value="${escapeHtml(s.student_id)}">${escapeHtml(s.student_name)} — ${escapeHtml(s.student_no||'')}</option>`).join(''));
+    }catch(err){studentSelect.innerHTML='<option value="">تعذر تحميل الطلاب</option>'}
+  };
+  document.getElementById('pointsGroup').addEventListener('change',loadPointStudents);
+
+  const renderRedemptions=rows=>{
+    const tbody=document.getElementById('redemptionRows');
+    if(!Array.isArray(rows)||!rows.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد طلبات استبدال.</td></tr>';return}
+    const statusLabel={requested:'مطلوب',approved:'تمت الموافقة',delivered:'تم التسليم',rejected:'مرفوض'};
+    tbody.innerHTML=rows.map(r=>`<tr data-redemption-id="${escapeHtml(r.redemption_id)}">
+      <td>${escapeHtml(r.student_name)}</td><td>${escapeHtml(r.reward_title)}</td><td><b>${Number(r.points_cost||0)}</b></td>
+      <td><span class="status ${r.status==='rejected'?'watch':'active'}">${escapeHtml(statusLabel[r.status]||r.status)}</span></td>
+      <td><select class="redemption-status"><option value="requested" ${r.status==='requested'?'selected':''}>مطلوب</option><option value="approved" ${r.status==='approved'?'selected':''}>موافقة</option><option value="delivered" ${r.status==='delivered'?'selected':''}>تم التسليم</option><option value="rejected" ${r.status==='rejected'?'selected':''}>رفض</option></select></td>
+    </tr>`).join('');
+  };
+
+  document.getElementById('redemptionRows').addEventListener('change',async e=>{
+    const sel=e.target.closest('.redemption-status');if(!sel)return;
+    const tr=sel.closest('tr'),id=tr.dataset.redemptionId;
+    try{
+      await dataApiFetch('/rpc/platform_reward_update_status',{method:'POST',body:JSON.stringify({p_redemption_id:id,p_status:sel.value})});
+      await loadRewards();
+    }catch(err){alert(err.message||'تعذر تحديث الطلب')}
+  });
+
+  const loadRewards=async()=>{
+    const ctx=await hydratePlatformContext();
+    const isStudent=String(ctx?.account_type||'')==='student';
+    const role=String(ctx?.role||'');
+    const canIssue=['admin','teacher'].includes(String(ctx?.account_type||'')) || (ctx?.account_type==='staff'&&['academic_admin','secretary'].includes(role));
+    document.getElementById('issuePointsPanel').style.display=canIssue?'':'none';
+
+    const [leader,catalog,summary,groups,redemptions]=await Promise.allSettled([
+      dataApiFetch('/rpc/platform_points_leaderboard',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/platform_reward_catalog_list',{method:'POST',body:'{}'}),
+      isStudent?dataApiFetch('/rpc/platform_student_points_summary',{method:'POST',body:'{}'}):Promise.resolve(null),
+      canIssue?loadAttendanceGroups():Promise.resolve([]),
+      dataApiFetch('/rpc/platform_reward_redemptions_admin',{method:'POST',body:'{}'})
+    ]);
+
+    const leaders=leader.status==='fulfilled'&&Array.isArray(leader.value)?leader.value:[];
+    document.getElementById('leaderboardRows').innerHTML=leaders.length?leaders.map((x,i)=>`<tr><td><b>${i+1}</b></td><td>${escapeHtml(x.student_name)}</td><td>${escapeHtml(x.grade_name||'—')}</td><td><b>${Number(x.points||0)}</b></td><td><span class="level-badge">${rewardLevelIcon(x.level)} ${escapeHtml(x.level)}</span></td></tr>`).join(''):'<tr><td colspan="5" class="students-empty">لا توجد نقاط مسجلة بعد.</td></tr>';
+    if(leaders[0]){document.getElementById('topStudentPoints').textContent=String(leaders[0].points||0)+' نقطة';document.getElementById('topStudentName').textContent=leaders[0].student_name||'—'}
+
+    if(summary.status==='fulfilled'&&summary.value){
+      document.getElementById('myPointsBalance').textContent=String(summary.value.balance||0);
+      document.getElementById('myPointsLevel').textContent=rewardLevelIcon(summary.value.level)+' '+(summary.value.level||'مبتدئ');
+    }else{
+      document.getElementById('myPointsBalance').textContent='—';
+      document.getElementById('myPointsLevel').textContent=isStudent?'لا توجد نقاط بعد':'لوحة تحفيز الطلاب';
+    }
+
+    const rewards=catalog.status==='fulfilled'&&Array.isArray(catalog.value)?catalog.value:[];
+    const cards=document.getElementById('rewardCards');
+    cards.innerHTML=rewards.length?rewards.map(r=>`<div class="feature reward-card">
+      <b>🎁 ${escapeHtml(r.title)}</b><span>${escapeHtml(r.description||'مكافأة من ROVEN')}</span>
+      <div class="reward-cost">${Number(r.points_cost||0)} نقطة</div>
+      ${r.stock!==null?'<div style="font-size:10px;color:var(--muted);margin-top:5px">المتاح: '+Number(r.stock)+'</div>':''}
+      ${isStudent?`<div class="reward-actions"><button class="secondary-action redeem-reward-btn" data-reward-id="${escapeHtml(r.reward_id)}" type="button">استبدال</button></div>`:''}
+    </div>`).join(''):'<div class="feature"><b>لا توجد مكافآت متاحة.</b></div>';
+
+    const canManageRewards=ctx?.account_type==='admin'||(ctx?.account_type==='staff'&&role==='academic_admin');
+    const canHandle=redemptions.status==='fulfilled';
+    document.getElementById('rewardAdminPanel').style.display=(canManageRewards||canHandle)?'':'none';
+    document.getElementById('createRewardBtn').style.display=canManageRewards?'':'none';
+    ['newRewardTitle','newRewardCost','newRewardStock','newRewardDescription'].forEach(id=>{document.getElementById(id).disabled=!canManageRewards});
+    renderRedemptions(canHandle?redemptions.value:[]);
+  };
+
+  document.getElementById('refreshRewards').addEventListener('click',loadRewards);
+  document.getElementById('issuePointsBtn').addEventListener('click',async()=>{
+    const msg=document.getElementById('pointsMsg');
+    const payload={
+      p_group_id:document.getElementById('pointsGroup').value||null,
+      p_student_id:document.getElementById('pointsStudent').value,
+      p_points:Number(document.getElementById('pointsAmount').value)||0,
+      p_reason:document.getElementById('pointsReason').value.trim(),
+      p_category:document.getElementById('pointsCategory').value
+    };
+    if(!payload.p_student_id||!payload.p_points||!payload.p_reason){msg.textContent='اختر الطالب واكتب عدد النقاط والسبب.';msg.className='student-form-msg error show';return}
+    try{
+      const r=await dataApiFetch('/rpc/platform_issue_points',{method:'POST',body:JSON.stringify(payload)});
+      msg.textContent=`تمت إضافة ${payload.p_points} نقطة. رصيد الطالب الآن ${Number(r?.balance||0)} نقطة.`;
+      msg.className='student-form-msg success show';
+      document.getElementById('pointsReason').value='';
+      await loadRewards();
+    }catch(err){msg.textContent=err.message||'تعذر إضافة النقاط';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('rewardCards').addEventListener('click',async e=>{
+    const btn=e.target.closest('.redeem-reward-btn');if(!btn)return;
+    if(!confirm('تأكيد استبدال هذه المكافأة بالنقاط؟'))return;
+    btn.disabled=true;
+    try{
+      const r=await dataApiFetch('/rpc/platform_redeem_reward',{method:'POST',body:JSON.stringify({p_reward_id:btn.dataset.rewardId})});
+      alert('تم طلب المكافأة بنجاح. رصيدك الحالي '+Number(r?.balance||0)+' نقطة.');
+      await loadRewards();
+    }catch(err){
+      const m=String(err.message||'');
+      alert(m.includes('not_enough_points')?'رصيد النقاط غير كافٍ.':(m.includes('reward_out_of_stock')?'المكافأة غير متاحة حاليًا.':m));
+    }finally{btn.disabled=false}
+  });
+
+  document.getElementById('createRewardBtn').addEventListener('click',async()=>{
+    const title=document.getElementById('newRewardTitle').value.trim(),cost=Number(document.getElementById('newRewardCost').value)||0;
+    if(!title||cost<=0){alert('اكتب اسم المكافأة وتكلفة النقاط.');return}
+    try{
+      await dataApiFetch('/rpc/platform_reward_create_admin',{method:'POST',body:JSON.stringify({
+        p_title:title,p_points_cost:cost,p_description:document.getElementById('newRewardDescription').value.trim()||null,
+        p_stock:document.getElementById('newRewardStock').value||null
+      })});
+      document.getElementById('newRewardTitle').value='';document.getElementById('newRewardDescription').value='';document.getElementById('newRewardStock').value='';
+      await loadRewards();
+    }catch(err){alert(err.message||'تعذر إضافة المكافأة')}
+  });
+
   // ===== ROVEN communications, rooms and personal profile =====
   const fileToBase64=file=>new Promise((resolve,reject)=>{
     if(!file){resolve({name:null,mime:null,base64:null});return}
@@ -1847,7 +2052,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();}if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
