@@ -1882,6 +1882,142 @@
     return `<a class="file-pill" download="${safeName}" href="data:${safeMime};base64,${b64}">📎 ${safeName}</a>`;
   };
 
+  let directChatContactsCache=[];
+  let currentDirectPeerId=null;
+
+  const directRoleLabel=c=>{
+    if(c.account_type==='teacher')return 'معلم';
+    const labels={super_admin:'مدير نظام',school_manager:'مدير',academic_admin:'مشرف أكاديمي',secretary:'سكرتير',reception:'طاقم إداري',finance_admin:'مسؤول مالي'};
+    return labels[c.role]||'إدارة';
+  };
+
+  const renderDirectChatContacts=()=>{
+    const box=document.getElementById('directChatContacts');
+    const q=String(document.getElementById('directChatSearch').value||'').trim().toLowerCase();
+    const rows=directChatContactsCache.filter(c=>{
+      if(!q)return true;
+      return [c.display_name,c.account_code,c.internal_email,directRoleLabel(c)].some(v=>String(v||'').toLowerCase().includes(q));
+    });
+    if(!rows.length){box.innerHTML='<div class="students-empty">لا توجد جهات اتصال مطابقة.</div>';return}
+    box.innerHTML=rows.map(c=>`<button class="direct-contact ${String(c.account_id)===String(currentDirectPeerId)?'active':''}" type="button" data-peer-id="${escapeHtml(c.account_id)}">
+      ${c.profile_photo?`<img class="platform-avatar" src="${escapeHtml(c.profile_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((c.display_name||'?')[0])}</span>`}
+      <span class="direct-contact-info">
+        <b>${escapeHtml(c.display_name||'مستخدم')}</b>
+        <span>${escapeHtml(directRoleLabel(c))} • ${escapeHtml(c.last_message||c.internal_email||c.account_code||'')}</span>
+      </span>
+      <span class="direct-contact-meta">
+        ${Number(c.unread_count||0)>0?`<span class="direct-unread">${Number(c.unread_count)}</span>`:''}
+        <small style="font-size:9px;color:var(--muted)">${c.last_at?escapeHtml(new Date(c.last_at).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})):''}</small>
+      </span>
+    </button>`).join('');
+  };
+
+  const loadDirectChatContacts=async(silent=false)=>{
+    const box=document.getElementById('directChatContacts');
+    if(!silent)box.innerHTML='<div class="students-empty">جارٍ تحميل جهات الاتصال...</div>';
+    try{
+      await hydratePlatformContext();
+      const data=await dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'});
+      directChatContactsCache=Array.isArray(data)?data:[];
+      renderDirectChatContacts();
+      if(!currentDirectPeerId && directChatContactsCache.length){
+        await openDirectChatPeer(directChatContactsCache[0].account_id);
+      }
+    }catch(err){
+      if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل جهات الاتصال')+'</div>';
+    }
+  };
+
+  const loadDirectChatMessages=async(silent=false)=>{
+    if(!currentDirectPeerId)return;
+    const box=document.getElementById('directChatMessages');
+    if(!silent)box.innerHTML='<div class="students-empty">جارٍ تحميل المحادثة...</div>';
+    try{
+      const data=await dataApiFetch('/rpc/platform_direct_chat_list',{method:'POST',body:JSON.stringify({p_peer_id:currentDirectPeerId})});
+      const rows=Array.isArray(data)?data:[];
+      if(!rows.length){box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';return}
+      const me=String(currentPlatformAccount?.account_id||'');
+      box.innerHTML=rows.map(m=>{
+        const mine=String(m.sender_account_id)===me;
+        return `<div class="direct-message ${mine?'mine':''}">
+          ${m.sender_photo?`<img class="platform-avatar" src="${escapeHtml(m.sender_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((m.sender_name||'?')[0])}</span>`}
+          <div class="direct-bubble">
+            ${m.body?`<div>${escapeHtml(m.body)}</div>`:''}
+            ${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):''}
+            <div class="direct-meta">${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}${mine&&m.read_at?' • تمت القراءة':''}</div>
+          </div>
+        </div>`;
+      }).join('');
+      box.scrollTop=box.scrollHeight;
+      const contact=directChatContactsCache.find(c=>String(c.account_id)===String(currentDirectPeerId));
+      if(contact)contact.unread_count=0;
+      renderDirectChatContacts();
+    }catch(err){
+      if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المحادثة')+'</div>';
+    }
+  };
+
+  const openDirectChatPeer=async peerId=>{
+    currentDirectPeerId=peerId;
+    const peer=directChatContactsCache.find(c=>String(c.account_id)===String(peerId));
+    renderDirectChatContacts();
+    const head=document.getElementById('directChatHead');
+    head.innerHTML=peer?`<div style="display:flex;gap:10px;align-items:center">
+      ${peer.profile_photo?`<img class="platform-avatar" src="${escapeHtml(peer.profile_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((peer.display_name||'?')[0])}</span>`}
+      <div><h3>${escapeHtml(peer.display_name||'مستخدم')}</h3><p>${escapeHtml(directRoleLabel(peer))} • ${escapeHtml(peer.internal_email||peer.account_code||'')}</p></div>
+    </div>`:'<div><h3>محادثة</h3></div>';
+    document.getElementById('directChatBody').disabled=false;
+    document.getElementById('directChatFile').disabled=false;
+    document.getElementById('sendDirectChat').disabled=false;
+    await loadDirectChatMessages();
+  };
+
+  document.getElementById('directChatContacts').addEventListener('click',e=>{
+    const btn=e.target.closest('.direct-contact');
+    if(btn)openDirectChatPeer(btn.dataset.peerId);
+  });
+  document.getElementById('directChatSearch').addEventListener('input',renderDirectChatContacts);
+  document.getElementById('refreshDirectChat').addEventListener('click',async()=>{
+    await loadDirectChatContacts();
+    await loadDirectChatMessages();
+  });
+
+  const sendDirectChatMessage=async()=>{
+    if(!currentDirectPeerId)return;
+    const body=document.getElementById('directChatBody').value.trim();
+    const input=document.getElementById('directChatFile');
+    const btn=document.getElementById('sendDirectChat');
+    try{
+      const file=await fileToBase64(input.files?.[0]||null);
+      if(!body&&!file.base64){return}
+      btn.disabled=true;btn.textContent='جارٍ الإرسال...';
+      await dataApiFetch('/rpc/platform_direct_chat_send',{method:'POST',body:JSON.stringify({
+        p_peer_id:currentDirectPeerId,
+        p_body:body,
+        p_attachment_name:file.name,
+        p_attachment_mime:file.mime,
+        p_attachment_base64:file.base64
+      })});
+      document.getElementById('directChatBody').value='';
+      input.value='';
+      await loadDirectChatMessages();
+      await loadDirectChatContacts(true);
+    }catch(err){alert(err.message||'تعذر إرسال الرسالة')}
+    finally{btn.disabled=false;btn.textContent='إرسال'}
+  };
+  document.getElementById('sendDirectChat').addEventListener('click',sendDirectChatMessage);
+  document.getElementById('directChatBody').addEventListener('keydown',e=>{
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendDirectChatMessage()}
+  });
+
+  setInterval(()=>{
+    const mod=document.getElementById('directchat');
+    if(mod&&mod.classList.contains('active')){
+      loadDirectChatContacts(true);
+      if(currentDirectPeerId)loadDirectChatMessages(true);
+    }
+  },7000);
+
   let currentRoomGroupId=null;
   const groupRoomModal=document.getElementById('groupRoomModal');
   const closeGroupRoom=()=>{groupRoomModal.classList.remove('show');groupRoomModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
