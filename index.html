@@ -2779,6 +2779,170 @@
     })});
   };
 
+  const teacherPrivatePaymentModal=document.getElementById('teacherPrivatePaymentModal');
+  const privatePaymentMsg=document.getElementById('privatePaymentMsg');
+
+  const closeTeacherPrivatePaymentModal=()=>{
+    teacherPrivatePaymentModal.classList.remove('show');
+    teacherPrivatePaymentModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+
+  const openTeacherPrivatePaymentModal=student=>{
+    if(!student)return;
+    document.getElementById('privatePaymentStudentId').value=student.private_student_id||'';
+    document.getElementById('teacherPrivatePaymentTitle').textContent='تحصيل من '+(student.full_name||'الطالب');
+    const monthKey=privateMonthKey();
+    const paid=privatePaymentsForStudent(student.private_student_id,monthKey);
+    const fee=Math.max(0,Number(student.monthly_fee||0));
+    const remaining=Math.max(0,fee-paid);
+    document.getElementById('teacherPrivatePaymentSub').textContent='رسوم الشهر: '+fee.toFixed(2)+' • محصل: '+paid.toFixed(2)+' • متبقي: '+remaining.toFixed(2);
+    document.getElementById('privatePaymentAmount').value=remaining>0?remaining.toFixed(2):'';
+    document.getElementById('privatePaymentDate').value=new Date().toISOString().slice(0,10);
+    document.getElementById('privatePaymentMethod').value='cash';
+    document.getElementById('privatePaymentNote').value='';
+    privatePaymentMsg.className='student-form-msg';
+    privatePaymentMsg.textContent='';
+    teacherPrivatePaymentModal.classList.add('show');
+    teacherPrivatePaymentModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  };
+
+  document.getElementById('closeTeacherPrivatePaymentModal').addEventListener('click',closeTeacherPrivatePaymentModal);
+  document.getElementById('cancelTeacherPrivatePayment').addEventListener('click',closeTeacherPrivatePaymentModal);
+  teacherPrivatePaymentModal.addEventListener('click',e=>{if(e.target===teacherPrivatePaymentModal)closeTeacherPrivatePaymentModal()});
+
+  const privateStudentPaymentHandler=e=>{
+    const btn=e.target.closest('.collect-private-payment');
+    if(!btn)return;
+    const student=teacherPrivateStudentsCache.find(s=>String(s.private_student_id)===String(btn.dataset.privateStudentId));
+    if(student)openTeacherPrivatePaymentModal(student);
+  };
+
+  document.getElementById('teacherPrivateStudentsRows').addEventListener('click',privateStudentPaymentHandler);
+  document.getElementById('teacherPrivateRoomRows').addEventListener('click',privateStudentPaymentHandler);
+
+  document.getElementById('teacherPrivatePaymentForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const ctx=await hydratePlatformContext();
+    const student=teacherPrivateStudentsCache.find(s=>String(s.private_student_id)===String(document.getElementById('privatePaymentStudentId').value));
+    if(ctx?.account_type!=='teacher'||!ctx?.internal_email||!student){
+      privatePaymentMsg.textContent='تعذر تحديد حساب المعلم أو الطالب.';
+      privatePaymentMsg.className='student-form-msg error show';
+      return;
+    }
+    const amount=Number(document.getElementById('privatePaymentAmount').value)||0;
+    const date=document.getElementById('privatePaymentDate').value||new Date().toISOString().slice(0,10);
+    const method=document.getElementById('privatePaymentMethod').value;
+    const note=document.getElementById('privatePaymentNote').value.trim()||null;
+    if(amount<=0){
+      privatePaymentMsg.textContent='أدخل مبلغًا صحيحًا.';
+      privatePaymentMsg.className='student-form-msg error show';
+      return;
+    }
+    const payment={
+      payment_id:'PP-'+Date.now().toString(36).toUpperCase(),
+      private_student_id:student.private_student_id,
+      private_code:student.private_code,
+      student_name:student.full_name,
+      group_id:student.group_id,
+      group_name:student.group_name,
+      amount,date,method,note,
+      created_at:new Date().toISOString()
+    };
+    try{
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:ctx.internal_email,
+        p_subject:'[PRIVATE_PAYMENT] '+payment.payment_id,
+        p_body:JSON.stringify(payment)
+      })});
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:ctx.internal_email,
+        p_subject:'[TEACHER_FINANCE] '+payment.payment_id,
+        p_body:JSON.stringify({
+          entry_id:payment.payment_id,
+          type:'income',
+          amount,
+          category:'تحصيل من طلاب',
+          date,
+          note:'تحصيل من '+student.full_name+(note?' — '+note:''),
+          private_student_id:student.private_student_id,
+          created_at:new Date().toISOString()
+        })
+      })});
+      privatePaymentMsg.textContent='تم تسجيل التحصيل وإضافته تلقائيًا إلى دفتر مالياتك الخاص.';
+      privatePaymentMsg.className='student-form-msg success show';
+      await loadTeacherHub();
+      if(currentTeacherStudentsGroupId)renderPrivateStudentsForRoom(currentTeacherStudentsGroupId);
+      setTimeout(closeTeacherPrivatePaymentModal,500);
+    }catch(err){
+      privatePaymentMsg.textContent=err.message||'تعذر تسجيل التحصيل.';
+      privatePaymentMsg.className='student-form-msg error show';
+    }
+  });
+
+  document.getElementById('privateAttendanceDate').value=new Date().toISOString().slice(0,10);
+  document.getElementById('privateAttendanceDate').addEventListener('change',()=>{
+    if(currentTeacherStudentsGroupId)renderPrivateStudentsForRoom(currentTeacherStudentsGroupId);
+  });
+  document.getElementById('markPrivateAllPresent').addEventListener('click',()=>{
+    document.querySelectorAll('#teacherPrivateRoomRows .private-attendance-status').forEach(x=>x.value='present');
+  });
+  document.getElementById('savePrivateAttendance').addEventListener('click',async()=>{
+    const msg=document.getElementById('privateAttendanceMsg');
+    msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext();
+    const groupId=currentTeacherStudentsGroupId;
+    const date=document.getElementById('privateAttendanceDate').value;
+    if(ctx?.account_type!=='teacher'||!ctx?.internal_email){
+      msg.textContent='هذا الإجراء متاح للمعلم فقط.';
+      msg.className='student-form-msg error show';
+      return;
+    }
+    if(!teacherPrivateGroupIds.has(String(groupId))){
+      msg.textContent='الحضور الخاص متاح داخل قاعاتك الخاصة فقط.';
+      msg.className='student-form-msg error show';
+      return;
+    }
+    if(!date){
+      msg.textContent='اختر تاريخ الحضور.';
+      msg.className='student-form-msg error show';
+      return;
+    }
+    const records=[...document.querySelectorAll('#teacherPrivateRoomRows tr[data-private-student-id]')].map(tr=>({
+      private_student_id:tr.dataset.privateStudentId,
+      status:tr.querySelector('.private-attendance-status')?.value||'present'
+    }));
+    if(!records.length){
+      msg.textContent='لا يوجد طلاب خاصون لتسجيل حضورهم.';
+      msg.className='student-form-msg error show';
+      return;
+    }
+    const batch={
+      attendance_id:'PA-'+Date.now().toString(36).toUpperCase(),
+      group_id:groupId,
+      group_name:currentTeacherStudentsGroupName,
+      date,
+      records,
+      saved_at:new Date().toISOString()
+    };
+    try{
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+        p_recipient:ctx.internal_email,
+        p_subject:'[PRIVATE_ATTENDANCE] '+groupId+'|'+date,
+        p_body:JSON.stringify(batch)
+      })});
+      const counts=records.reduce((acc,r)=>{acc[r.status]=(acc[r.status]||0)+1;return acc},{});
+      msg.textContent='تم حفظ الحضور الخاص — حاضر '+Number(counts.present||0)+'، غائب '+Number(counts.absent||0)+'، متأخر '+Number(counts.late||0)+'، بعذر '+Number(counts.excused||0)+'.';
+      msg.className='student-form-msg success show';
+      await loadTeacherHub();
+      renderPrivateStudentsForRoom(groupId);
+    }catch(err){
+      msg.textContent=err.message||'تعذر حفظ الحضور الخاص.';
+      msg.className='student-form-msg error show';
+    }
+  });
+
   document.getElementById('addTeacherPrivateStudent').addEventListener('click',()=>openTeacherPrivateStudentModal());
   document.getElementById('addPrivateStudentFromRoom').addEventListener('click',()=>openTeacherPrivateStudentModal(null,currentTeacherStudentsGroupId));
 
