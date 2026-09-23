@@ -241,9 +241,15 @@ async function delegatedGroups(linkId){
 async function directChatBaseContacts(a){
   const contacts=new Map();
   const add=(row,group,relation)=>{if(row?.account_id&&String(row.account_id)!==String(a.account_id))contacts.set(String(row.account_id),{...row,contact_group:group,relation_type:relation,profile_photo:null})};
+  const assistant=await assistantLink(a);
+  const privateStudent=(await sql`select id,teacher_account_id from public.teacher_private_students
+    where platform_account_id=${a.account_id} and status='active' limit 1`)[0]||null;
+  const privateParent=(await sql`select id,teacher_account_id from public.teacher_private_students
+    where guardian_account_id=${a.account_id} and status='active' limit 1`)[0]||null;
+  const effectiveType=assistant?'teacher_assistant':privateStudent?'private_student':privateParent?'private_parent':String(a.account_type||'');
 
   // School administration is available to teachers and students.
-  if(['teacher','student','private_student','teacher_assistant','parent','private_parent'].includes(String(a.account_type||''))){
+  if(['teacher','student','private_student','teacher_assistant','parent','private_parent'].includes(effectiveType)){
     const admins=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
       from public.platform_accounts pa
       left join public.app_users u on u.id=pa.app_user_id
@@ -253,7 +259,7 @@ async function directChatBaseContacts(a){
     admins.forEach(x=>add(x,'الإدارة','administration'));
   }
 
-  if(a.account_type==='teacher'){
+  if(effectiveType==='teacher'){
     // ROVEN students assigned to this teacher.
     if(a.teacher_id){
       const schoolStudents=await sql`select distinct pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,null::text role
@@ -274,7 +280,7 @@ async function directChatBaseContacts(a){
     privateStudents.forEach(x=>add(x,'طلابي الخاصون','private_student'));
   }
 
-  if(a.account_type==='student'&&a.student_id){
+  if(effectiveType==='student'&&a.student_id){
     const teachers=await sql`select distinct pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
       from public.enrollments en
       join public.study_groups g on g.id=en.group_id
@@ -286,17 +292,16 @@ async function directChatBaseContacts(a){
     teachers.forEach(x=>add(x,'معلموك','teacher'));
   }
 
-  if(a.account_type==='private_student'){
+  if(effectiveType==='private_student'){
     const owner=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
-      from public.teacher_private_students ps
-      join public.platform_accounts pa on pa.id=ps.teacher_account_id and pa.is_active=true
+      from public.platform_accounts pa
       left join public.app_users u on u.id=pa.app_user_id
-      where ps.platform_account_id=${a.account_id} and ps.status='active' limit 1`;
+      where pa.id=${privateStudent?.teacher_account_id||null} and pa.is_active=true limit 1`;
     owner.forEach(x=>add(x,'المعلم','teacher'));
   }
 
-  if(a.account_type==='teacher_assistant'){
-    const link=await assistantLink(a);
+  if(effectiveType==='teacher_assistant'){
+    const link=assistant;
     if(link){
       const teacher=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
         from public.platform_accounts pa left join public.app_users u on u.id=pa.app_user_id
@@ -306,7 +311,7 @@ async function directChatBaseContacts(a){
   }
 
   // Admin/management can contact teachers directly.
-  if(a.account_type==='admin'||(a.account_type==='staff'&&['super_admin','school_manager','academic_admin','secretary','reception'].includes(String(a.role||'')))){
+  if(effectiveType==='admin'||(effectiveType==='staff'&&['super_admin','school_manager','academic_admin','secretary','reception'].includes(String(a.role||'')))){
     const teachers=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
       from public.platform_accounts pa left join public.app_users u on u.id=pa.app_user_id
       where pa.school_id=${a.school_id} and pa.account_type='teacher' and pa.is_active=true
