@@ -657,7 +657,7 @@
           </div>
           <div class="student-form-msg" id="assistantRequestMsg"></div>
           <button class="primary-action" id="sendAssistantRequest" type="button" style="margin-top:10px">طلب إنشاء حساب المساعد</button>
-          <div class="table-wrap" style="margin-top:14px"><table class="table"><thead><tr><th>المساعد</th><th>القاعات</th><th>الصلاحيات</th><th>الحالة</th><th>بيانات الدخول</th></tr></thead><tbody id="teacherAssistantsRows"><tr><td colspan="5" class="students-empty">لا يوجد مساعدين.</td></tr></tbody></table></div>
+          <div class="table-wrap" style="margin-top:14px"><table class="table"><thead><tr><th>المساعد</th><th>القاعات</th><th>الصلاحيات</th><th>الحالة</th><th>بيانات الدخول</th><th>إجراء</th></tr></thead><tbody id="teacherAssistantsRows"><tr><td colspan="6" class="students-empty">لا يوجد مساعدين.</td></tr></tbody></table></div>
         </article>
 
         <div class="grid teacher-hub-grid" style="margin-top:15px">
@@ -2641,6 +2641,268 @@
       document.getElementById('newRewardTitle').value='';document.getElementById('newRewardDescription').value='';document.getElementById('newRewardStock').value='';
       await loadRewards();
     }catch(err){alert(err.message||'تعذر إضافة المكافأة')}
+  });
+
+  // ===== Teacher private assistant lifecycle =====
+  const assistantPermissionLabels={students:'إدارة الطلاب',attendance:'الحضور',collections:'التحصيل',chat:'التواصل'};
+
+  const assistantGroupsText=link=>(link.groups||[]).map(g=>g.group_name||g.name||g.group_id).filter(Boolean).join('، ');
+
+  const renderTeacherAssistants=()=>{
+    const tbody=document.getElementById('teacherAssistantsRows');
+    if(!tbody)return;
+    if(!teacherAssistantLinksCache.length){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا يوجد مساعدين مفعلون. أرسل طلبًا للإدارة لإنشاء مساعد خاص.</td></tr>';
+      return;
+    }
+    tbody.innerHTML=teacherAssistantLinksCache.map(a=>{
+      const perms=Object.entries(a.permissions||{}).filter(([,v])=>v).map(([k])=>assistantPermissionLabels[k]||k);
+      return `<tr>
+        <td><b>${escapeHtml(a.assistant_name||'مساعد')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(a.assistant_email||'')}</span></td>
+        <td>${escapeHtml(assistantGroupsText(a)||'—')}</td>
+        <td>${perms.length?perms.map(x=>'<span class="assistant-perm-chip">'+escapeHtml(x)+'</span>').join(' '):'—'}</td>
+        <td><span class="status active">مفعل</span></td>
+        <td><b>${escapeHtml(a.username||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(a.account_code||a.assistant_internal_email||'')}</span></td>
+        <td><div style="display:flex;gap:5px;flex-wrap:wrap">
+          <button class="secondary-action edit-assistant-assignment" type="button" data-request-id="${escapeHtml(a.request_id)}">تعديل التكليف</button>
+          <button class="secondary-action revoke-assistant-assignment" type="button" data-request-id="${escapeHtml(a.request_id)}" style="color:#b42318">إلغاء</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+  };
+
+  const syncTeacherAssistants=async()=>{
+    if(!teacherAssistantLinksCache.length)return;
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher')return;
+    for(const link of teacherAssistantLinksCache){
+      if(!link.assistant_internal_email)continue;
+      const allowedGroups=new Set((link.groups||[]).map(g=>String(g.group_id)));
+      const students=teacherPrivateStudentsCache.filter(s=>allowedGroups.has(String(s.group_id)));
+      const payments=(link.permissions?.collections?teacherPrivatePaymentsCache.filter(p=>students.some(s=>String(s.private_student_id)===String(p.private_student_id))):[]);
+      const attendance=(link.permissions?.attendance?teacherPrivateAttendanceCache.filter(a=>allowedGroups.has(String(a.group_id))):[]);
+      const snapshot={
+        request_id:link.request_id,
+        status:'active',
+        teacher_name:ctx.display_name,
+        teacher_internal_email:ctx.internal_email,
+        assistant_name:link.assistant_name,
+        groups:(link.groups||[]),
+        permissions:link.permissions||{},
+        students:link.permissions?.students?students:[],
+        payments,
+        attendance,
+        synced_at:new Date().toISOString()
+      };
+      try{await sendStructuredMail(link.assistant_internal_email,'ASSISTANT_LINK',link.request_id,snapshot)}catch{}
+    }
+  };
+
+  const decorateAssistantLogin=async platformData=>{
+    try{
+      const rows=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
+      const links=latestStructuredBy(Array.isArray(rows)?rows:[],'ASSISTANT_LINK','request_id')
+        .sort((a,b)=>new Date(b.synced_at||b._mail?.sent_at||0)-new Date(a.synced_at||a._mail?.sent_at||0));
+      const active=links.find(x=>x.status==='active');
+      if(active)return {...platformData,account_type:'teacher_assistant',assistant_link:active,role:'teacher_assistant'};
+      const revoked=links.find(x=>x.status==='revoked');
+      if(revoked)throw new Error('تم إلغاء تكليف هذا الحساب كمساعد معلم.');
+    }catch(err){
+      if(String(err?.message||'').includes('إلغاء تكليف'))throw err;
+    }
+    return platformData;
+  };
+
+  const loadAssistantHub=async()=>{
+    const ctx=await hydratePlatformContext();
+    const box=document.getElementById('assistantGroupsList');
+    if(ctx?.account_type!=='teacher_assistant'){
+      box.innerHTML='<div class="students-empty">هذه الصفحة مخصصة لمساعد المعلم الخاص.</div>';return;
+    }
+    const rows=await structuredMail('inbox');
+    const links=latestStructuredBy(rows,'ASSISTANT_LINK','request_id')
+      .sort((a,b)=>new Date(b.synced_at||b._mail?.sent_at||0)-new Date(a.synced_at||a._mail?.sent_at||0));
+    const link=links.find(x=>x.status==='active');
+    if(!link){
+      box.innerHTML='<div class="students-empty">لا يوجد تكليف نشط. راجع المعلم صاحب الحساب.</div>';
+      document.getElementById('assistantGroupsCount').textContent='0';
+      document.getElementById('assistantStudentsCount').textContent='0';
+      document.getElementById('assistantCollectedMonth').textContent='0.00';
+      return;
+    }
+    currentPlatformAccount={...(currentPlatformAccount||{}),assistant_link:link};
+    document.getElementById('assistantHubName').textContent='أ/ '+(ctx.display_name||link.assistant_name||'المساعد');
+    document.getElementById('assistantHubOwner').textContent='مساعد خاص لـ '+(link.teacher_name||'المعلم')+' — لا توجد صلاحيات على المدرسة.';
+    const groups=Array.isArray(link.groups)?link.groups:[];
+    const students=Array.isArray(link.students)?link.students:[];
+    const payments=Array.isArray(link.payments)?link.payments:[];
+    const month=privateMonthKey();
+    const collected=payments.filter(p=>privateMonthKey(p.date||p._sent_at)===month).reduce((s,p)=>s+Number(p.amount||0),0);
+    document.getElementById('assistantGroupsCount').textContent=String(groups.length);
+    document.getElementById('assistantStudentsCount').textContent=String(students.length);
+    document.getElementById('assistantCollectedMonth').textContent=link.permissions?.collections?collected.toFixed(2):'—';
+    if(!groups.length){box.innerHTML='<div class="students-empty">لم يسند لك المعلم أي قاعة خاصة.</div>';return}
+    box.innerHTML=groups.map(g=>{
+      const gs=students.filter(s=>String(s.group_id)===String(g.group_id));
+      return `<div class="teacher-hub-group">
+        <div><b>${escapeHtml(g.group_name||'قاعة خاصة')}</b><span>${gs.length} طالب خاص • صلاحياتك: ${Object.entries(link.permissions||{}).filter(([,v])=>v).map(([k])=>assistantPermissionLabels[k]||k).join('، ')||'عرض فقط'}</span></div>
+        <div class="room-actions">
+          ${link.permissions?.chat?'<button class="secondary-action assistant-whatsapp-room" type="button">التواصل</button>':''}
+        </div>
+      </div>`;
+    }).join('');
+  };
+
+  document.getElementById('refreshAssistantHub')?.addEventListener('click',loadAssistantHub);
+
+  const loadTeacherAssistantRequestsAdmin=async()=>{
+    const panel=document.getElementById('teacherAssistantRequestsPanel');
+    const ctx=await hydratePlatformContext();
+    const canManage=ctx?.account_type==='admin'||(ctx?.account_type==='staff'&&['academic_admin','secretary'].includes(String(ctx.role||'')));
+    panel.style.display=canManage?'':'none';
+    if(!canManage)return;
+    const tbody=document.getElementById('teacherAssistantRequestsRows');
+    tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
+    try{
+      const inbox=await structuredMail('inbox');
+      const requests=latestStructuredBy(inbox,'ASSISTANT_REQUEST','request_id');
+      const created=latestStructuredBy(inbox,'ASSISTANT_CREATED_ADMIN','request_id');
+      const createdMap=new Map(created.map(x=>[String(x.request_id),x]));
+      if(!requests.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد طلبات مساعدين.</td></tr>';return}
+      tbody.innerHTML=requests.map(r=>{
+        const done=createdMap.get(String(r.request_id));
+        const perms=Object.entries(r.permissions||{}).filter(([,v])=>v).map(([k])=>assistantPermissionLabels[k]||k).join('، ');
+        return `<tr>
+          <td><b>${escapeHtml(r.teacher_name||r._mail?.sender_name||'معلم')}</b></td>
+          <td>${escapeHtml(r.assistant_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.assistant_email||'')}</span></td>
+          <td>${escapeHtml((r.groups||[]).map(g=>g.group_name||g.group_id).join('، ')||'—')}</td>
+          <td>${escapeHtml(perms||'—')}</td>
+          <td><span class="status ${done?'active':'watch'}">${done?'تم إنشاء الحساب':'بانتظار الاعتماد'}</span></td>
+          <td>${done?'<span class="status active">مكتمل</span>':`<button class="primary-action approve-assistant-request" type="button" data-request-id="${escapeHtml(r.request_id)}">إنشاء الحساب</button>`}</td>
+        </tr>`;
+      }).join('');
+      panel._assistantRequests=requests;
+    }catch(err){tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلبات')+'</td></tr>'}
+  };
+
+  document.getElementById('refreshTeacherAssistantRequests')?.addEventListener('click',loadTeacherAssistantRequestsAdmin);
+
+  document.getElementById('teacherAssistantRequestsRows')?.addEventListener('click',async e=>{
+    const btn=e.target.closest('.approve-assistant-request');if(!btn)return;
+    const panel=document.getElementById('teacherAssistantRequestsPanel');
+    const request=(panel._assistantRequests||[]).find(x=>String(x.request_id)===String(btn.dataset.requestId));
+    if(!request)return;
+    btn.disabled=true;btn.textContent='جارٍ الإنشاء...';
+    try{
+      const username=('asst-'+String(request.request_id).replace(/[^a-z0-9]/gi,'').slice(-8)).toLowerCase();
+      const password=makeRandomPassword();
+      const created=await dataApiFetch('/rpc/create_system_user_admin',{method:'POST',body:JSON.stringify({
+        p_full_name:request.assistant_name,
+        p_email:request.assistant_email,
+        p_phone:null,
+        p_username:username,
+        p_password:password,
+        p_generate_password:false,
+        p_role:'teacher',
+        p_teacher_id:null
+      })});
+      const r=Array.isArray(created)?created[0]:created;
+      const payload={
+        ...request,status:'active',
+        assistant_internal_email:r?.internal_email||null,
+        account_id:r?.account_id||null,
+        account_code:r?.account_code||null,
+        username:r?.username||username,
+        initial_password:password,
+        activated_at:new Date().toISOString()
+      };
+      if(!payload.assistant_internal_email)throw new Error('تعذر إنشاء البريد الداخلي للمساعد.');
+      await sendStructuredMail(request.teacher_internal_email,'ASSISTANT_CREATED',request.request_id,payload);
+      await sendStructuredMail(payload.assistant_internal_email,'ASSISTANT_LINK',request.request_id,{...payload,initial_password:undefined});
+      const me=await hydratePlatformContext();
+      if(me?.internal_email)await sendStructuredMail(me.internal_email,'ASSISTANT_CREATED_ADMIN',request.request_id,payload);
+      alert('تم إنشاء حساب المساعد. اسم المستخدم: '+payload.username+'\nكلمة المرور المؤقتة: '+password);
+      await loadTeacherAssistantRequestsAdmin();
+    }catch(err){alert(err.message||'تعذر إنشاء حساب المساعد')}
+    finally{btn.disabled=false;btn.textContent='إنشاء الحساب'}
+  });
+
+  document.getElementById('sendAssistantRequest')?.addEventListener('click',async()=>{
+    const msg=document.getElementById('assistantRequestMsg');msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher'){msg.textContent='هذا الإجراء للمعلم فقط.';msg.className='student-form-msg error show';return}
+    const adminEmail=document.getElementById('assistantRequestAdmin').value;
+    const name=document.getElementById('assistantRequestName').value.trim();
+    const email=document.getElementById('assistantRequestEmail').value.trim().toLowerCase();
+    const groupIds=[...document.getElementById('assistantRequestGroups').selectedOptions].map(o=>o.value);
+    if(!adminEmail||!name||!email||!groupIds.length){msg.textContent='اختر الإدارة واكتب بيانات المساعد وحدد قاعة خاصة واحدة على الأقل.';msg.className='student-form-msg error show';return}
+    const groups=teacherHubGroupsCache.filter(g=>groupIds.includes(String(g.group_id))&&teacherPrivateGroupIds.has(String(g.group_id))).map(g=>({group_id:g.group_id,group_name:g.group_name}));
+    if(!groups.length){msg.textContent='لا يمكن إسناد إلا القاعات الخاصة بك.';msg.className='student-form-msg error show';return}
+    const editRequestId=document.getElementById('sendAssistantRequest').dataset.editRequestId||'';
+    const existing=editRequestId?teacherAssistantLinksCache.find(x=>String(x.request_id)===String(editRequestId)):null;
+    const request={
+      request_id:editRequestId||('ASR-'+Date.now().toString(36).toUpperCase()),
+      teacher_name:ctx.display_name,
+      teacher_internal_email:ctx.internal_email,
+      assistant_name:name,assistant_email:email,groups,
+      permissions:{
+        students:document.getElementById('assistantPermStudents').checked,
+        attendance:document.getElementById('assistantPermAttendance').checked,
+        collections:document.getElementById('assistantPermCollections').checked,
+        chat:document.getElementById('assistantPermChat').checked
+      },
+      status:'requested',requested_at:new Date().toISOString()
+    };
+    try{
+      if(existing?.assistant_internal_email){
+        const updated={...existing,...request,status:'active',assistant_internal_email:existing.assistant_internal_email,account_id:existing.account_id,account_code:existing.account_code,username:existing.username,updated_at:new Date().toISOString()};
+        await sendStructuredMail(ctx.internal_email,'ASSISTANT_CREATED',request.request_id,updated);
+        await sendStructuredMail(existing.assistant_internal_email,'ASSISTANT_LINK',request.request_id,{...updated,initial_password:undefined});
+        msg.textContent='تم تحديث قاعات وصلاحيات المساعد فورًا.';
+      }else{
+        await sendStructuredMail(adminEmail,'ASSISTANT_REQUEST',request.request_id,request);
+        await sendStructuredMail(ctx.internal_email,'ASSISTANT_REQUEST_SENT',request.request_id,request);
+        msg.textContent='تم إرسال طلب إنشاء المساعد للإدارة.';
+      }
+      msg.className='student-form-msg success show';
+      document.getElementById('assistantRequestName').value='';document.getElementById('assistantRequestEmail').value='';
+      [...document.getElementById('assistantRequestGroups').options].forEach(o=>o.selected=false);
+      const sendBtn=document.getElementById('sendAssistantRequest');sendBtn.textContent='طلب إنشاء حساب المساعد';delete sendBtn.dataset.editRequestId;
+      await loadTeacherHub();
+    }catch(err){msg.textContent=err.message||'تعذر حفظ التكليف';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('teacherAssistantsRows')?.addEventListener('click',async e=>{
+    const revoke=e.target.closest('.revoke-assistant-assignment');
+    const edit=e.target.closest('.edit-assistant-assignment');
+    const id=(revoke||edit)?.dataset.requestId;if(!id)return;
+    const link=teacherAssistantLinksCache.find(x=>String(x.request_id)===String(id));if(!link)return;
+    const ctx=await hydratePlatformContext();
+    if(revoke){
+      if(!confirm('إلغاء تكليف هذا المساعد وسحب كل القاعات الخاصة منه؟'))return;
+      try{
+        const revoked={...link,status:'revoked',groups:[],permissions:{students:false,attendance:false,collections:false,chat:false},revoked_at:new Date().toISOString()};
+        await sendStructuredMail(ctx.internal_email,'ASSISTANT_CREATED',id,revoked);
+        if(link.assistant_internal_email)await sendStructuredMail(link.assistant_internal_email,'ASSISTANT_LINK',id,revoked);
+        await loadTeacherHub();
+      }catch(err){alert(err.message||'تعذر إلغاء المساعد')}
+      return;
+    }
+    if(edit){
+      const ids=new Set((link.groups||[]).map(g=>String(g.group_id)));
+      [...document.getElementById('assistantRequestGroups').options].forEach(o=>o.selected=ids.has(String(o.value)));
+      document.getElementById('assistantRequestName').value=link.assistant_name||'';
+      document.getElementById('assistantRequestEmail').value=link.assistant_email||'';
+      document.getElementById('assistantPermStudents').checked=!!link.permissions?.students;
+      document.getElementById('assistantPermAttendance').checked=!!link.permissions?.attendance;
+      document.getElementById('assistantPermCollections').checked=!!link.permissions?.collections;
+      document.getElementById('assistantPermChat').checked=!!link.permissions?.chat;
+      document.getElementById('assistantRequestMsg').textContent='عدّل القاعات أو الصلاحيات ثم اضغط «تحديث التكليف».';
+      document.getElementById('assistantRequestMsg').className='student-form-msg success show';
+      const sendBtn=document.getElementById('sendAssistantRequest');
+      sendBtn.textContent='تحديث التكليف';
+      sendBtn.dataset.editRequestId=id;
+    }
   });
 
   // ===== Dedicated teacher workspace =====
@@ -4867,7 +5129,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -5131,7 +5393,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
