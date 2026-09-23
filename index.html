@@ -657,6 +657,8 @@
   const AUTH_BASE='https://ep-jolly-band-b5o7f86y.neonauth.c-7.us-east-2.aws.neon.tech/schooldb/auth';
   const ROVEN_API='https://br-round-hall-b5qw20e0-rovenapi.compute.c-7.us-east-2.aws.neon.tech/';
   let rovenSessionToken='';
+  let platformSessionToken='';
+  let currentPlatformAccount=null;
 
   // Authentication is handled by Neon Auth using its normal opaque session cookie.
   // All school database operations go through the Neon Function above and connect
@@ -696,7 +698,7 @@
   };
 
   const callRovenRpc=async(action,payload={},retry=true)=>{
-    const sessionToken=await getOpaqueSessionToken(!retry);
+    const sessionToken=platformSessionToken || await getOpaqueSessionToken(!retry);
     const res=await fetch(ROVEN_API,{
       method:'POST',
       mode:'cors',
@@ -710,42 +712,50 @@
 
     const msg=String(data?.error||data?.message||data?.details||'تعذر تنفيذ العملية.');
     if(retry && (msg.includes('invalid_or_expired_session')||msg.includes('app_user_not_active'))){
-      rovenSessionToken='';
+      if(platformSessionToken){platformSessionToken='';currentPlatformAccount=null}else{rovenSessionToken=''}
       return callRovenRpc(action,payload,false);
     }
     throw new Error(msg.includes('invalid_or_expired_session')?'انتهت جلسة الدخول. سجل الدخول مرة أخرى.':msg);
   };
 
-  const studentLoginRequest=async(identityValue,passwordValue)=>{
+  const platformLoginRequest=async(identityValue,passwordValue)=>{
     const res=await fetch(ROVEN_API,{
-      method:'POST',
-      mode:'cors',
-      cache:'no-store',
+      method:'POST',mode:'cors',cache:'no-store',
       headers:{'Content-Type':'application/json','Accept':'application/json'},
-      body:JSON.stringify({
-        action:'student_login',
-        sessionToken:'student-public-login',
-        payload:{p_identity:identityValue,p_password:passwordValue}
-      })
+      body:JSON.stringify({action:'platform_login',sessionToken:'public-login',payload:{p_identity:identityValue,p_password:passwordValue}})
     });
     let data=null; try{data=await res.json()}catch{}
-    if(!res.ok) throw new Error(String(data?.error||data?.message||'بيانات دخول الطالب غير صحيحة.'));
+    if(!res.ok) throw new Error(String(data?.error||data?.message||'بيانات الدخول غير صحيحة.'));
+    platformSessionToken=data?.session_token||'';
+    currentPlatformAccount=data||null;
     return data;
   };
 
-  const enterStudentPortal=data=>{
+  const enterPlatformPortal=data=>{
+    currentPlatformAccount=data||currentPlatformAccount;
     openDashboard();
-    document.getElementById('pageTitle').textContent='بوابة الطالب';
-    document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=btn.dataset.section==='dashboard'?'':'none'});
+    const type=String(data?.account_type||'');
+    const isAdmin=type==='admin'||type==='staff';
+    const allowed=isAdmin
+      ? new Set(['dashboard','students','education','attendance','finance','expenses','reports','mygroups','mail','profile','settings'])
+      : type==='teacher'
+        ? new Set(['dashboard','mygroups','mail','profile'])
+        : type==='parent'
+          ? new Set(['dashboard','mail','profile'])
+          : new Set(['dashboard','mygroups','mail','profile']);
+
+    document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=allowed.has(btn.dataset.section)?'':'none'});
+    document.getElementById('bottomNav').style.display=isAdmin?'':'none';
     document.querySelectorAll('.module').forEach(m=>m.classList.remove('active'));
     const dash=document.getElementById('dashboard');
     dash.classList.add('active');
-    dash.innerHTML=`<div class="welcome"><div><div class="tag">بوابة الطالب</div><h2>مرحبًا، ${escapeHtml(data?.full_name||'الطالب')}</h2><p>يمكنك الدخول إلى خدماتك التعليمية من حسابك الشخصي.</p></div><div class="year"><span>رقم الطالب</span><strong>${escapeHtml(data?.student_no||'—')}</strong></div></div>
-      <div class="stats">
-        <div class="stat"><div class="stat-head"><span>اسم المستخدم</span><span class="stat-icon">👤</span></div><div class="value" style="font-size:20px">${escapeHtml(data?.username||'—')}</div><div class="sub">حساب الطالب</div></div>
-        <div class="stat"><div class="stat-head"><span>المرحلة</span><span class="stat-icon">🎓</span></div><div class="value" style="font-size:20px">${escapeHtml(data?.stage_name||'—')}</div><div class="sub">${escapeHtml(data?.grade_name||'—')}</div></div>
-        <div class="stat"><div class="stat-head"><span>الحصص</span><span class="stat-icon">📚</span></div><div class="value" style="font-size:20px">قريبًا</div><div class="sub">جدول الطالب</div></div>
-        <div class="stat"><div class="stat-head"><span>الواجبات والاختبارات</span><span class="stat-icon">✓</span></div><div class="value" style="font-size:20px">قريبًا</div><div class="sub">المهام والنتائج</div></div>
+    const typeLabel=type==='teacher'?'المعلم':type==='parent'?'ولي الأمر':type==='student'?'الطالب':'المستخدم';
+    document.getElementById('pageTitle').textContent='بوابة '+typeLabel;
+    dash.innerHTML=`<div class="welcome"><div><div class="tag">بوابة ${escapeHtml(typeLabel)}</div><h2>مرحبًا، ${escapeHtml(data?.display_name||data?.full_name||'مستخدم ROVEN')}</h2><p>حسابك الشخصي في مدرسة روفين أونلاين.</p></div><div class="year"><span>كود المستخدم</span><strong>${escapeHtml(data?.account_code||data?.student_no||data?.employee_no||'—')}</strong></div></div>
+      <div class="portal-grid">
+        <div class="portal-card"><h3>💬 مجموعاتي والقاعات</h3><p>شات المجموعة وروابط Zoom / Meet والملفات.</p></div>
+        <div class="portal-card"><h3>✉ بريد روفين</h3><p>رسائل خاصة وملفات بين مستخدمي المنصة.</p></div>
+        <div class="portal-card"><h3>👤 حسابي</h3><p>${escapeHtml(data?.internal_email||'')} — الصورة الشخصية وتغيير كلمة المرور.</p></div>
       </div>`;
   };
 
@@ -794,22 +804,31 @@
     document.getElementById('loginForm').addEventListener('submit',async e=>{
       e.preventDefault(); loginError.classList.remove('show');
       const email=identity.value.trim(),pass=password.value;
-      if(!email||!pass){loginError.textContent='أدخل البريد الإلكتروني وكلمة المرور.';loginError.classList.add('show');return}
+      if(!email||!pass){loginError.textContent='أدخل اسم المستخدم أو البريد وكلمة المرور.';loginError.classList.add('show');return}
       loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
       try{
-        if(activeRole==='student'){
-          const studentData=await studentLoginRequest(email,pass);
-          enterStudentPortal(studentData);
+        if(['student','teacher','parent'].includes(activeRole)){
+          const platformData=await platformLoginRequest(email,pass);
+          const expected=activeRole==='student'?'student':activeRole==='teacher'?'teacher':'parent';
+          if(String(platformData?.account_type)!==expected) throw new Error('نوع الحساب لا يطابق البوابة المختارة.');
+          enterPlatformPortal(platformData);
           return;
         }
+        if(activeRole==='admin'){
+          try{
+            const platformData=await platformLoginRequest(email,pass);
+            if(!['admin','staff'].includes(String(platformData?.account_type))) throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
+            enterPlatformPortal(platformData);
+            return;
+          }catch(platformErr){
+            platformSessionToken='';currentPlatformAccount=null;
+          }
+        }
         const data=await authPost('/sign-in/email',{email,password:pass,rememberMe:true});
-        rovenSessionToken='';
+        rovenSessionToken=''; platformSessionToken=''; currentPlatformAccount=null;
         const authRole=data?.user?.role||data?.role||'';
         if(activeRole==='admin' && authRole && !['super_admin','school_manager','academic_admin','finance_admin','reception'].includes(String(authRole))){
           throw new Error('هذا الحساب لا يملك صلاحية الإدارة.');
-        }
-        if(activeRole==='teacher' && authRole && String(authRole)!=='teacher'){
-          throw new Error('هذا الحساب ليس حساب معلم.');
         }
         openDashboard();
       }catch(err){
