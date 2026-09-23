@@ -2613,21 +2613,152 @@
   };
 
   document.getElementById('refreshTeacherHub').addEventListener('click',loadTeacherHub);
+
+  const teacherPrivateStudentModal=document.getElementById('teacherPrivateStudentModal');
+  const privateStudentMsg=document.getElementById('privateStudentMsg');
+
+  const privateGroupOptions=(selected='')=>{
+    const groups=teacherHubGroupsCache.filter(g=>teacherPrivateGroupIds.has(String(g.group_id)));
+    return '<option value="">اختر القاعة</option>'+groups.map(g=>`<option value="${escapeHtml(g.group_id)}" ${String(g.group_id)===String(selected)?'selected':''}>${escapeHtml(g.group_name)} — ${escapeHtml(g.subject_name||'')}</option>`).join('');
+  };
+
+  const openTeacherPrivateStudentModal=(student=null,preselectedGroup='')=>{
+    const available=teacherHubGroupsCache.filter(g=>teacherPrivateGroupIds.has(String(g.group_id)));
+    if(!available.length){
+      alert('لا توجد قاعة خاصة مفعّلة لك حتى الآن. اطلب فتح قاعة خاصة أولًا ثم انتظر إنشاء الإدارة لها.');
+      return;
+    }
+    const selected=student?.group_id||preselectedGroup||'';
+    document.getElementById('privateStudentId').value=student?.private_student_id||'';
+    document.getElementById('privateStudentName').value=student?.full_name||'';
+    document.getElementById('privateStudentGroup').innerHTML=privateGroupOptions(selected);
+    document.getElementById('privateStudentPhone').value=student?.phone||'';
+    document.getElementById('privateStudentParentName').value=student?.parent_name||'';
+    document.getElementById('privateStudentParentPhone').value=student?.parent_phone||'';
+    document.getElementById('privateStudentNotes').value=student?.notes||'';
+    document.getElementById('teacherPrivateStudentModalTitle').textContent=student?'تعديل الطالب الخاص':'إضافة طالب خاص';
+    document.getElementById('deleteTeacherPrivateStudent').style.display=student?'':'none';
+    privateStudentMsg.className='student-form-msg';
+    privateStudentMsg.textContent='';
+    teacherPrivateStudentModal.classList.add('show');
+    teacherPrivateStudentModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  };
+
+  const closeTeacherPrivateStudentModal=()=>{
+    teacherPrivateStudentModal.classList.remove('show');
+    teacherPrivateStudentModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  document.getElementById('closeTeacherPrivateStudentModal').addEventListener('click',closeTeacherPrivateStudentModal);
+  document.getElementById('cancelTeacherPrivateStudent').addEventListener('click',closeTeacherPrivateStudentModal);
+  teacherPrivateStudentModal.addEventListener('click',e=>{if(e.target===teacherPrivateStudentModal)closeTeacherPrivateStudentModal()});
+
+  const sendTeacherPrivateStudentRecord=async record=>{
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher'||!ctx?.internal_email)throw new Error('teacher_account_required');
+    await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+      p_recipient:ctx.internal_email,
+      p_subject:'[PRIVATE_STUDENT] '+record.private_student_id,
+      p_body:JSON.stringify(record)
+    })});
+  };
+
+  document.getElementById('addTeacherPrivateStudent').addEventListener('click',()=>openTeacherPrivateStudentModal());
+  document.getElementById('addPrivateStudentFromRoom').addEventListener('click',()=>openTeacherPrivateStudentModal(null,currentTeacherStudentsGroupId));
+
+  const privateStudentEditHandler=e=>{
+    const btn=e.target.closest('.edit-private-student');
+    if(!btn)return;
+    const student=teacherPrivateStudentsCache.find(s=>String(s.private_student_id)===String(btn.dataset.privateStudentId));
+    if(student)openTeacherPrivateStudentModal(student);
+  };
+  document.getElementById('teacherPrivateStudentsRows').addEventListener('click',privateStudentEditHandler);
+  document.getElementById('teacherPrivateRoomRows').addEventListener('click',privateStudentEditHandler);
+
+  document.getElementById('teacherPrivateStudentForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    privateStudentMsg.className='student-form-msg';
+    const groupId=document.getElementById('privateStudentGroup').value;
+    const group=teacherHubGroupsCache.find(g=>String(g.group_id)===String(groupId));
+    if(!group||!teacherPrivateGroupIds.has(String(groupId))){
+      privateStudentMsg.textContent='اختر قاعة خاصة تابعة لك.';
+      privateStudentMsg.className='student-form-msg error show';
+      return;
+    }
+    const oldId=document.getElementById('privateStudentId').value;
+    const existing=teacherPrivateStudentsCache.find(s=>String(s.private_student_id)===String(oldId));
+    const record={
+      private_student_id:oldId||('PS-'+Date.now().toString(36).toUpperCase()),
+      private_code:existing?.private_code||privateStudentCode(),
+      full_name:document.getElementById('privateStudentName').value.trim(),
+      phone:document.getElementById('privateStudentPhone').value.trim()||null,
+      parent_name:document.getElementById('privateStudentParentName').value.trim()||null,
+      parent_phone:document.getElementById('privateStudentParentPhone').value.trim()||null,
+      notes:document.getElementById('privateStudentNotes').value.trim()||null,
+      group_id:group.group_id,
+      group_name:group.group_name,
+      status:'active',
+      ownership:'teacher_private',
+      updated_at:new Date().toISOString()
+    };
+    if(!record.full_name){
+      privateStudentMsg.textContent='اسم الطالب مطلوب.';
+      privateStudentMsg.className='student-form-msg error show';
+      return;
+    }
+    try{
+      await sendTeacherPrivateStudentRecord(record);
+      privateStudentMsg.textContent='تم حفظ الطالب كطالب خاص بك، ولن يظهر ضمن طلاب ROVEN School.';
+      privateStudentMsg.className='student-form-msg success show';
+      await loadTeacherHub();
+      if(currentTeacherStudentsGroupId)renderPrivateStudentsForRoom(currentTeacherStudentsGroupId);
+      setTimeout(closeTeacherPrivateStudentModal,500);
+    }catch(err){
+      privateStudentMsg.textContent=err.message||'تعذر حفظ الطالب.';
+      privateStudentMsg.className='student-form-msg error show';
+    }
+  });
+
+  document.getElementById('deleteTeacherPrivateStudent').addEventListener('click',async()=>{
+    const id=document.getElementById('privateStudentId').value;
+    const student=teacherPrivateStudentsCache.find(s=>String(s.private_student_id)===String(id));
+    if(!student)return;
+    if(!confirm('حذف هذا الطالب من طلابك الخاصين؟ لن يتأثر أي طالب من طلاب ROVEN.'))return;
+    try{
+      await sendTeacherPrivateStudentRecord({...student,status:'deleted',updated_at:new Date().toISOString()});
+      await loadTeacherHub();
+      if(currentTeacherStudentsGroupId)renderPrivateStudentsForRoom(currentTeacherStudentsGroupId);
+      closeTeacherPrivateStudentModal();
+    }catch(err){alert(err.message||'تعذر حذف الطالب')}
+  });
+
   const teacherStudentsModal=document.getElementById('teacherStudentsModal');
-  const closeTeacherStudentsModal=()=>{teacherStudentsModal.classList.remove('show');teacherStudentsModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  const closeTeacherStudentsModal=()=>{currentTeacherStudentsGroupId='';currentTeacherStudentsGroupName='';teacherStudentsModal.classList.remove('show');teacherStudentsModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('closeTeacherStudentsModal').addEventListener('click',closeTeacherStudentsModal);
   teacherStudentsModal.addEventListener('click',e=>{if(e.target===teacherStudentsModal)closeTeacherStudentsModal()});
 
   const openTeacherStudents=async(groupId,groupName)=>{
+    currentTeacherStudentsGroupId=String(groupId||'');
+    currentTeacherStudentsGroupName=groupName||'';
     teacherStudentsModal.classList.add('show');teacherStudentsModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     document.getElementById('teacherStudentsModalTitle').textContent='طلاب '+(groupName||'القاعة');
+    document.getElementById('teacherStudentsModalSub').textContent=teacherPrivateGroupIds.has(String(groupId))
+      ?'هذه قاعة خاصة: طلاب ROVEN يظلون للعرض فقط، ويمكنك إدارة طلابك الخاصين أسفلهم.'
+      :'هذه قاعة ROVEN School: الطلاب مسندون لك للتدريس والحضور فقط.';
     const tbody=document.getElementById('teacherStudentsModalRows');
-    tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل الطلاب...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="4" class="students-empty">جارٍ تحميل طلاب ROVEN...</td></tr>';
+    renderPrivateStudentsForRoom(groupId);
     try{
       const rows=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})});
-      if(!Array.isArray(rows)||!rows.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا يوجد طلاب في هذه القاعة.</td></tr>';return}
-      tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(s.student_name)}</b></td><td>${escapeHtml(s.student_no||'—')}</td><td><span class="teacher-student-status">${escapeHtml(attendanceStatusLabel[s.status]||'لم يسجل بعد')}</span></td></tr>`).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="4" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الطلاب')+'</td></tr>'}
+      if(!Array.isArray(rows)||!rows.length){
+        tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا يوجد طلاب ROVEN مسندون في هذه القاعة.</td></tr>';
+      }else{
+        tbody.innerHTML=rows.map((s,i)=>`<tr><td>${i+1}</td><td><b>${escapeHtml(s.student_name)}</b></td><td>${escapeHtml(s.student_no||'—')}</td><td><span class="teacher-student-status">${escapeHtml(attendanceStatusLabel[s.status]||'لم يسجل بعد')}</span></td></tr>`).join('');
+      }
+    }catch(err){
+      tbody.innerHTML='<tr><td colspan="4" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلاب ROVEN')+'</td></tr>';
+    }
   };
 
   const openAttendanceForTeacherGroup=async groupId=>{
