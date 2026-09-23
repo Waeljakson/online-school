@@ -2211,6 +2211,7 @@
       registrationResult.className='registration-result show';
       studentFormMsg.textContent='تم حفظ بيانات الطالب وولي الأمر والاشتراك في قاعدة البيانات.';
       studentFormMsg.className='student-form-msg success show';
+      try{await persistParentLink(r,payload)}catch{}
       await loadRegisteredStudents();
       newStudentForm.reset();document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);updateMoneySummary();
     }catch(err){
@@ -3636,7 +3637,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -3900,7 +3901,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
