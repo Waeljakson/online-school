@@ -115,12 +115,17 @@ async function ensureSchema(){
       id uuid primary key default gen_random_uuid(),
       exam_id uuid not null references public.platform_exams(id) on delete cascade,
       sort_order integer not null default 1,
-      question_type text not null check(question_type in ('mcq','essay')),
+      question_type text not null check(question_type in ('mcq','true_false','essay')),
       question_text text not null,
       choices jsonb,
       correct_answer jsonb,
       points numeric(8,2) not null default 1
     )`;
+    await sql`alter table public.platform_exam_questions
+      drop constraint if exists platform_exam_questions_question_type_check`;
+    await sql`alter table public.platform_exam_questions
+      add constraint platform_exam_questions_question_type_check
+      check(question_type in ('mcq','true_false','essay'))`;
     await sql`create table if not exists public.platform_exam_attempts(
       id uuid primary key default gen_random_uuid(),
       exam_id uuid not null references public.platform_exams(id) on delete cascade,
