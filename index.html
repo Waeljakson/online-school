@@ -659,6 +659,11 @@
   let rovenSessionToken='';
   let platformSessionToken='';
   let currentPlatformAccount=null;
+  const makeRandomPassword=()=>{
+    const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const bytes=new Uint8Array(12);crypto.getRandomValues(bytes);
+    return Array.from(bytes,b=>chars[b%chars.length]).join('');
+  };
 
   // Authentication is handled by Neon Auth using its normal opaque session cookie.
   // All school database operations go through the Neon Function above and connect
@@ -900,11 +905,13 @@
     userModal.classList.add('show');userModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     userFormMsg.className='student-form-msg';userCreationResult.className='registration-result';
     setTeacherLinkVisibility();await loadUnlinkedTeachers();
+    document.getElementById('nuPassword').value=makeRandomPassword();
   };
   const closeUserModal=()=>{userModal.classList.remove('show');userModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('openUserModal').addEventListener('click',openUserModal);
   document.getElementById('closeUserModal').addEventListener('click',closeUserModal);
   document.getElementById('cancelUserModal').addEventListener('click',closeUserModal);
+  document.getElementById('generateUserPassword').addEventListener('click',()=>{document.getElementById('nuPassword').value=makeRandomPassword()});
   userModal.addEventListener('click',e=>{if(e.target===userModal)closeUserModal()});
 
   const roleBadge=role=>'<span class="role-badge role-'+escapeHtml(role)+'">'+(roleIcons[role]||'•')+' '+escapeHtml(roleLabels[role]||role)+'</span>';
@@ -916,8 +923,9 @@
       const data=await dataApiFetch('/rpc/list_system_users_admin',{method:'POST',body:'{}'});
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد حسابات مستخدمين.</td></tr>';return}
       tbody.innerHTML=data.map(u=>`<tr data-user-id="${escapeHtml(u.app_user_id)}">
-        <td><strong>${escapeHtml(u.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${roleBadge(u.role)}</span></td>
-        <td>${escapeHtml(u.email||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.phone||'')}</span></td>
+        <td><strong>${escapeHtml(u.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.email||u.phone||'')}</span></td>
+        <td><b>${escapeHtml(u.account_code||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.internal_email||'')}</span></td>
+        <td>${escapeHtml(u.username||'لم يُنشأ')}</td>
         <td>
           <select class="form-field user-role-select row-role">
             <option value="super_admin" ${u.role==='super_admin'?'selected':''}>مدير نظام</option>
@@ -926,10 +934,9 @@
             <option value="reception" ${u.role==='reception'?'selected':''}>طاقم إداري</option>
           </select>
         </td>
-        <td>${u.employee_no?'<b>'+escapeHtml(u.employee_no)+'</b>':'—'}</td>
         <td><span class="status ${u.is_active?'active':'watch'}">${u.is_active?'نشط':'موقوف'}</span></td>
         <td><div class="user-actions">
-          <button class="mini-btn primary save-user-role" type="button">حفظ الصلاحية</button>
+          <button class="mini-btn primary save-user-role" type="button">حفظ</button>
           <button class="mini-btn ${u.is_active?'danger':'primary'} toggle-user-active" type="button" data-active="${u.is_active?'1':'0'}">${u.is_active?'إيقاف':'تفعيل'}</button>
         </div></td>
       </tr>`).join('');
@@ -964,6 +971,9 @@
       p_full_name:document.getElementById('nuFullName').value.trim(),
       p_email:document.getElementById('nuEmail').value.trim().toLowerCase(),
       p_phone:document.getElementById('nuPhone').value.trim()||null,
+      p_username:document.getElementById('nuUsername').value.trim()||null,
+      p_password:document.getElementById('nuPassword').value,
+      p_generate_password:false,
       p_role:document.getElementById('nuRole').value,
       p_teacher_id:document.getElementById('nuRole').value==='teacher'?(document.getElementById('nuTeacherId').value||null):null
     };
@@ -972,19 +982,14 @@
     try{
       const result=await dataApiFetch('/rpc/create_system_user_admin',{method:'POST',body:JSON.stringify(payload)});
       const r=Array.isArray(result)?result[0]:result;
-      let activationSent=false;
-      try{
-        await authPost('/request-password-reset',{email:payload.p_email,redirectTo:location.origin+location.pathname});
-        activationSent=true;
-      }catch{}
-      userCreationResult.innerHTML=`<h4>✓ تم إنشاء المستخدم</h4><div class="result-grid">
-        <div class="result-item"><span>المستخدم</span><b>${escapeHtml(r?.full_name||payload.p_full_name)}</b></div>
-        <div class="result-item"><span>الصلاحية</span><b>${escapeHtml(roleLabels[payload.p_role])}</b></div>
-        <div class="result-item"><span>البريد</span><b>${escapeHtml(payload.p_email)}</b></div>
-        <div class="result-item"><span>التفعيل</span><b>${activationSent?'تم إرسال الرابط':'يستخدم نسيت كلمة المرور'}</b></div>
+      userCreationResult.innerHTML=`<h4>✓ تم إنشاء المستخدم وحساب الدخول</h4><div class="result-grid">
+        <div class="result-item"><span>كود المنصة</span><b>${escapeHtml(r?.account_code||'—')}</b></div>
+        <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||payload.p_username||'—')}</b></div>
+        <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
+        <div class="result-item"><span>بريد ROVEN</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
       </div>`;
       userCreationResult.className='registration-result show';
-      userFormMsg.textContent=activationSent?'تم إنشاء الحساب وإرسال رابط تعيين كلمة المرور إلى المستخدم.':'تم إنشاء الحساب. يمكن للمستخدم تعيين كلمة المرور من «نسيت كلمة المرور؟».';
+      userFormMsg.textContent='تم إنشاء الحساب. سلّم للمستخدم اسم المستخدم وكلمة المرور ويمكنه تغييرها من «حسابي».';
       userFormMsg.className='student-form-msg success show';
       await loadSystemUsers();
       newUserForm.reset();setTeacherLinkVisibility();await loadUnlinkedTeachers();
@@ -1073,20 +1078,21 @@
 
   const loadGroups=async()=>{
     const tbody=document.getElementById('groupsRows');
-    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل المجموعات...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل المجموعات...</td></tr>';
     try{
       const data=await dataApiFetch('/rpc/list_study_groups_admin',{method:'POST',body:'{}'});
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا توجد مجموعات دراسية بعد.</td></tr>';return}
+      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا توجد مجموعات دراسية بعد.</td></tr>';return}
       tbody.innerHTML=data.map(g=>`<tr>
         <td><b>${escapeHtml(g.group_name)}</b></td>
         <td>${escapeHtml(g.teacher_name||'—')}</td>
         <td>${escapeHtml(g.subject_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(g.grade_name||'بدون صف')}</span></td>
         <td><span class="group-count">${Number(g.students_count||0)}</span></td>
         <td>${scheduleLabel(g.schedule_json)}</td>
-        <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="color:var(--primary)">فتح الرابط ↗</a>`:'—'}</td>
+        <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml((g.meeting_provider||'zoom').replace('_',' '))} ↗</a>`:'—'}</td>
         <td><span class="status ${g.is_active?'active':'watch'}">${g.is_active?'نشطة':'متوقفة'}</span></td>
+        <td><button class="secondary-action room-chat-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">القاعة / الشات</button></td>
       </tr>`).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
+    }catch(err){tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
   };
   document.getElementById('refreshGroups').addEventListener('click',loadGroups);
 
@@ -1106,6 +1112,7 @@
       p_subject_name:document.getElementById('ngSubject').value.trim(),
       p_stage_name:document.getElementById('ngStage').value.trim()||null,
       p_grade_name:document.getElementById('ngGrade').value.trim()||null,
+      p_meeting_provider:document.getElementById('ngMeetingProvider').value,
       p_meeting_url:document.getElementById('ngMeetingUrl').value.trim()||null,
       p_capacity:capacityVal,
       p_schedule:{sessions:schedule},
@@ -1138,11 +1145,12 @@
   const teacherFormMsg=document.getElementById('teacherFormMsg');
   const teacherRegistrationResult=document.getElementById('teacherRegistrationResult');
   const saveTeacherBtn=document.getElementById('saveTeacherBtn');
-  const openTeacherModal=()=>{teacherModal.classList.add('show');teacherModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';teacherFormMsg.className='student-form-msg';teacherRegistrationResult.className='registration-result';};
+  const openTeacherModal=()=>{teacherModal.classList.add('show');teacherModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';teacherFormMsg.className='student-form-msg';teacherRegistrationResult.className='registration-result';document.getElementById('ntPassword').value=makeRandomPassword();};
   const closeTeacherModal=()=>{teacherModal.classList.remove('show');teacherModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('openTeacherModal').addEventListener('click',openTeacherModal);
   document.getElementById('closeTeacherModal').addEventListener('click',closeTeacherModal);
   document.getElementById('cancelTeacherModal').addEventListener('click',closeTeacherModal);
+  document.getElementById('generateTeacherPassword').addEventListener('click',()=>{document.getElementById('ntPassword').value=makeRandomPassword()});
   teacherModal.addEventListener('click',e=>{if(e.target===teacherModal)closeTeacherModal()});
   document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);
 
@@ -1165,11 +1173,11 @@
       const data=await dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'});
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
       tbody.innerHTML=data.map(t=>`<tr>
-        <td><b>${escapeHtml(t.employee_no||'—')}</b></td>
-        <td><strong>${escapeHtml(t.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.email||'')}</span></td>
+        <td><b>${escapeHtml(t.account_code||t.employee_no||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.employee_no||'')}</span></td>
+        <td><strong>${escapeHtml(t.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.internal_email||t.email||'')}</span></td>
+        <td>${escapeHtml(t.username||'لم يُنشأ')}</td>
         <td>${escapeHtml(t.specialization||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.subjects||'')}</span></td>
         <td>${escapeHtml(t.phone||'—')}</td>
-        <td>${escapeHtml(t.hire_date||'—')}</td>
         <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
         <td><span class="status ${t.status==='active'?'active':'watch'}">${t.status==='active'?'نشط':'غير نشط'}</span></td>
       </tr>`).join('');
@@ -1200,21 +1208,24 @@
       p_bank_name:document.getElementById('ntBankName').value.trim()||null,
       p_bank_account:document.getElementById('ntBankAccount').value.trim()||null,
       p_subject_names:subjects.length?subjects:null,
-      p_notes:document.getElementById('ntNotes').value.trim()||null
+      p_notes:document.getElementById('ntNotes').value.trim()||null,
+      p_username:document.getElementById('ntUsername').value.trim()||null,
+      p_password:document.getElementById('ntPassword').value,
+      p_generate_password:false
     };
     if(!payload.p_full_name){teacherFormMsg.textContent='اسم المعلم مطلوب.';teacherFormMsg.className='student-form-msg error show';return}
     saveTeacherBtn.disabled=true;saveTeacherBtn.textContent='جارٍ الحفظ...';
     try{
       const result=await dataApiFetch('/rpc/register_new_teacher',{method:'POST',body:JSON.stringify(payload)});
       const r=Array.isArray(result)?result[0]:result;
-      teacherRegistrationResult.innerHTML=`<h4>✓ تم تسجيل المعلم بنجاح</h4><div class="result-grid">
-        <div class="result-item"><span>الرقم الوظيفي</span><b>${escapeHtml(r?.employee_no||'—')}</b></div>
-        <div class="result-item"><span>المعلم</span><b>${escapeHtml(r?.full_name||payload.p_full_name)}</b></div>
-        <div class="result-item"><span>تاريخ الالتحاق</span><b>${escapeHtml(r?.hire_date||payload.p_hire_date)}</b></div>
-        <div class="result-item"><span>نظام المرتب</span><b>${escapeHtml(salaryLabels[r?.salary_type||salaryType]||salaryType)}</b></div>
+      teacherRegistrationResult.innerHTML=`<h4>✓ تم تسجيل المعلم وإنشاء حسابه</h4><div class="result-grid">
+        <div class="result-item"><span>كود المعلم</span><b>${escapeHtml(r?.account_code||r?.employee_no||'—')}</b></div>
+        <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||payload.p_username||'—')}</b></div>
+        <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
+        <div class="result-item"><span>بريد ROVEN</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
       </div>`;
       teacherRegistrationResult.className='registration-result show';
-      teacherFormMsg.textContent='تم حفظ بيانات المعلم وبيانات التوظيف والمرتب والمواد في قاعدة البيانات.';
+      teacherFormMsg.textContent='تم حفظ بيانات المعلم وإنشاء كود واسم مستخدم وكلمة مرور وبريد ROVEN داخلي.';
       teacherFormMsg.className='student-form-msg success show';
       await loadTeachers();
       newTeacherForm.reset();document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);document.getElementById('ntSalaryAmountLabel').textContent='المرتب الشهري';
