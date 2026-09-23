@@ -190,6 +190,8 @@
     .teacher-hero{background:linear-gradient(135deg,#0f766e,#163e63);color:#fff;border-radius:22px;padding:22px 24px;display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:16px;box-shadow:0 16px 36px rgba(15,118,110,.18)}.teacher-hero h2{margin:5px 0 5px;font-size:24px}.teacher-hero p{margin:0;color:rgba(255,255,255,.8);font-size:12px}.teacher-kicker{font-size:10px;font-weight:800;letter-spacing:.12em;color:#bff5e9}.teacher-hero-code{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);padding:11px 14px;border-radius:14px;min-width:150px}.teacher-hero-code span{display:block;font-size:9px;color:rgba(255,255,255,.7)}.teacher-hero-code b{display:block;margin-top:3px;direction:ltr;font-size:15px}.teacher-hub-grid{align-items:stretch}.teacher-hub-group{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:11px 0;border-bottom:1px solid #edf2f7}.teacher-hub-group:last-child{border-bottom:0}.teacher-hub-group b{display:block}.teacher-hub-group span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.teacher-money-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.teacher-money-row>div{background:#f8fbfd;border:1px solid #e7eef4;border-radius:13px;padding:12px}.teacher-money-row span{display:block;color:var(--muted);font-size:10px}.teacher-money-row b{display:block;font-size:18px;margin-top:5px}.teacher-finance-mini-note{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.7}.room-request-status{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800}.room-request-status.pending{background:#fff7dd;color:#8a6500}.room-request-status.approved,.room-request-status.created{background:#e8f7f1;color:#137a59}.room-request-status.rejected{background:#fff0f0;color:#b23c3c}.teacher-room-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:780px){.teacher-hero{align-items:flex-start;flex-direction:column}.teacher-hub-grid{grid-template-columns:1fr}.teacher-money-row{grid-template-columns:1fr}.teacher-hub-stats{grid-template-columns:repeat(2,1fr)}}
 
     .teacher-upcoming-list{display:grid;gap:8px}.teacher-upcoming-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:11px 12px;border:1px solid #e6eef4;border-radius:14px;background:#fbfdff}.teacher-upcoming-time{min-width:72px;text-align:center;background:#edf8f6;color:#0f766e;border-radius:11px;padding:8px;font-weight:800}.teacher-upcoming-item b{display:block;font-size:13px}.teacher-upcoming-item span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.teacher-upcoming-actions{display:flex;gap:6px;flex-wrap:wrap}.teacher-agreement-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}.teacher-agreement-summary>div{padding:10px 12px;border-radius:12px;background:#f8fbfd;border:1px solid #e5edf4}.teacher-agreement-summary span{display:block;font-size:9px;color:var(--muted)}.teacher-agreement-summary b{display:block;font-size:17px;margin-top:4px}.teacher-student-status{font-size:10px}.teacher-hub-group .room-actions{justify-content:flex-end}@media(max-width:780px){.teacher-upcoming-item{grid-template-columns:1fr}.teacher-upcoming-time{text-align:right}.teacher-agreement-summary{grid-template-columns:repeat(2,1fr)}}
+
+    .account-category-cards{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}.account-category{border:1px solid #e2eaf1;background:#f8fbfd;border-radius:12px;padding:10px 9px;text-align:right;cursor:pointer;font:inherit;color:var(--text)}.account-category span{display:block;font-size:9px;color:var(--muted)}.account-category b{display:block;font-size:18px;margin-top:3px}.account-category.active{border-color:#9dd7cd;background:#edf9f6;color:#0f766e}.account-directory-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px}.account-security-note{font-size:10px;color:#8a6500;background:#fff8df;border:1px solid #f1e2a9;border-radius:10px;padding:8px 10px}.account-password-mask{font-family:monospace;letter-spacing:2px;color:#64748b}.account-type-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:#eef4fb;color:#35526f;font-size:10px;font-weight:800}.account-identity-card{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}.account-identity-card>div{background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px;padding:10px}.account-identity-card span{display:block;font-size:9px;color:var(--muted)}.account-identity-card b{display:block;margin-top:3px;font-size:12px;word-break:break-word}.credential-generate-option{display:flex;gap:8px;align-items:flex-start;font-size:11px;color:var(--muted);margin-top:5px}.teacher-edit-btn{white-space:nowrap}@media(max-width:950px){.account-category-cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.account-category-cards{grid-template-columns:repeat(2,1fr)}.account-directory-toolbar{align-items:stretch;flex-direction:column}.account-identity-card{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -343,8 +345,8 @@
           <div class="panel-head"><div><h3>المعلمون المسجلون</h3><p>البيانات الوظيفية والمالية الحالية</p></div><button class="link-btn" id="refreshTeachers" type="button">تحديث</button></div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>كود المعلم</th><th>المعلم</th><th>اسم المستخدم</th><th>التخصص / المواد</th><th>الجوال</th><th>المرتب</th><th>الحالة</th></tr></thead>
-              <tbody id="teachersRows"><tr><td colspan="7" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المعلمين.</td></tr></tbody>
+              <thead><tr><th>كود المعلم</th><th>المعلم</th><th>اسم المستخدم</th><th>التخصص / المواد</th><th>الجوال</th><th>المرتب</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody id="teachersRows"><tr><td colspan="8" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض المعلمين.</td></tr></tbody>
             </table>
           </div>
         </article>
@@ -611,6 +613,34 @@
             </table>
           </div>
         </article>
+
+        <article class="panel account-directory-panel" style="margin-top:15px">
+          <div class="panel-head">
+            <div><h3>دليل حسابات المنصة</h3><p>جميع حسابات ROVEN حسب التصنيف مع إدارة اسم المستخدم وإعادة توليد كلمة المرور.</p></div>
+            <button class="link-btn" id="refreshAccountDirectory" type="button">تحديث الحسابات</button>
+          </div>
+
+          <div class="account-category-cards">
+            <button class="account-category active" type="button" data-account-filter="all"><span>الكل</span><b id="countAllAccounts">0</b></button>
+            <button class="account-category" type="button" data-account-filter="admin"><span>الإدارة</span><b id="countAdminAccounts">0</b></button>
+            <button class="account-category" type="button" data-account-filter="staff"><span>الهيئة والموظفون</span><b id="countStaffAccounts">0</b></button>
+            <button class="account-category" type="button" data-account-filter="teacher"><span>المعلمون</span><b id="countTeacherAccounts">0</b></button>
+            <button class="account-category" type="button" data-account-filter="student"><span>الطلاب</span><b id="countStudentAccounts">0</b></button>
+            <button class="account-category" type="button" data-account-filter="parent"><span>أولياء الأمور</span><b id="countParentAccounts">0</b></button>
+          </div>
+
+          <div class="account-directory-toolbar">
+            <div class="form-field" style="margin:0;min-width:260px;flex:1"><input id="accountDirectorySearch" placeholder="بحث بالاسم أو الكود أو اسم المستخدم..."></div>
+            <span class="account-security-note">🔐 كلمة المرور الحالية مشفرة ولا يمكن عرضها؛ يمكن إعادة تعيينها فقط.</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table" style="min-width:980px">
+              <thead><tr><th>المستخدم</th><th>التصنيف</th><th>الكود</th><th>اسم المستخدم</th><th>بريد ROVEN</th><th>كلمة المرور</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody id="accountDirectoryRows"><tr><td colspan="8" class="students-empty">اضغط تحديث الحسابات لعرض دليل المستخدمين.</td></tr></tbody>
+            </table>
+          </div>
+        </article>
       </section>
     </div>
   </main>
@@ -645,6 +675,34 @@
       </div>
       <div class="student-form-msg" id="teacherRoomReviewMsg"></div>
       <div class="student-form-actions"><button class="secondary-action" type="button" id="cancelTeacherRoomReview">إلغاء</button><button class="save-student" type="submit">حفظ وإرسال القرار</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="student-modal" id="accountCredentialsModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:690px">
+    <div class="student-dialog-head">
+      <div><h3 id="accountCredentialsTitle">إدارة بيانات الدخول</h3><p id="accountCredentialsSub">تعديل اسم المستخدم أو إصدار كلمة مرور جديدة.</p></div>
+      <button class="close-modal" type="button" id="closeAccountCredentials">×</button>
+    </div>
+    <form class="student-form" id="accountCredentialsForm">
+      <input id="credentialsAccountId" type="hidden">
+      <div class="account-identity-card">
+        <div><span>الاسم</span><b id="credentialsDisplayName">—</b></div>
+        <div><span>كود المنصة</span><b id="credentialsAccountCode">—</b></div>
+        <div><span>بريد ROVEN</span><b id="credentialsInternalEmail">—</b></div>
+      </div>
+      <div class="form-grid">
+        <div class="form-field"><label>اسم المستخدم <span class="required">*</span></label><input id="credentialsUsername" required autocomplete="off"></div>
+        <div class="form-field"><label>كلمة مرور جديدة</label><div style="display:flex;gap:8px"><input id="credentialsPassword" autocomplete="off" placeholder="اتركها فارغة واستخدم التوليد العشوائي"><button class="secondary-action" type="button" id="generateCredentialsPassword">توليد</button></div></div>
+      </div>
+      <label class="credential-generate-option"><input id="credentialsGeneratePassword" type="checkbox" checked> توليد كلمة مرور عشوائية جديدة وإلغاء جميع الجلسات القديمة لهذا المستخدم</label>
+      <div class="student-form-msg" id="credentialsMsg"></div>
+      <div class="registration-result" id="credentialsResult"></div>
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="cancelAccountCredentials">إلغاء</button>
+        <button class="save-student" type="submit" id="saveAccountCredentials">حفظ / إعادة تعيين</button>
+      </div>
     </form>
   </div>
 </div>
