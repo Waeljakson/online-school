@@ -2367,6 +2367,65 @@
   const teacherPricingLabel={monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'};
   const teacherRoomStatusLabel={pending:'قيد المراجعة',approved:'تمت الموافقة',created:'تم إنشاء القاعة',rejected:'مرفوض'};
   let adminRoomRequestCache=new Map();
+  let teacherPrivateStudentsCache=[];
+  let teacherPrivateGroupIds=new Set();
+  let teacherHubGroupsCache=[];
+  let currentTeacherStudentsGroupId='';
+  let currentTeacherStudentsGroupName='';
+
+  const teacherPrivateStudentRecords=rows=>{
+    const map=new Map();
+    (rows||[]).filter(m=>String(m.subject||'').startsWith('[PRIVATE_STUDENT]')).sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0)).forEach(m=>{
+      const x=teacherSafeJson(m.body);
+      if(x?.private_student_id)map.set(String(x.private_student_id),{...x,_sent_at:m.sent_at});
+    });
+    return [...map.values()].filter(x=>x.status!=='deleted').sort((a,b)=>String(a.full_name||'').localeCompare(String(b.full_name||''),'ar'));
+  };
+
+  const privateStudentCode=()=>('TPS-'+Date.now().toString(36).toUpperCase()).slice(0,18);
+
+  const privateStudentsByGroup=groupId=>teacherPrivateStudentsCache.filter(s=>String(s.group_id||'')===String(groupId));
+
+  const renderTeacherPrivateStudents=()=>{
+    const tbody=document.getElementById('teacherPrivateStudentsRows');
+    if(!tbody)return;
+    if(!teacherPrivateStudentsCache.length){
+      tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد طلاب خاصون بعد. أضف طالبًا بعد إنشاء قاعتك الخاصة.</td></tr>';
+      return;
+    }
+    tbody.innerHTML=teacherPrivateStudentsCache.map(s=>`<tr>
+      <td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
+      <td><b>${escapeHtml(s.full_name||'—')}</b></td>
+      <td>${escapeHtml(s.group_name||'—')}</td>
+      <td>${escapeHtml(s.phone||'—')}</td>
+      <td>${escapeHtml(s.parent_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(s.parent_phone||'')}</span></td>
+      <td><span class="status active">خاص بالمعلم</span></td>
+      <td><button class="secondary-action private-student-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button></td>
+    </tr>`).join('');
+  };
+
+  const renderPrivateStudentsForRoom=groupId=>{
+    const tbody=document.getElementById('teacherPrivateRoomRows');
+    const addBtn=document.getElementById('addPrivateStudentFromRoom');
+    if(!tbody||!addBtn)return;
+    const isPrivateRoom=teacherPrivateGroupIds.has(String(groupId));
+    addBtn.style.display=isPrivateRoom?'':'none';
+    if(!isPrivateRoom){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">هذه قاعة ROVEN School؛ لا يمكن إضافة طلابك الخاصين إليها.</td></tr>';
+      return;
+    }
+    const rows=privateStudentsByGroup(groupId);
+    if(!rows.length){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا يوجد طلاب خاصون في هذه القاعة بعد.</td></tr>';
+      return;
+    }
+    tbody.innerHTML=rows.map((s,i)=>`<tr>
+      <td>${i+1}</td><td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
+      <td><b>${escapeHtml(s.full_name||'—')}</b></td><td>${escapeHtml(s.phone||'—')}</td>
+      <td>${escapeHtml(s.parent_name||'—')}</td>
+      <td><button class="secondary-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button></td>
+    </tr>`).join('');
+  };
 
   const parseScheduleSessions=schedule=>{
     let value=schedule;
@@ -2377,16 +2436,16 @@
   const markInternalTeacherMailRead=async rows=>{
     const internal=(rows||[]).filter(m=>{
       const s=String(m.subject||'');
-      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]')||s.startsWith('[ROOM_CREATED]'));
+      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]')||s.startsWith('[ROOM_CREATED]')||s.startsWith('[PRIVATE_STUDENT]'));
     });
     await Promise.allSettled(internal.map(m=>dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:m.message_id})})));
   };
 
-  const renderTeacherHubGroups=(groups,studentCountByGroup)=>{
+  const renderTeacherHubGroups=(groups,studentCountByGroup,privateCountByGroup)=>{
     const box=document.getElementById('teacherHubGroups');
     if(!groups.length){box.innerHTML='<div class="students-empty">لا توجد قاعات مسندة لك حتى الآن.</div>';return}
     box.innerHTML=groups.map(g=>`<div class="teacher-hub-group">
-      <div><b>${escapeHtml(g.group_name)}</b><span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span></div>
+      <div><b>${escapeHtml(g.group_name)}</b><span>${escapeHtml(g.subject_name||'بدون مادة')} • ${Number(studentCountByGroup.get(String(g.group_id))||0)} طالب ROVEN • ${Number(privateCountByGroup.get(String(g.group_id))||0)} طالب خاص • ${parseScheduleSessions(g.schedule_json).length} حصة أسبوعيًا</span></div>
       <div class="room-actions">
         ${g.meeting_url?`<a class="secondary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">دخول الحصة ↗</a>`:''}
         <button class="secondary-action teacher-students-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}">الطلاب</button>
@@ -2473,6 +2532,17 @@
     const sent=sentResult.status==='fulfilled'&&Array.isArray(sentResult.value)?sentResult.value:[];
     const directory=directoryResult.status==='fulfilled'&&Array.isArray(directoryResult.value)?directoryResult.value:[];
 
+    teacherHubGroupsCache=groups;
+    teacherPrivateGroupIds=new Set(
+      inbox.filter(m=>String(m.subject||'').startsWith('[ROOM_CREATED]'))
+        .map(m=>teacherSafeJson(m.body))
+        .filter(x=>x?.group_id)
+        .map(x=>String(x.group_id))
+    );
+    teacherPrivateStudentsCache=teacherPrivateStudentRecords(inbox)
+      .filter(s=>teacherPrivateGroupIds.has(String(s.group_id||'')));
+    renderTeacherPrivateStudents();
+
     markInternalTeacherMailRead(inbox).catch(()=>{});
 
     const rosterResults=await Promise.allSettled(groups.slice(0,40).map(g=>
@@ -2489,11 +2559,14 @@
     const lessonMarkers=inbox.filter(m=>String(m.subject||'').startsWith('[TAUGHT_LESSON]')).map(m=>teacherSafeJson(m.body)).filter(Boolean);
     const taughtKeys=new Set(lessonMarkers.map(x=>String(x.group_id||'')+'|'+String(x.date||'')));
     document.getElementById('teacherTaughtCount').textContent=String([...taughtKeys].filter(x=>x!=='|').length);
-    document.getElementById('teacherStudentsCount').textContent=String(uniqueStudents.size);
+    document.getElementById('teacherStudentsCount').textContent=String(teacherPrivateStudentsCache.length);
+    document.getElementById('teacherAssignedStudentsCount').textContent=String(uniqueStudents.size);
     document.getElementById('teacherGroupsCount').textContent=String(groups.length);
     document.getElementById('teacherWeeklyCount').textContent=String(weekly);
+    const privateCountByGroup=new Map();
+    teacherPrivateStudentsCache.forEach(s=>privateCountByGroup.set(String(s.group_id),Number(privateCountByGroup.get(String(s.group_id))||0)+1));
     renderTeacherUpcoming(groups);
-    renderTeacherHubGroups(groups,studentCountByGroup);
+    renderTeacherHubGroups(groups,studentCountByGroup,privateCountByGroup);
 
     const financeEntries=inbox
       .filter(m=>String(m.subject||'').startsWith('[TEACHER_FINANCE]'))
@@ -3011,7 +3084,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -3275,7 +3348,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
