@@ -383,10 +383,19 @@
             <div><span>اتفاقات معتمدة</span><b id="roomApprovedCount">0</b></div>
             <div><span>شهري متفق</span><b id="roomMonthlyTotal">0.00</b></div>
             <div><span>لكل حصة</span><b id="roomSessionTotal">0.00</b></div>
+            <div><span>قاعات تديرها ROVEN</span><b id="roomManagedCount">0</b></div>
+            <div><span>رسوم إدارة شهرية</span><b id="roomManagementMonthlyTotal">0.00</b></div>
           </div>
           <div class="table-wrap"><table class="table" style="min-width:900px">
-            <thead><tr><th>المعلم</th><th>القاعة / المادة</th><th>السعر المقترح</th><th>السعر المتفق</th><th>الحالة</th><th>إجراء</th></tr></thead>
-            <tbody id="teacherRoomAdminRows"><tr><td colspan="6" class="students-empty">لا توجد طلبات معروضة.</td></tr>
+            <thead><tr><th>المعلم</th><th>القاعة / المادة</th><th>السعر المقترح</th><th>السعر المتفق</th><th>الإدارة</th><th>الحالة</th><th>إجراء</th></tr></thead>
+            <tbody id="teacherRoomAdminRows"><tr><td colspan="7" class="students-empty">لا توجد طلبات معروضة.</td></tr>
+          </table></div>
+        </article>
+        <article class="panel" id="managedTeacherRoomsPanel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>قاعات خاصة تديرها ROVEN</h3><p>القاعات التي اختار المعلم إسناد الحضور والتحصيل والمتابعة فيها للمنصة.</p></div><button class="link-btn" id="refreshManagedTeacherRooms" type="button">تحديث</button></div>
+          <div class="table-wrap"><table class="table" style="min-width:850px">
+            <thead><tr><th>المعلم</th><th>القاعة</th><th>رسوم الخدمة</th><th>طلاب خاصون</th><th>التحصيل</th><th>إدارة</th></tr></thead>
+            <tbody id="managedTeacherRoomsRows"><tr><td colspan="6" class="students-empty">لا توجد قاعات خاصة مدارة بواسطة ROVEN.</td></tr>
           </table></div>
         </article>
       </section>
@@ -628,6 +637,7 @@
                 <div class="form-field"><label>الصف</label><input id="teacherRoomGrade"></div>
                 <div class="form-field"><label>السعر المقترح</label><input id="teacherRoomPrice" type="number" min="0" step="0.01" placeholder="اختياري"></div>
                 <div class="form-field"><label>طريقة الحساب</label><select id="teacherRoomPricing"><option value="monthly">شهري</option><option value="per_student">لكل طالب</option><option value="per_session">لكل حصة</option><option value="fixed">مبلغ ثابت</option><option value="custom">حسب الاتفاق</option></select></div>
+                <div class="form-field"><label>إدارة القاعة</label><select id="teacherRoomManagementMode"><option value="teacher">أديرها بنفسي</option><option value="roven">ROVEN تدير الحضور والتحصيل والمتابعة</option></select></div>
                 <div class="form-field"><label>ملاحظات</label><input id="teacherRoomNotes" placeholder="تفاصيل أو شروط الاتفاق"></div>
               </div>
               <div class="student-form-msg" id="teacherRoomMsg"></div>
@@ -882,6 +892,9 @@
       <div class="form-grid">
         <div class="form-field"><label>السعر المتفق عليه <span class="required">*</span></label><input id="reviewRoomAgreedPrice" type="number" min="0" step="0.01" required></div>
         <div class="form-field"><label>طريقة الحساب</label><select id="reviewRoomPricing"><option value="monthly">شهري</option><option value="per_student">لكل طالب</option><option value="per_session">لكل حصة</option><option value="fixed">مبلغ ثابت</option><option value="custom">حسب الاتفاق</option></select></div>
+        <div class="form-field"><label>إدارة القاعة</label><select id="reviewRoomManagementMode"><option value="teacher">المعلم يدير القاعة</option><option value="roven">ROVEN تدير القاعة</option></select></div>
+        <div class="form-field"><label>رسوم خدمة إدارة ROVEN</label><input id="reviewRoomManagementFee" type="number" min="0" step="0.01" value="0"></div>
+        <div class="form-field"><label>حساب رسوم الإدارة</label><select id="reviewRoomManagementFeeBasis"><option value="monthly">شهري</option><option value="per_student">لكل طالب</option><option value="per_session">لكل حصة</option><option value="fixed">مبلغ ثابت</option><option value="custom">حسب الاتفاق</option></select></div>
         <div class="form-field"><label>القرار</label><select id="reviewRoomStatus"><option value="approved">موافقة</option><option value="rejected">رفض</option></select></div>
         <div class="form-field"><label>ملاحظة الإدارة</label><input id="reviewRoomNote"></div>
       </div>
