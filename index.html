@@ -1374,7 +1374,7 @@
   document.getElementById('generateUserPassword').addEventListener('click',()=>{document.getElementById('nuPassword').value=makeRandomPassword()});
   userModal.addEventListener('click',e=>{if(e.target===userModal)closeUserModal()});
 
-  const roleBadge=role=>'<span class="role-badge role-'+escapeHtml(role)+'">'+(roleIcons[role]||'•')+' '+escapeHtml(roleLabels[role]||role)+'</span>';
+  const roleBadge=role=>'<span class="role-badge role-'+escapeHtml(role||'user')+'">'+(roleIcons[role]||'•')+' '+escapeHtml(roleLabels[role]||({admin:'إدارة',staff:'هيئة / موظف',student:'طالب',parent:'ولي أمر'}[role]||role||'مستخدم'))+'</span>';
 
   let accountDirectoryCache=[];
   let accountDirectoryFilter='all';
@@ -1428,22 +1428,20 @@
     const tbody=document.getElementById('accountDirectoryRows');
     tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل جميع حسابات المنصة...</td></tr>';
     try{
-      const [profile,directory,systemUsers]=await Promise.all([
+      const [profile,directory]=await Promise.all([
         dataApiFetch('/rpc/platform_my_profile',{method:'POST',body:'{}'}),
-        dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'}),
-        dataApiFetch('/rpc/list_system_users_admin',{method:'POST',body:'{}'})
+        dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
       ]);
 
-      const roleByAccount=new Map((systemUsers||[]).filter(x=>x.account_id).map(x=>[String(x.account_id),x.role]));
       const combined=[];
       if(profile?.account_id)combined.push({...profile,is_active:true});
-      (directory||[]).forEach(a=>combined.push({...a,is_active:true}));
+      (directory||[]).forEach(a=>combined.push({...a,is_active:a.is_active!==false}));
 
       const dedup=new Map();
       combined.forEach(a=>{
         const id=String(a.account_id||'');
         if(!id)return;
-        dedup.set(id,{...a,role:a.role||roleByAccount.get(id)||null});
+        dedup.set(id,{...a});
       });
       accountDirectoryCache=[...dedup.values()].sort((a,b)=>String(a.display_name||'').localeCompare(String(b.display_name||''),'ar'));
       updateAccountDirectoryCounts();
@@ -1452,7 +1450,6 @@
       tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(String(err.message||'تعذر تحميل دليل الحسابات'))+'</td></tr>';
     }
   };
-
   document.getElementById('refreshAccountDirectory').addEventListener('click',loadAccountDirectory);
   document.getElementById('accountDirectorySearch').addEventListener('input',renderAccountDirectory);
   document.querySelectorAll('.account-category').forEach(btn=>btn.addEventListener('click',()=>{
@@ -1466,53 +1463,34 @@
     const tbody=document.getElementById('systemUsersRows');
     tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل المستخدمين...</td></tr>';
     try{
-      const data=await dataApiFetch('/rpc/list_system_users_admin',{method:'POST',body:'{}'});
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد حسابات مستخدمين.</td></tr>';return}
-      tbody.innerHTML=data.map(u=>`<tr data-user-id="${escapeHtml(u.app_user_id)}">
-        <td><strong>${escapeHtml(u.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.email||u.phone||'')}</span></td>
-        <td><b>${escapeHtml(u.account_code||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.internal_email||'')}</span></td>
-        <td>${escapeHtml(u.username||'لم يُنشأ')}</td>
-        <td>
-          <select class="form-field user-role-select row-role">
-            <option value="super_admin" ${u.role==='super_admin'?'selected':''}>مدير نظام</option>
-            <option value="school_manager" ${u.role==='school_manager'?'selected':''}>مدير</option>
-            <option value="academic_admin" ${u.role==='academic_admin'?'selected':''}>عضو هيئة تعليمية</option>
-            <option value="finance_admin" ${u.role==='finance_admin'?'selected':''}>مسؤول مالي</option>
-            <option value="secretary" ${u.role==='secretary'?'selected':''}>سكرتير</option>
-            <option value="teacher" ${u.role==='teacher'?'selected':''}>معلم</option>
-            <option value="reception" ${u.role==='reception'?'selected':''}>طاقم إداري</option>
-          </select>
-        </td>
-        <td><span class="status ${u.is_active?'active':'watch'}">${u.is_active?'نشط':'موقوف'}</span></td>
+      const data=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
+      const rows=(Array.isArray(data)?data:[]).filter(u=>['admin','staff','teacher'].includes(String(u.account_type||'')));
+      if(!rows.length){
+        tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد حسابات إدارية أو تعليمية معروضة.</td></tr>';
+        return;
+      }
+      tbody.innerHTML=rows.map(u=>`<tr>
+        <td><strong>${escapeHtml(u.display_name||'مستخدم')}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(u.internal_email||'')}</span></td>
+        <td><b>${escapeHtml(u.account_code||'—')}</b></td>
+        <td>${escapeHtml(u.username||'—')}</td>
+        <td>${roleBadge(u.role||(
+          u.account_type==='teacher'?'teacher':
+          u.account_type==='admin'?'school_manager':'reception'
+        ))}</td>
+        <td><span class="status active">نشط</span></td>
         <td><div class="user-actions">
-          <button class="mini-btn primary save-user-role" type="button">حفظ</button>
-          <button class="mini-btn ${u.is_active?'danger':'primary'} toggle-user-active" type="button" data-active="${u.is_active?'1':'0'}">${u.is_active?'إيقاف':'تفعيل'}</button>
+          <button class="mini-btn primary open-directory-credentials" type="button" data-account-id="${escapeHtml(u.account_id||'')}">إدارة الدخول</button>
         </div></td>
       </tr>`).join('');
-
-      tbody.querySelectorAll('.save-user-role').forEach(btn=>btn.addEventListener('click',async()=>{
-        const tr=btn.closest('tr'),id=tr.dataset.userId,role=tr.querySelector('.row-role').value;
-        btn.disabled=true;btn.textContent='جارٍ الحفظ...';
-        try{
-          await dataApiFetch('/rpc/update_system_user_admin',{method:'POST',body:JSON.stringify({p_app_user_id:id,p_role:role,p_is_active:true,p_teacher_id:null})});
-          await loadSystemUsers();
-        }catch(err){alert(err.message||'تعذر تحديث الصلاحية');btn.disabled=false;btn.textContent='حفظ الصلاحية'}
-      }));
-
-      tbody.querySelectorAll('.toggle-user-active').forEach(btn=>btn.addEventListener('click',async()=>{
-        const tr=btn.closest('tr'),id=tr.dataset.userId,role=tr.querySelector('.row-role').value,current=btn.dataset.active==='1';
-        if(!confirm(current?'هل تريد إيقاف هذا المستخدم؟':'هل تريد تفعيل هذا المستخدم؟'))return;
-        btn.disabled=true;
-        try{
-          await dataApiFetch('/rpc/update_system_user_admin',{method:'POST',body:JSON.stringify({p_app_user_id:id,p_role:role,p_is_active:!current,p_teacher_id:null})});
-          await loadSystemUsers();
-        }catch(err){alert(err.message||'تعذر تحديث حالة المستخدم');btn.disabled=false}
-      }));
     }catch(err){
-      tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(String(err.message||'تعذر تحميل المستخدمين').includes('not_authorized')?'إدارة المستخدمين متاحة لمدير النظام فقط.':(err.message||'تعذر تحميل المستخدمين'))+'</td></tr>';
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المستخدمين')+'</td></tr>';
     }
   };
   document.getElementById('refreshUsers').addEventListener('click',loadSystemUsers);
+  document.getElementById('systemUsersRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.open-directory-credentials');
+    if(btn&&btn.dataset.accountId)openAccountCredentials(btn.dataset.accountId);
+  });
 
   const accountCredentialsModal=document.getElementById('accountCredentialsModal');
   const credentialsMsg=document.getElementById('credentialsMsg');
