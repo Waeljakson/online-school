@@ -168,6 +168,18 @@ async function ensureSchema(){
     await sql`create index if not exists tps_teacher_idx on public.teacher_private_students(teacher_account_id,status)`;
     await sql`create index if not exists cert_student_idx on public.platform_certificates(student_id,issued_at desc)`;
     await sql`create index if not exists exam_owner_idx on public.platform_exams(owner_account_id,created_at desc)`;
+    await sql`create table if not exists public.platform_entity_archive(
+      school_id uuid not null references public.schools(id) on delete cascade,
+      entity_type text not null check(entity_type in ('student','teacher','group','account')),
+      entity_id uuid not null,
+      label text,
+      snapshot jsonb,
+      archived_by_account_id uuid references public.platform_accounts(id) on delete set null,
+      archived_at timestamptz not null default now(),
+      primary key(school_id,entity_type,entity_id)
+    )`;
+    await sql`create index if not exists platform_entity_archive_school_idx
+      on public.platform_entity_archive(school_id,entity_type,archived_at desc)`;
   })();
   return schemaReady;
 }
@@ -758,21 +770,152 @@ async function custom(action,a,p){
       order by s.full_name`;
   }
 
-  if(action==='archive_school_entity'){
-    must(a,String(a.role||'')==='super_admin'||String(a.role||'')==='school_manager'||a.account_type==='admin');
-    const type=String(p.p_type||''),id=String(p.p_id||'');
-    if(type==='student'){
-      await sql`update public.students set status='withdrawn' where id=${id}::uuid and school_id=${a.school_id}`;
-      await sql`update public.platform_accounts set is_active=false,updated_at=now() where student_id=${id}::uuid`;
+  const adminEntityAllowed=()=>a.account_type==='admin'||['super_admin','school_manager'].includes(String(a.role||''));
+
+  if(action==='admin_accounts_all'){
+    must(a,adminEntityAllowed());
+    return await sql`select pa.id account_id,pa.account_type,pa.account_code,pa.username,pa.internal_email,
+      pa.display_name,pa.is_active,pa.student_id,pa.teacher_id,pa.parent_id,pa.app_user_id,u.role
+      from public.platform_accounts pa
+      left join public.app_users u on u.id=pa.app_user_id
+      where pa.school_id=${a.school_id}
+        and not exists(
+          select 1 from public.platform_entity_archive ar
+          where ar.school_id=pa.school_id and ar.entity_type='account' and ar.entity_id=pa.id
+        )
+        and not exists(
+          select 1 from public.platform_entity_archive ar
+          where ar.school_id=pa.school_id and (
+            (ar.entity_type='student' and ar.entity_id=pa.student_id) or
+            (ar.entity_type='teacher' and ar.entity_id=pa.teacher_id)
+          )
+        )
+      order by pa.display_name nulls last,pa.created_at desc`;
+  }
+
+  if(action==='admin_students_all'){
+    must(a,adminEntityAllowed());
+    return await sql`select s.*,s.id student_id,g.name grade_name,
+      pa.id account_id,pa.account_code,pa.username,pa.internal_email,coalesce(pa.is_active,false) account_active
+      from public.students s
+      left join public.grades g on g.id=s.grade_id
+      left join public.platform_accounts pa on pa.student_id=s.id
+      where s.school_id=${a.school_id}
+        and not exists(
+          select 1 from public.platform_entity_archive ar
+          where ar.school_id=s.school_id and ar.entity_type='student' and ar.entity_id=s.id
+        )
+      order by (s.status='active') desc,s.full_name`;
+  }
+
+  if(action==='admin_teachers_all'){
+    must(a,adminEntityAllowed());
+    return await sql`select t.*,t.id teacher_id,
+      pa.id account_id,pa.account_code,pa.username,pa.internal_email,coalesce(pa.is_active,false) account_active
+      from public.teachers t
+      left join public.platform_accounts pa on pa.teacher_id=t.id
+      where t.school_id=${a.school_id}
+        and not exists(
+          select 1 from public.platform_entity_archive ar
+          where ar.school_id=t.school_id and ar.entity_type='teacher' and ar.entity_id=t.id
+        )
+      order by (t.status='active') desc,t.full_name`;
+  }
+
+  if(action==='admin_groups_all'){
+    must(a,adminEntityAllowed());
+    return await sql`select g.id group_id,g.name group_name,g.schedule_json,g.meeting_url,g.meeting_provider,g.is_active,
+      coalesce((select count(*) from public.enrollments en where en.group_id=g.id and en.status='active'),0)::int students_count
+      from public.study_groups g
+      where g.school_id=${a.school_id}
+        and not exists(
+          select 1 from public.platform_entity_archive ar
+          where ar.school_id=g.school_id and ar.entity_type='group' and ar.entity_id=g.id
+        )
+      order by g.is_active desc,g.name`;
+  }
+
+  if(action==='admin_entity_set_active'){
+    must(a,adminEntityAllowed());
+    const type=String(p.p_type||''),id=String(p.p_id||''),active=p.p_active!==false;
+    if(!id)throw new Error('entity_id_required');
+    if(type==='account'){
+      if(String(id)===String(a.account_id)&&!active)throw new Error('cannot_disable_current_account');
+      const target=(await sql`select id,app_user_id from public.platform_accounts
+        where id=${id}::uuid and school_id=${a.school_id} limit 1`)[0];
+      if(!target)throw new Error('account_not_found');
+      await sql`update public.platform_accounts set is_active=${active},updated_at=now() where id=${id}::uuid`;
+      if(target.app_user_id)await sql`update public.app_users set is_active=${active},updated_at=now() where id=${target.app_user_id}`;
+    }else if(type==='student'){
+      await sql`update public.students set status=${active?'active':'withdrawn'} where id=${id}::uuid and school_id=${a.school_id}`;
+      const accts=await sql`select id,app_user_id from public.platform_accounts where student_id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.platform_accounts set is_active=${active},updated_at=now() where student_id=${id}::uuid and school_id=${a.school_id}`;
+      for(const x of accts)if(x.app_user_id)await sql`update public.app_users set is_active=${active},updated_at=now() where id=${x.app_user_id}`;
     }else if(type==='teacher'){
-      await sql`update public.teachers set status='inactive' where id=${id}::uuid and school_id=${a.school_id}`;
-      await sql`update public.platform_accounts set is_active=false,updated_at=now() where teacher_id=${id}::uuid`;
+      await sql`update public.teachers set status=${active?'active':'inactive'} where id=${id}::uuid and school_id=${a.school_id}`;
+      const accts=await sql`select id,app_user_id from public.platform_accounts where teacher_id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.platform_accounts set is_active=${active},updated_at=now() where teacher_id=${id}::uuid and school_id=${a.school_id}`;
+      for(const x of accts)if(x.app_user_id)await sql`update public.app_users set is_active=${active},updated_at=now() where id=${x.app_user_id}`;
     }else if(type==='group'){
-      await sql`update public.study_groups set is_active=false where id=${id}::uuid and school_id=${a.school_id}`;
-    }else if(type==='account'){
-      await sql`update public.platform_accounts set is_active=false,updated_at=now() where id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.study_groups set is_active=${active} where id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.teacher_room_management set is_active=${active},updated_at=now()
+        where group_id=${id}::uuid and school_id=${a.school_id}`;
     }else throw new Error('unsupported_entity');
-    return {archived:true};
+    return {updated:true,is_active:active};
+  }
+
+  if(action==='admin_entity_delete'){
+    must(a,adminEntityAllowed());
+    const type=String(p.p_type||''),id=String(p.p_id||'');
+    if(!id)throw new Error('entity_id_required');
+    if(type==='account'&&String(id)===String(a.account_id))throw new Error('cannot_delete_current_account');
+
+    let label=null,snapshot=null;
+    if(type==='student'){
+      const row=(await sql`select * from public.students where id=${id}::uuid and school_id=${a.school_id} limit 1`)[0];
+      if(!row)throw new Error('student_not_found');
+      label=row.full_name;snapshot=row;
+      await sql`update public.students set status='withdrawn' where id=${id}::uuid and school_id=${a.school_id}`;
+      const accts=await sql`select id,app_user_id from public.platform_accounts where student_id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.platform_accounts set is_active=false,updated_at=now() where student_id=${id}::uuid and school_id=${a.school_id}`;
+      for(const x of accts)if(x.app_user_id)await sql`update public.app_users set is_active=false,updated_at=now() where id=${x.app_user_id}`;
+    }else if(type==='teacher'){
+      const row=(await sql`select * from public.teachers where id=${id}::uuid and school_id=${a.school_id} limit 1`)[0];
+      if(!row)throw new Error('teacher_not_found');
+      label=row.full_name;snapshot=row;
+      await sql`update public.teachers set status='inactive' where id=${id}::uuid and school_id=${a.school_id}`;
+      const accts=await sql`select id,app_user_id from public.platform_accounts where teacher_id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.platform_accounts set is_active=false,updated_at=now() where teacher_id=${id}::uuid and school_id=${a.school_id}`;
+      for(const x of accts)if(x.app_user_id)await sql`update public.app_users set is_active=false,updated_at=now() where id=${x.app_user_id}`;
+    }else if(type==='group'){
+      const row=(await sql`select * from public.study_groups where id=${id}::uuid and school_id=${a.school_id} limit 1`)[0];
+      if(!row)throw new Error('group_not_found');
+      label=row.name;snapshot=row;
+      await sql`update public.study_groups set is_active=false where id=${id}::uuid and school_id=${a.school_id}`;
+      await sql`update public.teacher_room_management set is_active=false,updated_at=now()
+        where group_id=${id}::uuid and school_id=${a.school_id}`;
+    }else if(type==='account'){
+      const row=(await sql`select id,account_type,account_code,username,internal_email,display_name,is_active,app_user_id
+        from public.platform_accounts where id=${id}::uuid and school_id=${a.school_id} limit 1`)[0];
+      if(!row)throw new Error('account_not_found');
+      label=row.display_name;snapshot=row;
+      await sql`update public.platform_accounts set is_active=false,updated_at=now() where id=${id}::uuid`;
+      if(row.app_user_id)await sql`update public.app_users set is_active=false,updated_at=now() where id=${row.app_user_id}`;
+    }else throw new Error('unsupported_entity');
+
+    await sql`insert into public.platform_entity_archive(
+      school_id,entity_type,entity_id,label,snapshot,archived_by_account_id,archived_at
+    ) values(
+      ${a.school_id},${type},${id}::uuid,${label},${JSON.stringify(snapshot||{})}::jsonb,${a.account_id},now()
+    ) on conflict(school_id,entity_type,entity_id)
+      do update set label=excluded.label,snapshot=excluded.snapshot,
+        archived_by_account_id=excluded.archived_by_account_id,archived_at=now()`;
+    return {deleted:true,soft_delete:true};
+  }
+
+  if(action==='archive_school_entity'){
+    // Backward-compatible alias: archive means deactivate, not hard delete.
+    return await custom('admin_entity_set_active',a,{p_type:p.p_type,p_id:p.p_id,p_active:false});
   }
 
   throw new Error('unknown_custom_action');
@@ -826,7 +969,9 @@ export default{
         'exam_create','exam_save_questions','exam_publish','exam_delete','exam_list_owned',
         'exam_my_available','exam_get','exam_submit','exam_attempts_owned','exam_grade_essay',
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
-        'teacher_roven_contacts','school_contacts','archive_school_entity'
+        'teacher_roven_contacts','school_contacts','archive_school_entity',
+        'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
+        'admin_entity_set_active','admin_entity_delete'
       ]);
 
       if(customActions.has(action)){
