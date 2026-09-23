@@ -3498,6 +3498,206 @@
     })});
   };
 
+  // ===== ROVEN-managed teacher private rooms =====
+  let managedRoomDefsCache=[];
+  let managedRoomStudentsCache=[];
+  let managedRoomPaymentsCache=[];
+  let managedRoomAttendanceCache=[];
+  let activeManagedRoom=null;
+
+  const managedPrivateStudentRecords=rows=>{
+    const map=new Map();
+    rows.filter(m=>String(m.subject||'').startsWith('[MANAGED_PRIVATE_STUDENT]'))
+      .sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0))
+      .forEach(m=>{const x=mailPayload(m);if(x?.private_student_id)map.set(String(x.private_student_id),{...x,_mail:m})});
+    return [...map.values()].filter(x=>x.status!=='deleted');
+  };
+  const managedPrivatePaymentRecords=rows=>{
+    const all=[];
+    for(const prefix of ['MANAGED_PRIVATE_PAYMENT','MANAGED_PRIVATE_PAYMENT_ACTION']){
+      latestStructuredBy(rows,prefix,'payment_id').forEach(x=>all.push(x));
+    }
+    const map=new Map();all.forEach(x=>{if(x?.payment_id)map.set(String(x.payment_id),x)});
+    return [...map.values()];
+  };
+  const managedPrivateAttendanceRecords=rows=>{
+    const all=[];
+    for(const prefix of ['MANAGED_PRIVATE_ATTENDANCE','MANAGED_PRIVATE_ATTENDANCE_ACTION']){
+      latestStructuredBy(rows,prefix,'attendance_id').forEach(x=>all.push(x));
+    }
+    return all;
+  };
+  const managedAttendanceFor=(groupId,date)=>{
+    const map=new Map();
+    managedRoomAttendanceCache
+      .filter(x=>String(x.group_id)===String(groupId)&&String(x.date)===String(date))
+      .sort((a,b)=>new Date(a.saved_at||a._mail?.sent_at||0)-new Date(b.saved_at||b._mail?.sent_at||0))
+      .forEach(batch=>(batch.records||[]).forEach(r=>map.set(String(r.private_student_id),r.status||'present')));
+    return map;
+  };
+  const managedMonthPaid=(studentId,month=privateMonthKey())=>managedRoomPaymentsCache
+    .filter(p=>String(p.private_student_id)===String(studentId)&&privateMonthKey(p.date||p.created_at||p._mail?.sent_at)===month)
+    .reduce((s,p)=>s+Number(p.amount||0),0);
+
+  const loadManagedTeacherRooms=async()=>{
+    const panel=document.getElementById('managedTeacherRoomsPanel');
+    if(!panel)return;
+    const ctx=await hydratePlatformContext();
+    const role=String(ctx?.role||'');
+    const allowed=ctx?.account_type==='admin'||(ctx?.account_type==='staff'&&['academic_admin','secretary','reception'].includes(role));
+    panel.style.display=allowed?'':'none';
+    if(!allowed)return;
+
+    const tbody=document.getElementById('managedTeacherRoomsRows');
+    tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل القاعات...</td></tr>';
+    const inbox=await structuredMail('inbox');
+    const sent=await structuredMail('sent');
+    const all=inbox.concat(sent);
+    managedRoomDefsCache=latestStructuredBy(all,'ROOM_MANAGED','group_id')
+      .filter(x=>x.management_mode==='roven'&&x.group_id);
+    managedRoomStudentsCache=managedPrivateStudentRecords(inbox);
+    managedRoomPaymentsCache=managedPrivatePaymentRecords(all);
+    managedRoomAttendanceCache=managedPrivateAttendanceRecords(all);
+
+    if(!managedRoomDefsCache.length){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد قاعات خاصة تديرها ROVEN لهذا الحساب.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML=managedRoomDefsCache.map(room=>{
+      const students=managedRoomStudentsCache.filter(s=>String(s.group_id)===String(room.group_id));
+      const monthPaid=students.reduce((sum,s)=>sum+managedMonthPaid(s.private_student_id),0);
+      const fee=Number(room.management_fee||0);
+      return `<tr>
+        <td><b>${escapeHtml(room.teacher_name||'معلم')}</b><span class="managed-room-teacher">${escapeHtml(room.teacher_internal_email||'')}</span></td>
+        <td><b>${escapeHtml(room.group_name||'قاعة خاصة')}</b></td>
+        <td><span class="managed-fee-chip">${fee.toFixed(2)} • ${escapeHtml(teacherPricingLabel[room.management_fee_basis]||room.management_fee_basis||'شهري')}</span></td>
+        <td>${students.length}</td>
+        <td><b class="paid">${monthPaid.toFixed(2)}</b></td>
+        <td><button class="primary-action manage-roven-room-btn" type="button" data-group-id="${escapeHtml(room.group_id)}">إدارة</button></td>
+      </tr>`;
+    }).join('');
+  };
+
+  const managedTeacherRoomModal=document.getElementById('managedTeacherRoomModal');
+  const closeManagedTeacherRoom=()=>{
+    activeManagedRoom=null;
+    managedTeacherRoomModal.classList.remove('show');
+    managedTeacherRoomModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  document.getElementById('closeManagedTeacherRoom').addEventListener('click',closeManagedTeacherRoom);
+  managedTeacherRoomModal.addEventListener('click',e=>{if(e.target===managedTeacherRoomModal)closeManagedTeacherRoom()});
+
+  const renderManagedRoomStudents=()=>{
+    const tbody=document.getElementById('managedRoomStudentsRows');
+    if(!activeManagedRoom){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد قاعة مفتوحة.</td></tr>';return}
+    const date=document.getElementById('managedAttendanceDate').value||new Date().toISOString().slice(0,10);
+    const attendance=managedAttendanceFor(activeManagedRoom.group_id,date);
+    const students=managedRoomStudentsCache.filter(s=>String(s.group_id)===String(activeManagedRoom.group_id)&&s.status!=='deleted');
+    if(!students.length){
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">لم يضف المعلم طلابًا خاصين لهذه القاعة بعد.</td></tr>';
+      return;
+    }
+    tbody.innerHTML=students.map(s=>{
+      const fee=Number(s.monthly_fee||0),paid=managedMonthPaid(s.private_student_id),remaining=Math.max(0,fee-paid);
+      const status=attendance.get(String(s.private_student_id))||'present';
+      return `<tr data-private-student-id="${escapeHtml(s.private_student_id)}">
+        <td><b>${escapeHtml(s.full_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(s.private_code||'')}</span></td>
+        <td>${fee.toFixed(2)}</td>
+        <td><b class="paid">${paid.toFixed(2)}</b></td>
+        <td><b class="${remaining>0?'due':'paid'}">${remaining.toFixed(2)}</b></td>
+        <td><select class="managed-attendance-status">
+          <option value="present" ${status==='present'?'selected':''}>حاضر</option>
+          <option value="absent" ${status==='absent'?'selected':''}>غائب</option>
+          <option value="late" ${status==='late'?'selected':''}>متأخر</option>
+          <option value="excused" ${status==='excused'?'selected':''}>بعذر</option>
+        </select></td>
+        <td><button class="secondary-action managed-collect-btn" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تحصيل</button></td>
+      </tr>`;
+    }).join('');
+  };
+
+  const openManagedRoom=room=>{
+    activeManagedRoom=room;
+    document.getElementById('managedRoomGroupId').value=room.group_id||'';
+    document.getElementById('managedRoomTitle').textContent='إدارة '+(room.group_name||'القاعة الخاصة');
+    document.getElementById('managedRoomSub').textContent='المعلم: '+(room.teacher_name||'—')+' • رسوم إدارة ROVEN: '+Number(room.management_fee||0).toFixed(2);
+    document.getElementById('managedAttendanceDate').value=new Date().toISOString().slice(0,10);
+    document.getElementById('managedRoomMsg').className='student-form-msg';
+    renderManagedRoomStudents();
+    managedTeacherRoomModal.classList.add('show');managedTeacherRoomModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+  };
+
+  document.getElementById('refreshManagedTeacherRooms').addEventListener('click',loadManagedTeacherRooms);
+  document.getElementById('managedTeacherRoomsRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.manage-roven-room-btn');if(!btn)return;
+    const room=managedRoomDefsCache.find(x=>String(x.group_id)===String(btn.dataset.groupId));if(room)openManagedRoom(room);
+  });
+  document.getElementById('managedAttendanceDate').addEventListener('change',renderManagedRoomStudents);
+  document.getElementById('managedMarkAllPresent').addEventListener('click',()=>{
+    document.querySelectorAll('#managedRoomStudentsRows .managed-attendance-status').forEach(x=>x.value='present');
+  });
+
+  document.getElementById('managedRoomStudentsRows').addEventListener('click',async e=>{
+    const btn=e.target.closest('.managed-collect-btn');if(!btn||!activeManagedRoom)return;
+    const student=managedRoomStudentsCache.find(s=>String(s.private_student_id)===String(btn.dataset.privateStudentId));if(!student)return;
+    const fee=Number(student.monthly_fee||0),paid=managedMonthPaid(student.private_student_id),remaining=Math.max(0,fee-paid);
+    const raw=prompt('المبلغ المحصل من '+student.full_name+'؟',remaining>0?remaining.toFixed(2):'0');
+    if(raw===null)return;
+    const amount=Number(raw)||0;if(amount<=0)return;
+    const ctx=await hydratePlatformContext();
+    const payment={
+      payment_id:'RMP-'+Date.now().toString(36).toUpperCase(),
+      private_student_id:student.private_student_id,
+      private_code:student.private_code,
+      student_name:student.full_name,
+      group_id:activeManagedRoom.group_id,
+      group_name:activeManagedRoom.group_name,
+      amount,date:new Date().toISOString().slice(0,10),method:'cash',
+      note:'تحصيل بواسطة ROVEN',
+      recorded_by:ctx?.display_name||'ROVEN',
+      created_at:new Date().toISOString()
+    };
+    try{
+      await sendStructuredMail(activeManagedRoom.teacher_internal_email,'MANAGED_PRIVATE_PAYMENT_ACTION',payment.payment_id,payment);
+      await sendStructuredMail(ctx.internal_email,'MANAGED_PRIVATE_PAYMENT_ACTION',payment.payment_id,payment);
+      await sendStructuredMail(activeManagedRoom.teacher_internal_email,'TEACHER_FINANCE',payment.payment_id,{
+        entry_id:payment.payment_id,type:'income',amount,category:'تحصيل من طلاب',
+        date:payment.date,note:'تحصيل ROVEN من '+student.full_name,
+        private_student_id:student.private_student_id,created_at:payment.created_at
+      });
+      await loadManagedTeacherRooms();
+      activeManagedRoom=managedRoomDefsCache.find(x=>String(x.group_id)===String(payment.group_id))||activeManagedRoom;
+      renderManagedRoomStudents();
+    }catch(err){alert(err.message||'تعذر تسجيل التحصيل')}
+  });
+
+  document.getElementById('saveManagedAttendance').addEventListener('click',async()=>{
+    if(!activeManagedRoom)return;
+    const ctx=await hydratePlatformContext();
+    const date=document.getElementById('managedAttendanceDate').value;
+    const records=[...document.querySelectorAll('#managedRoomStudentsRows tr[data-private-student-id]')].map(tr=>({
+      private_student_id:tr.dataset.privateStudentId,
+      status:tr.querySelector('.managed-attendance-status')?.value||'present'
+    }));
+    const msg=document.getElementById('managedRoomMsg');
+    if(!date||!records.length){msg.textContent='اختر التاريخ وتأكد من وجود طلاب.';msg.className='student-form-msg error show';return}
+    const batch={
+      attendance_id:'RMA-'+Date.now().toString(36).toUpperCase(),
+      group_id:activeManagedRoom.group_id,group_name:activeManagedRoom.group_name,date,records,
+      recorded_by:ctx?.display_name||'ROVEN',saved_at:new Date().toISOString()
+    };
+    try{
+      await sendStructuredMail(activeManagedRoom.teacher_internal_email,'MANAGED_PRIVATE_ATTENDANCE_ACTION',batch.attendance_id,batch);
+      await sendStructuredMail(ctx.internal_email,'MANAGED_PRIVATE_ATTENDANCE_ACTION',batch.attendance_id,batch);
+      managedRoomAttendanceCache.push(batch);
+      renderManagedRoomStudents();
+      msg.textContent='تم حفظ حضور طلاب المعلم الخاصين ومزامنته مع لوحة المعلم.';
+      msg.className='student-form-msg success show';
+    }catch(err){msg.textContent=err.message||'تعذر حفظ الحضور';msg.className='student-form-msg error show'}
+  });
+
   // ===== Professional assessments =====
   let currentExamDraftId=null;
   let teacherExamDefs=[];
