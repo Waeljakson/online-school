@@ -345,6 +345,8 @@
             <select id="nuRole">
               <option value="super_admin">مدير نظام</option>
               <option value="school_manager">مدير</option>
+              <option value="academic_admin">عضو هيئة تعليمية / مشرف أكاديمي</option>
+              <option value="finance_admin">مسؤول مالي</option>
               <option value="teacher">معلم</option>
               <option value="reception">طاقم إداري</option>
             </select>
@@ -879,8 +881,8 @@
   const userFormMsg=document.getElementById('userFormMsg');
   const userCreationResult=document.getElementById('userCreationResult');
   const saveUserBtn=document.getElementById('saveUserBtn');
-  const roleLabels={super_admin:'مدير نظام',school_manager:'مدير',teacher:'معلم',reception:'طاقم إداري'};
-  const roleIcons={super_admin:'🛡️',school_manager:'🏫',teacher:'👨‍🏫',reception:'🗂️'};
+  const roleLabels={super_admin:'مدير نظام',school_manager:'مدير',academic_admin:'عضو هيئة تعليمية',finance_admin:'مسؤول مالي',teacher:'معلم',reception:'طاقم إداري'};
+  const roleIcons={super_admin:'🛡️',school_manager:'🏫',academic_admin:'🎓',finance_admin:'💳',teacher:'👨‍🏫',reception:'🗂️'};
 
   const setTeacherLinkVisibility=()=>{
     document.getElementById('teacherLinkBox').classList.toggle('show',document.getElementById('nuRole').value==='teacher');
@@ -930,6 +932,8 @@
           <select class="form-field user-role-select row-role">
             <option value="super_admin" ${u.role==='super_admin'?'selected':''}>مدير نظام</option>
             <option value="school_manager" ${u.role==='school_manager'?'selected':''}>مدير</option>
+            <option value="academic_admin" ${u.role==='academic_admin'?'selected':''}>عضو هيئة تعليمية</option>
+            <option value="finance_admin" ${u.role==='finance_admin'?'selected':''}>مسؤول مالي</option>
             <option value="teacher" ${u.role==='teacher'?'selected':''}>معلم</option>
             <option value="reception" ${u.role==='reception'?'selected':''}>طاقم إداري</option>
           </select>
