@@ -2361,7 +2361,7 @@
     try{
       const data=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:date})});
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا يوجد طلاب في هذه المجموعة.</td></tr>';return}
-      tbody.innerHTML=data.map(s=>`<tr data-student-id="${escapeHtml(s.student_id)}">
+      tbody.innerHTML=data.map(s=>`<tr data-student-id="${escapeHtml(s.student_id)}" data-student-no="${escapeHtml(s.student_no||'')}" data-student-name="${escapeHtml(s.student_name||'')}">
         <td><b>${escapeHtml(s.student_name)}</b><br><span style="font-size:10px;color:var(--muted)">${escapeHtml(s.student_no||'')}</span></td>
         <td><select class="attendance-status">${attendanceStatusOptions(s.status||'present')}</select></td>
         <td><input class="attendance-late" type="number" min="0" value="${Number(s.minutes_late||0)}" style="width:90px"></td>
@@ -2384,6 +2384,8 @@
     if(!groupId||!date){msg.textContent='اختر المجموعة والتاريخ.';msg.className='student-form-msg error show';return}
     const records=[...document.querySelectorAll('#attendanceRows tr[data-student-id]')].map(tr=>({
       student_id:tr.dataset.studentId,
+      student_no:tr.dataset.studentNo||null,
+      student_name:tr.dataset.studentName||null,
       status:tr.querySelector('.attendance-status').value,
       minutes_late:Number(tr.querySelector('.attendance-late').value)||0,
       note:tr.querySelector('.attendance-note').value.trim()||null
@@ -2394,6 +2396,11 @@
       const r=await dataApiFetch('/rpc/platform_save_attendance',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:date,p_records:records})});
       msg.textContent=`تم حفظ حضور ${Number(r?.saved||0)} طالب — حاضر ${Number(r?.present||0)}، غائب ${Number(r?.absent||0)}، متأخر ${Number(r?.late||0)}.`;
       msg.className='student-form-msg success show';
+      try{
+        await publishSchoolStudentEvents('attendance',records.map(x=>({
+          ...x,group_id:groupId,date,event_id:'ATT-'+groupId+'-'+date+'-'+x.student_id
+        })));
+      }catch{}
       try{
         const ctx=await hydratePlatformContext();
         if(ctx?.account_type==='teacher' && ctx?.internal_email){
@@ -2501,6 +2508,19 @@
       const r=await dataApiFetch('/rpc/platform_issue_points',{method:'POST',body:JSON.stringify(payload)});
       msg.textContent=`تمت إضافة ${payload.p_points} نقطة. رصيد الطالب الآن ${Number(r?.balance||0)} نقطة.`;
       msg.className='student-form-msg success show';
+      try{
+        const opt=document.getElementById('pointsStudent').selectedOptions[0];
+        await publishSchoolStudentEvents('points',[{
+          event_id:'PTS-'+Date.now().toString(36).toUpperCase(),
+          student_id:payload.p_student_id,
+          student_name:(opt?.textContent||'').split(' — ')[0],
+          points:payload.p_points,
+          balance:Number(r?.balance||0),
+          reason:payload.p_reason,
+          category:payload.p_category,
+          date:new Date().toISOString()
+        }]);
+      }catch{};
       document.getElementById('pointsReason').value='';
       await loadRewards();
     }catch(err){msg.textContent=err.message||'تعذر إضافة النقاط';msg.className='student-form-msg error show'}
@@ -3760,6 +3780,42 @@
   };
   document.getElementById('refreshAssessments').addEventListener('click',loadAssessments);
 
+  const accountDirectorySafe=async()=>{
+    try{const d=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});return Array.isArray(d)?d:[]}catch{return []}
+  };
+
+  const managementParentLinks=async()=>{
+    const inbox=await structuredMail('inbox');
+    return latestStructuredBy(inbox,'PARENT_LINK_MASTER','student_no');
+  };
+
+  const publishSchoolStudentEvents=async(type,events)=>{
+    const ctx=await hydratePlatformContext();
+    const directory=await accountDirectorySafe();
+    let master=[];
+    if(['admin','staff'].includes(String(ctx?.account_type||'')))master=await managementParentLinks();
+    for(const ev of (events||[])){
+      const studentAcct=directory.find(a=>
+        a.account_type==='student' && (
+          (ev.student_no&&String(a.username||'')===String(ev.student_no))||
+          (ev.student_name&&String(a.display_name||'')===String(ev.student_name))
+        )
+      );
+      const prefix=type==='attendance'?'ATTENDANCE_EVENT':'POINT_EVENT';
+      if(studentAcct?.internal_email){
+        try{await sendStructuredMail(studentAcct.internal_email,prefix,ev.event_id,{...ev,event_type:type})}catch{}
+      }
+      const link=master.find(x=>
+        (ev.student_id&&String(x.student_id||'')===String(ev.student_id))||
+        (ev.student_no&&String(x.student_no||'')===String(ev.student_no))
+      );
+      if(link?.parent_internal_email){
+        const parentPrefix=type==='attendance'?'PARENT_ATTENDANCE':'PARENT_POINTS';
+        try{await sendStructuredMail(link.parent_internal_email,parentPrefix,ev.event_id,{...ev,event_type:type,student_name:ev.student_name||link.student_name})}catch{}
+      }
+    }
+  };
+
   const persistParentLink=async(r,payload)=>{
     if(!r?.parent_username)return;
     const directory=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
@@ -3791,8 +3847,16 @@
     };
     await sendStructuredMail(parent.internal_email,'PARENT_LINK',link.link_id,link);
     if(link.student_internal_email)await sendStructuredMail(link.student_internal_email,'STUDENT_PARENT_LINK',link.link_id,link);
-    const me=(await hydratePlatformContext())?.internal_email;
-    if(me)await sendStructuredMail(me,'PARENT_LINK_MASTER',link.link_id,link);
+    const ctx=await hydratePlatformContext();
+    const management=list.filter(a=>a.internal_email && (
+      a.account_type==='admin' ||
+      (a.account_type==='staff'&&['academic_admin','secretary','reception','finance_admin'].includes(String(a.role||'')))
+    ));
+    const targets=new Set(management.map(a=>a.internal_email));
+    if(ctx?.internal_email)targets.add(ctx.internal_email);
+    for(const email of targets){
+      try{await sendStructuredMail(email,'PARENT_LINK_MASTER',link.link_id,link)}catch{}
+    }
   };
 
   const latestStructuredBy=(rows,prefix,key)=>{
@@ -3814,20 +3878,29 @@
     const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
     const certs=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id');
     const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
+    const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
+    const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
 
     document.getElementById('parentChildrenCount').textContent=String(links.length);
     document.getElementById('parentBalanceTotal').textContent=links.reduce((s,x)=>s+Number(x.balance||0),0).toFixed(2);
     document.getElementById('parentCertificatesCount').textContent=String(certs.length);
     document.getElementById('parentResultsCount').textContent=String(results.length);
 
-    box.innerHTML=links.length?links.map(x=>`<div class="feature">
-      <b>👤 ${escapeHtml(x.student_name||'الطالب')}</b>
-      <span>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — ')||'')}</span>
-      <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <span>المدفوع: <b class="paid">${Number(x.paid||0).toFixed(2)}</b></span>
-        <span>المتبقي: <b class="due">${Number(x.balance||0).toFixed(2)}</b></span>
-      </div>
-    </div>`).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
+    box.innerHTML=links.length?links.map(x=>{
+      const att=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+      const pts=points.filter(a=>String(a.student_id||a.student_name)===String(x.student_id||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+      const attLabel={present:'حاضر',absent:'غائب',late:'متأخر',excused:'بعذر',left_early:'غادر مبكرًا'}[att?.status]||'لا يوجد';
+      return `<div class="feature">
+        <b>👤 ${escapeHtml(x.student_name||'الطالب')}</b>
+        <span>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — ')||'')}</span>
+        <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <span>المدفوع: <b class="paid">${Number(x.paid||0).toFixed(2)}</b></span>
+          <span>المتبقي: <b class="due">${Number(x.balance||0).toFixed(2)}</b></span>
+          <span>آخر حضور: <b>${escapeHtml(attLabel)}</b></span>
+          <span>النقاط: <b>${pts?Number(pts.balance||0):'—'}</b></span>
+        </div>
+      </div>`;
+    }).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
 
     const certBox=document.getElementById('parentCertificatesList');
     certBox.innerHTML=certs.length?certs.map(c=>`<div class="certificate-list-item"><b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b><span>${escapeHtml(c.student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleDateString('ar-EG'))}</span><p style="font-size:11px;margin:6px 0 0">${escapeHtml(c.body||'')}</p></div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
@@ -3909,6 +3982,19 @@
       if(localStorage.getItem(key))continue;
       try{await sendStructuredMail(link.parent_internal_email,'CERTIFICATE_PARENT',c.certificate_id,{...c,student_name:c.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
     }
+    const attendanceEvents=latestStructuredBy(inbox,'ATTENDANCE_EVENT','event_id');
+    for(const ev of attendanceEvents){
+      const key='roven_forward_att_'+String(ctx.account_id||ctx.username||'')+'_'+String(ev.event_id);
+      if(localStorage.getItem(key))continue;
+      try{await sendStructuredMail(link.parent_internal_email,'PARENT_ATTENDANCE',ev.event_id,{...ev,student_name:ev.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
+    }
+    const pointEvents=latestStructuredBy(inbox,'POINT_EVENT','event_id');
+    for(const ev of pointEvents){
+      const key='roven_forward_pts_'+String(ctx.account_id||ctx.username||'')+'_'+String(ev.event_id);
+      if(localStorage.getItem(key))continue;
+      try{await sendStructuredMail(link.parent_internal_email,'PARENT_POINTS',ev.event_id,{...ev,student_name:ev.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
+    }
+
     const results=latestStructuredBy(inbox,'EXAM_RESULT','result_id');
     for(const r of results){
       const key='roven_forward_result_'+String(ctx.account_id||ctx.username||'')+'_'+String(r.result_id);
@@ -4346,7 +4432,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -4610,7 +4696,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
