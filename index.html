@@ -188,6 +188,8 @@
     .logout-top{height:38px;border:1px solid #dbe5ec;background:#fff;color:#9f2f2f;border-radius:11px;padding:0 11px;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:.18s}.logout-top:hover{background:#fff2f2;border-color:#f0c7c7}.sidebar-logout{width:100%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;border-radius:11px;padding:10px 12px;display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;font-weight:800;cursor:pointer;margin-bottom:9px}.sidebar-logout:hover{background:rgba(220,38,38,.2);border-color:rgba(248,113,113,.35)}@media(max-width:780px){.logout-top{width:38px;padding:0;justify-content:center}.logout-text{display:none}.sidebar-logout{min-height:42px}}
 
     .teacher-hero{background:linear-gradient(135deg,#0f766e,#163e63);color:#fff;border-radius:22px;padding:22px 24px;display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:16px;box-shadow:0 16px 36px rgba(15,118,110,.18)}.teacher-hero h2{margin:5px 0 5px;font-size:24px}.teacher-hero p{margin:0;color:rgba(255,255,255,.8);font-size:12px}.teacher-kicker{font-size:10px;font-weight:800;letter-spacing:.12em;color:#bff5e9}.teacher-hero-code{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);padding:11px 14px;border-radius:14px;min-width:150px}.teacher-hero-code span{display:block;font-size:9px;color:rgba(255,255,255,.7)}.teacher-hero-code b{display:block;margin-top:3px;direction:ltr;font-size:15px}.teacher-hub-grid{align-items:stretch}.teacher-hub-group{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:11px 0;border-bottom:1px solid #edf2f7}.teacher-hub-group:last-child{border-bottom:0}.teacher-hub-group b{display:block}.teacher-hub-group span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.teacher-money-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.teacher-money-row>div{background:#f8fbfd;border:1px solid #e7eef4;border-radius:13px;padding:12px}.teacher-money-row span{display:block;color:var(--muted);font-size:10px}.teacher-money-row b{display:block;font-size:18px;margin-top:5px}.teacher-finance-mini-note{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.7}.room-request-status{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800}.room-request-status.pending{background:#fff7dd;color:#8a6500}.room-request-status.approved{background:#e8f7f1;color:#137a59}.room-request-status.rejected{background:#fff0f0;color:#b23c3c}.teacher-room-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:780px){.teacher-hero{align-items:flex-start;flex-direction:column}.teacher-hub-grid{grid-template-columns:1fr}.teacher-money-row{grid-template-columns:1fr}.teacher-hub-stats{grid-template-columns:repeat(2,1fr)}}
+
+    .teacher-upcoming-list{display:grid;gap:8px}.teacher-upcoming-item{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:11px 12px;border:1px solid #e6eef4;border-radius:14px;background:#fbfdff}.teacher-upcoming-time{min-width:72px;text-align:center;background:#edf8f6;color:#0f766e;border-radius:11px;padding:8px;font-weight:800}.teacher-upcoming-item b{display:block;font-size:13px}.teacher-upcoming-item span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.teacher-upcoming-actions{display:flex;gap:6px;flex-wrap:wrap}.teacher-agreement-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}.teacher-agreement-summary>div{padding:10px 12px;border-radius:12px;background:#f8fbfd;border:1px solid #e5edf4}.teacher-agreement-summary span{display:block;font-size:9px;color:var(--muted)}.teacher-agreement-summary b{display:block;font-size:17px;margin-top:4px}.teacher-student-status{font-size:10px}.teacher-hub-group .room-actions{justify-content:flex-end}@media(max-width:780px){.teacher-upcoming-item{grid-template-columns:1fr}.teacher-upcoming-time{text-align:right}.teacher-agreement-summary{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -360,6 +362,12 @@
         </article>
         <article class="panel" id="teacherRoomAdminPanel" style="margin-top:15px">
           <div class="panel-head"><div><h3>طلبات فتح قاعات المعلمين</h3><p>راجع الطلب، اتفق على السعر، ثم أنشئ القاعة للمعلم مباشرة.</p></div><button class="link-btn" id="refreshTeacherRoomAdmin" type="button">تحديث</button></div>
+          <div class="teacher-agreement-summary" id="teacherAgreementSummary">
+            <div><span>طلبات معلقة</span><b id="roomPendingCount">0</b></div>
+            <div><span>اتفاقات معتمدة</span><b id="roomApprovedCount">0</b></div>
+            <div><span>شهري متفق</span><b id="roomMonthlyTotal">0.00</b></div>
+            <div><span>لكل حصة</span><b id="roomSessionTotal">0.00</b></div>
+          </div>
           <div class="table-wrap"><table class="table" style="min-width:900px">
             <thead><tr><th>المعلم</th><th>القاعة / المادة</th><th>السعر المقترح</th><th>السعر المتفق</th><th>الحالة</th><th>إجراء</th></tr></thead>
             <tbody id="teacherRoomAdminRows"><tr><td colspan="6" class="students-empty">لا توجد طلبات معروضة.</td></tr>
@@ -457,6 +465,11 @@
           <div class="stat"><div class="stat-head"><span>القاعات والمجموعات</span><span class="stat-icon">🏫</span></div><div class="value" id="teacherGroupsCount">0</div><div class="sub">القاعات المسندة لك</div></div>
           <div class="stat"><div class="stat-head"><span>حصص أسبوعية</span><span class="stat-icon">📅</span></div><div class="value" id="teacherWeeklyCount">0</div><div class="sub">حسب جداول مجموعاتك</div></div>
         </div>
+
+        <article class="panel teacher-upcoming-panel" style="margin-bottom:15px">
+          <div class="panel-head"><div><h3>حصص اليوم والقادمة</h3><p>أقرب مواعيد حصصك من جداول القاعات.</p></div><span>🗓️</span></div>
+          <div id="teacherUpcomingLessons"><div class="students-empty">جارٍ حساب المواعيد...</div></div>
+        </article>
 
         <div class="grid teacher-hub-grid">
           <article class="panel">
@@ -606,6 +619,18 @@
 
 
 
+
+<div class="student-modal" id="teacherStudentsModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:760px">
+    <div class="student-dialog-head">
+      <div><h3 id="teacherStudentsModalTitle">طلاب القاعة</h3><p id="teacherStudentsModalSub">الطلاب الملحقون بالمجموعة.</p></div>
+      <button class="close-modal" type="button" id="closeTeacherStudentsModal">×</button>
+    </div>
+    <div class="student-form">
+      <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>الطالب</th><th>رقم الطالب</th><th>حالة اليوم</th></tr></thead><tbody id="teacherStudentsModalRows"><tr><td colspan="4" class="students-empty">جارٍ التحميل...</td></tr></tbody></table></div>
+    </div>
+  </div>
+</div>
 
 <div class="student-modal" id="teacherRoomReviewModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:720px">
