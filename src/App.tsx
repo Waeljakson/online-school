@@ -38,12 +38,7 @@ const navItems: Array<{ id: Section; label: string; icon: typeof LayoutDashboard
   { id: 'settings', label: 'الإعدادات والصلاحيات', icon: Settings },
 ];
 
-const students = [
-  { name: 'أحمد محمد علي', grade: 'أول ثانوي', attendance: '96%', balance: 'مسدد', status: 'نشط' },
-  { name: 'سارة محمود حسن', grade: 'ثالث إعدادي', attendance: '89%', balance: '450 ج', status: 'نشط' },
-  { name: 'يوسف خالد أحمد', grade: 'ثاني ثانوي', attendance: '93%', balance: 'مسدد', status: 'نشط' },
-  { name: 'مريم أحمد سامي', grade: 'أول إعدادي', attendance: '82%', balance: '750 ج', status: 'متابعة' },
-];
+const students: Array<{ name: string; grade: string; attendance: string; balance: string; status: string }> = [];
 
 function App() {
   const [active, setActive] = useState<Section>('dashboard');
@@ -119,10 +114,10 @@ function App() {
               </section>
 
               <section className="stats-grid">
-                <StatCard title="الطلاب النشطون" value="428" subtitle="+18 هذا الشهر" icon={UsersRound} tone="primary" />
-                <StatCard title="حضور اليوم" value="91%" subtitle="389 طالبًا" icon={UserRoundCheck} tone="success" />
-                <StatCard title="إيرادات الشهر" value="82,400 ج" subtitle="+12.6% عن السابق" icon={TrendingUp} tone="success" />
-                <StatCard title="المستحقات" value="14,500 ج" subtitle="27 طالبًا" icon={ReceiptText} tone="warning" />
+                <StatCard title="الطلاب النشطون" value="—" subtitle="بيانات فعلية فقط" icon={UsersRound} tone="primary" />
+                <StatCard title="المعلمون النشطون" value="—" subtitle="بيانات فعلية فقط" icon={UserRoundCheck} tone="success" />
+                <StatCard title="تحصيل الشهر" value="—" subtitle="بيانات فعلية فقط" icon={TrendingUp} tone="success" />
+                <StatCard title="المستحقات" value="—" subtitle="بيانات فعلية فقط" icon={ReceiptText} tone="warning" />
               </section>
 
               <section className="dashboard-grid">
@@ -131,19 +126,15 @@ function App() {
                     <div><h3>التحصيل الشهري</h3><p>ملخص الإيرادات والمستحقات</p></div>
                     <button className="text-button">عرض التقرير</button>
                   </div>
-                  <div className="chart-placeholder" aria-label="رسم بياني تجريبي">
-                    {[42, 58, 52, 71, 66, 83, 76, 91].map((h, i) => <span key={i} style={{ height: `${h}%` }} />)}
+                  <div className="chart-placeholder" aria-label="لا توجد بيانات تجريبية">
+                    <div className="students-empty">لا يتم عرض أي بيانات إلا بعد تحميلها من النظام.</div>
                   </div>
-                  <div className="chart-labels"><span>فبراير</span><span>مارس</span><span>أبريل</span><span>مايو</span><span>يونيو</span><span>يوليو</span><span>أغسطس</span><span>سبتمبر</span></div>
                 </article>
 
                 <article className="panel">
-                  <div className="panel-head"><div><h3>حصص اليوم</h3><p>4 حصص مجدولة</p></div><CalendarDays size={20} /></div>
+                  <div className="panel-head"><div><h3>حصص اليوم</h3><p>بيانات فعلية فقط</p></div><CalendarDays size={20} /></div>
                   <div className="lesson-list">
-                    <div className="lesson"><time>09:00</time><div><strong>الرياضيات</strong><span>أول ثانوي • أ/ محمد</span></div><span className="pill live">قريبًا</span></div>
-                    <div className="lesson"><time>11:00</time><div><strong>الفيزياء</strong><span>ثاني ثانوي • أ/ أحمد</span></div><span className="pill">مجدولة</span></div>
-                    <div className="lesson"><time>14:00</time><div><strong>English</strong><span>ثالث إعدادي • Ms. Sara</span></div><span className="pill">مجدولة</span></div>
-                    <div className="lesson"><time>17:30</time><div><strong>الكيمياء</strong><span>ثالث ثانوي • أ/ خالد</span></div><span className="pill">مجدولة</span></div>
+                    <div className="students-empty">لا يتم عرض حصص تجريبية.</div>
                   </div>
                 </article>
               </section>
