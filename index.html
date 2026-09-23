@@ -3387,6 +3387,357 @@
     }catch(err){msg.textContent=err.message||'تعذر حفظ القرار';msg.className='student-form-msg error show'}
   });
 
+  // ===== Parent portal, certificates, materials and WhatsApp =====
+  const mailPayload=m=>{try{return JSON.parse(String(m?.body||'{}'))}catch{return null}};
+  const structuredMail=async(folder='inbox')=>{
+    try{
+      const rows=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
+      return Array.isArray(rows)?rows:[];
+    }catch{return []}
+  };
+  const sendStructuredMail=async(recipient,prefix,id,payload)=>{
+    if(!recipient)return null;
+    return dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+      p_recipient:recipient,p_subject:'['+prefix+'] '+String(id||Date.now()),p_body:JSON.stringify(payload||{})
+    })});
+  };
+
+  const persistParentLink=async(r,payload)=>{
+    if(!r?.parent_username)return;
+    const directory=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
+    const list=Array.isArray(directory)?directory:[];
+    const parent=list.find(a=>String(a.username||'').toLowerCase()===String(r.parent_username||'').toLowerCase());
+    const student=list.find(a=>
+      (r.internal_email&&String(a.internal_email||'')===String(r.internal_email))||
+      (r.username&&String(a.username||'').toLowerCase()===String(r.username).toLowerCase())
+    );
+    if(!parent?.internal_email)return;
+    const link={
+      link_id:'PL-'+Date.now().toString(36).toUpperCase(),
+      student_id:r.student_id||null,
+      student_no:r.student_no||null,
+      student_name:payload.p_full_name,
+      stage:payload.p_stage_name,
+      grade:payload.p_grade_name,
+      joined_on:payload.p_joined_on,
+      fee:Number(payload.p_fee||0),
+      discount:Number(payload.p_discount||0),
+      paid:Number(r.paid??payload.p_first_payment??0),
+      balance:Number(r.balance||0),
+      parent_name:payload.p_parent_name,
+      parent_phone:payload.p_parent_phone,
+      relationship:payload.p_relationship,
+      student_internal_email:r.internal_email||student?.internal_email||null,
+      parent_internal_email:parent.internal_email,
+      created_at:new Date().toISOString()
+    };
+    await sendStructuredMail(parent.internal_email,'PARENT_LINK',link.link_id,link);
+    if(link.student_internal_email)await sendStructuredMail(link.student_internal_email,'STUDENT_PARENT_LINK',link.link_id,link);
+    const me=(await hydratePlatformContext())?.internal_email;
+    if(me)await sendStructuredMail(me,'PARENT_LINK_MASTER',link.link_id,link);
+  };
+
+  const latestStructuredBy=(rows,prefix,key)=>{
+    const map=new Map();
+    rows.filter(m=>String(m.subject||'').startsWith('['+prefix+']'))
+      .sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0))
+      .forEach(m=>{const x=mailPayload(m);if(x){const k=String(x[key]||m.message_id||'');if(k)map.set(k,{...x,_mail:m})}});
+    return [...map.values()];
+  };
+
+  const loadParentHub=async()=>{
+    const ctx=await hydratePlatformContext();
+    const box=document.getElementById('parentChildrenCards');
+    if(!['parent','private_parent'].includes(String(ctx?.account_type||''))){
+      box.innerHTML='<div class="feature"><b>هذه الصفحة مخصصة لولي الأمر.</b></div>';
+      return;
+    }
+    const inbox=await structuredMail('inbox');
+    const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
+    const certs=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id');
+    const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
+
+    document.getElementById('parentChildrenCount').textContent=String(links.length);
+    document.getElementById('parentBalanceTotal').textContent=links.reduce((s,x)=>s+Number(x.balance||0),0).toFixed(2);
+    document.getElementById('parentCertificatesCount').textContent=String(certs.length);
+    document.getElementById('parentResultsCount').textContent=String(results.length);
+
+    box.innerHTML=links.length?links.map(x=>`<div class="feature">
+      <b>👤 ${escapeHtml(x.student_name||'الطالب')}</b>
+      <span>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — ')||'')}</span>
+      <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <span>المدفوع: <b class="paid">${Number(x.paid||0).toFixed(2)}</b></span>
+        <span>المتبقي: <b class="due">${Number(x.balance||0).toFixed(2)}</b></span>
+      </div>
+    </div>`).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
+
+    const certBox=document.getElementById('parentCertificatesList');
+    certBox.innerHTML=certs.length?certs.map(c=>`<div class="certificate-list-item"><b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b><span>${escapeHtml(c.student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleDateString('ar-EG'))}</span><p style="font-size:11px;margin:6px 0 0">${escapeHtml(c.body||'')}</p></div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
+
+    const resultBox=document.getElementById('parentExamResults');
+    resultBox.innerHTML=results.length?results.map(r=>`<div class="exam-list-item"><b>📝 ${escapeHtml(r.exam_title||'اختبار')}</b><span>${escapeHtml(r.student_name||'')} • ${Number(r.score||0).toFixed(2)} / ${Number(r.max_score||0).toFixed(2)}</span></div>`).join(''):'<div class="students-empty">لا توجد نتائج.</div>';
+  };
+  document.getElementById('refreshParentHub').addEventListener('click',loadParentHub);
+
+  // Certificates
+  let certificateTargetsCache=new Map();
+  const certificateTypeLabel={appreciation:'شهادة تقدير',thanks:'شهادة شكر',excellence:'شهادة تفوق',attendance:'شهادة التزام'};
+
+  const loadCertificateTargets=async()=>{
+    const ctx=await hydratePlatformContext();
+    const source=document.getElementById('certificateSource').value;
+    const select=document.getElementById('certificateStudent');
+    select.innerHTML='<option value="">جارٍ التحميل...</option>';
+    certificateTargetsCache=new Map();
+
+    try{
+      if(source==='private'&&ctx?.account_type==='teacher'){
+        if(!teacherPrivateStudentsCache.length)await loadTeacherHub();
+        teacherPrivateStudentsCache.forEach(s=>{
+          const key='private:'+s.private_student_id;
+          certificateTargetsCache.set(key,{key,kind:'private',id:s.private_student_id,name:s.full_name,parent_phone:s.parent_phone||null,internal_email:s.student_internal_email||null});
+        });
+      }else if(ctx?.account_type==='teacher'){
+        const [groups,directory]=await Promise.all([
+          dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}),
+          dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+        ]);
+        const dir=Array.isArray(directory)?directory:[];
+        for(const g of (groups||[])){
+          try{
+            const roster=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:g.group_id,p_on_date:new Date().toISOString().slice(0,10)})});
+            (roster||[]).forEach(s=>{
+              const acct=dir.find(a=>String(a.username||'')===String(s.student_no||''))||
+                         dir.find(a=>a.account_type==='student'&&String(a.display_name||'')===String(s.student_name||''));
+              const key='roven:'+s.student_id;
+              if(!certificateTargetsCache.has(key))certificateTargetsCache.set(key,{key,kind:'roven',id:s.student_id,name:s.student_name,student_no:s.student_no,internal_email:acct?.internal_email||null});
+            });
+          }catch{}
+        }
+      }else{
+        const [students,directory]=await Promise.all([
+          dataApiFetch('/rpc/list_students_admin',{method:'POST',body:'{}'}),
+          dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+        ]);
+        const dir=Array.isArray(directory)?directory:[];
+        (students||[]).forEach(s=>{
+          const acct=dir.find(a=>String(a.username||'')===String(s.username||s.student_no||''))||
+                     dir.find(a=>a.account_type==='student'&&String(a.display_name||'')===String(s.full_name||''));
+          const key='roven:'+s.student_id;
+          certificateTargetsCache.set(key,{key,kind:'roven',id:s.student_id,name:s.full_name,student_no:s.student_no,internal_email:acct?.internal_email||null});
+        });
+      }
+      select.innerHTML='<option value="">اختر الطالب</option>'+[...certificateTargetsCache.values()].map(t=>`<option value="${escapeHtml(t.key)}">${escapeHtml(t.name)}${t.student_no?' — '+escapeHtml(t.student_no):''}</option>`).join('');
+    }catch(err){select.innerHTML='<option value="">تعذر تحميل الطلاب</option>'}
+  };
+
+  const updateCertificatePreview=()=>{
+    const target=certificateTargetsCache.get(document.getElementById('certificateStudent').value);
+    const title=document.getElementById('certificateTitle').value.trim()||certificateTypeLabel[document.getElementById('certificateType').value]||'شهادة تقدير';
+    const body=document.getElementById('certificateBody').value.trim()||'تقديرًا لتميزه وجهده.';
+    document.getElementById('certificatePreview').innerHTML=`<div class="certificate-seal">ROVEN</div><h2>${escapeHtml(title)}</h2><p>تُمنح إلى</p><h3>${escapeHtml(target?.name||'اسم الطالب')}</h3><p>${escapeHtml(body)}</p><small>ROVEN Online School</small>`;
+  };
+  ['certificateStudent','certificateType','certificateTitle','certificateBody'].forEach(id=>document.getElementById(id).addEventListener('input',updateCertificatePreview));
+  document.getElementById('certificateSource').addEventListener('change',loadCertificateTargets);
+
+  const forwardStudentArtifactsToParent=async(inbox)=>{
+    const ctx=await hydratePlatformContext();
+    if(!['student','private_student'].includes(String(ctx?.account_type||'')))return;
+    const link=latestStructuredBy(inbox,'STUDENT_PARENT_LINK','link_id').slice(-1)[0];
+    if(!link?.parent_internal_email)return;
+    const certs=latestStructuredBy(inbox,'CERTIFICATE','certificate_id');
+    for(const c of certs){
+      const key='roven_forward_cert_'+String(ctx.account_id||ctx.username||'')+'_'+String(c.certificate_id);
+      if(localStorage.getItem(key))continue;
+      try{await sendStructuredMail(link.parent_internal_email,'CERTIFICATE_PARENT',c.certificate_id,{...c,student_name:c.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
+    }
+    const results=latestStructuredBy(inbox,'EXAM_RESULT','result_id');
+    for(const r of results){
+      const key='roven_forward_result_'+String(ctx.account_id||ctx.username||'')+'_'+String(r.result_id);
+      if(localStorage.getItem(key))continue;
+      try{await sendStructuredMail(link.parent_internal_email,'EXAM_RESULT_PARENT',r.result_id,{...r,student_name:r.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
+    }
+  };
+
+  const loadCertificates=async()=>{
+    const ctx=await hydratePlatformContext();
+    const createArea=document.getElementById('certificateCreateArea');
+    const canCreate=['admin','teacher','staff'].includes(String(ctx?.account_type||''));
+    createArea.style.display=canCreate?'':'none';
+    if(canCreate)await loadCertificateTargets();
+
+    const inbox=await structuredMail('inbox');
+    await forwardStudentArtifactsToParent(inbox);
+    const sent=await structuredMail('sent');
+    let rows=[];
+    if(['student','private_student'].includes(String(ctx?.account_type||'')))rows=latestStructuredBy(inbox,'CERTIFICATE','certificate_id');
+    else if(['parent','private_parent'].includes(String(ctx?.account_type||'')))rows=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id');
+    else rows=latestStructuredBy(inbox.concat(sent),'CERTIFICATE_ISSUED','certificate_id');
+
+    document.getElementById('certificatesList').innerHTML=rows.length?rows.map(c=>`<div class="certificate-list-item">
+      <b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b>
+      <span>${escapeHtml(c.student_name||c.private_student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleString('ar-EG'))}</span>
+      <p style="font-size:11px;margin:6px 0">${escapeHtml(c.body||'')}</p>
+      <button class="secondary-action print-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}">طباعة</button>
+    </div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
+  };
+
+  document.getElementById('issueCertificate').addEventListener('click',async()=>{
+    const msg=document.getElementById('certificateMsg');
+    const ctx=await hydratePlatformContext();
+    const target=certificateTargetsCache.get(document.getElementById('certificateStudent').value);
+    if(!target){msg.textContent='اختر الطالب أولًا.';msg.className='student-form-msg error show';return}
+    const cert={
+      certificate_id:'CERT-'+Date.now().toString(36).toUpperCase(),
+      target_kind:target.kind,target_id:target.id,student_name:target.name,
+      title:document.getElementById('certificateTitle').value.trim()||certificateTypeLabel[document.getElementById('certificateType').value]||'شهادة تقدير',
+      type:document.getElementById('certificateType').value,
+      body:document.getElementById('certificateBody').value.trim()||'تقديرًا لتميزه وجهده.',
+      issuer_name:ctx?.display_name||'ROVEN',
+      issued_at:new Date().toISOString()
+    };
+    try{
+      if(ctx?.internal_email)await sendStructuredMail(ctx.internal_email,'CERTIFICATE_ISSUED',cert.certificate_id,cert);
+      if(target.internal_email)await sendStructuredMail(target.internal_email,'CERTIFICATE',cert.certificate_id,cert);
+      msg.textContent=target.internal_email?'تم إصدار الشهادة وإرسالها إلى حساب الطالب.':'تم حفظ الشهادة. هذا الطالب لا يملك حساب ROVEN مرتبطًا حاليًا ويمكن إرسالها له عبر واتساب.';
+      msg.className='student-form-msg success show';
+      await loadCertificates();
+    }catch(err){msg.textContent=err.message||'تعذر إصدار الشهادة';msg.className='student-form-msg error show'}
+  });
+  document.getElementById('refreshCertificates').addEventListener('click',loadCertificates);
+  document.getElementById('certificatesList').addEventListener('click',e=>{
+    const btn=e.target.closest('.print-certificate-btn');if(!btn)return;
+    const preview=document.getElementById('certificatePreview').innerHTML;
+    const w=window.open('','_blank','width=900,height=650');
+    if(w){w.document.write('<html dir="rtl"><head><title>شهادة ROVEN</title><style>body{font-family:Cairo,Arial;padding:30px}.certificate-preview{border:10px double #c9a94b;padding:50px;text-align:center}.certificate-seal{margin:auto;width:72px;height:72px;border:4px double #c9a94b;border-radius:50%;display:grid;place-items:center}</style></head><body><div class="certificate-preview">'+preview+'</div><script>window.print()<\/script></body></html>');w.document.close()}
+  });
+
+  // Materials / books financial ledger
+  let materialDefsCache=[],materialSalesCache=[];
+  const loadMaterials=async()=>{
+    const ctx=await hydratePlatformContext();
+    const adminArea=document.getElementById('materialsAdminArea');
+    const canManage=['admin','teacher','staff'].includes(String(ctx?.account_type||''));
+    adminArea.style.display=canManage?'':'none';
+    const inbox=await structuredMail('inbox');
+    const defs=latestStructuredBy(inbox,'MATERIAL_DEF','material_id').filter(x=>x.status!=='deleted');
+    const sales=latestStructuredBy(inbox,'MATERIAL_SALE','sale_id');
+    materialDefsCache=defs;materialSalesCache=sales;
+
+    let salesTotal=0,paidTotal=0,costTotal=0;
+    defs.forEach(d=>{
+      const ds=sales.filter(s=>s.material_id===d.material_id);
+      ds.forEach(s=>{salesTotal+=Number(s.total||0);paidTotal+=Number(s.paid||0);costTotal+=Number(d.cost_price||0)*Number(s.quantity||1)})
+    });
+    document.getElementById('materialsSalesTotal').textContent=salesTotal.toFixed(2);
+    document.getElementById('materialsPaidTotal').textContent=paidTotal.toFixed(2);
+    document.getElementById('materialsCostTotal').textContent=costTotal.toFixed(2);
+    document.getElementById('materialsProfitTotal').textContent=(paidTotal-costTotal).toFixed(2);
+
+    const tbody=document.getElementById('materialsRows');
+    tbody.innerHTML=defs.length?defs.map(d=>{
+      const ds=sales.filter(s=>s.material_id===d.material_id),qty=ds.reduce((n,s)=>n+Number(s.quantity||0),0),stock=d.stock==null?'غير محدود':Math.max(0,Number(d.stock)-qty);
+      return `<tr><td><b>${escapeHtml(d.title)}</b></td><td>${escapeHtml({memo:'مذكرة',book:'كتاب',digital:'رقمي',other:'أخرى'}[d.product_type]||d.product_type)}</td><td>${Number(d.cost_price||0).toFixed(2)}</td><td>${Number(d.sale_price||0).toFixed(2)}</td><td>${escapeHtml(stock)}</td><td>${qty}</td><td><div class="private-money-actions"><button class="secondary-action material-sale-btn" data-id="${escapeHtml(d.material_id)}" type="button">تسجيل بيع</button><button class="secondary-action material-delete-btn" data-id="${escapeHtml(d.material_id)}" type="button">إيقاف</button></div></td></tr>`;
+    }).join(''):'<tr><td colspan="7" class="students-empty">لا توجد منتجات تعليمية بعد.</td></tr>';
+  };
+
+  document.getElementById('saveMaterial').addEventListener('click',async()=>{
+    const msg=document.getElementById('materialMsg'),ctx=await hydratePlatformContext();
+    const title=document.getElementById('materialTitle').value.trim();
+    if(!title){msg.textContent='اكتب اسم المذكرة أو الكتاب.';msg.className='student-form-msg error show';return}
+    const d={
+      material_id:'MAT-'+Date.now().toString(36).toUpperCase(),title,
+      product_type:document.getElementById('materialType').value,
+      cost_price:Number(document.getElementById('materialCost').value)||0,
+      sale_price:Number(document.getElementById('materialPrice').value)||0,
+      stock:document.getElementById('materialStock').value===''?null:Number(document.getElementById('materialStock').value)||0,
+      download_url:document.getElementById('materialUrl').value.trim()||null,
+      owner_type:ctx?.account_type==='teacher'?'teacher':'school',
+      status:'active',created_at:new Date().toISOString()
+    };
+    try{
+      await sendStructuredMail(ctx.internal_email,'MATERIAL_DEF',d.material_id,d);
+      msg.textContent='تم حفظ المنتج وإضافته إلى الحساب المالي للمذكرات والكتب.';
+      msg.className='student-form-msg success show';
+      document.getElementById('materialTitle').value='';document.getElementById('materialStock').value='';
+      await loadMaterials();
+    }catch(err){msg.textContent=err.message||'تعذر حفظ المنتج';msg.className='student-form-msg error show'}
+  });
+  document.getElementById('materialsRows').addEventListener('click',async e=>{
+    const saleBtn=e.target.closest('.material-sale-btn');
+    const delBtn=e.target.closest('.material-delete-btn');
+    const ctx=await hydratePlatformContext();
+    if(saleBtn){
+      const d=materialDefsCache.find(x=>x.material_id===saleBtn.dataset.id);if(!d)return;
+      const q=Number(prompt('الكمية المباعة؟','1')||0);if(q<=0)return;
+      const total=Number(d.sale_price||0)*q;
+      const paid=Number(prompt('المبلغ المحصل؟',total.toFixed(2))||0);
+      const s={sale_id:'MS-'+Date.now().toString(36).toUpperCase(),material_id:d.material_id,title:d.title,quantity:q,total,paid,sold_at:new Date().toISOString()};
+      await sendStructuredMail(ctx.internal_email,'MATERIAL_SALE',s.sale_id,s);
+      if(ctx.account_type==='teacher'&&paid>0)await sendStructuredMail(ctx.internal_email,'TEACHER_FINANCE',s.sale_id,{entry_id:s.sale_id,type:'income',amount:paid,category:'مبيعات مذكرات وكتب',date:new Date().toISOString().slice(0,10),note:'بيع '+d.title,created_at:new Date().toISOString()});
+      await loadMaterials();return;
+    }
+    if(delBtn){
+      const d=materialDefsCache.find(x=>x.material_id===delBtn.dataset.id);if(!d)return;
+      if(!confirm('إيقاف هذا المنتج؟'))return;
+      await sendStructuredMail(ctx.internal_email,'MATERIAL_DEF',d.material_id,{...d,status:'deleted',updated_at:new Date().toISOString()});
+      await loadMaterials();
+    }
+  });
+  document.getElementById('refreshMaterials').addEventListener('click',loadMaterials);
+
+  // WhatsApp center
+  let whatsappContactsCache=[];
+  const whatsappTemplates={
+    custom:'',
+    attendance:'السلام عليكم، نود متابعة حضور {الاسم} في منصة ROVEN Online School.',
+    fees:'السلام عليكم، نذكركم بمتابعة الرسوم المستحقة الخاصة بـ {الاسم}. مع تحيات ROVEN Online School.',
+    lesson:'السلام عليكم، تذكير بموعد الحصة القادمة للطالب {الاسم}. يرجى الدخول من منصة ROVEN.',
+    certificate:'مبارك لـ {الاسم} حصوله على شهادة تقدير من ROVEN Online School.'
+  };
+  const waNumber=n=>{
+    let d=String(n||'').replace(/\D/g,'');
+    if(d.startsWith('00'))d=d.slice(2);
+    return d;
+  };
+  const openWa=(phone,name)=>{
+    const n=waNumber(phone);if(!n){alert('لا يوجد رقم واتساب مسجل.');return}
+    const msg=document.getElementById('whatsappMessage').value.replaceAll('{الاسم}',name||'الطالب');
+    window.open('https://wa.me/'+n+'?text='+encodeURIComponent(msg),'_blank','noopener');
+  };
+  const renderWhatsapp=()=>{
+    const q=String(document.getElementById('whatsappSearch').value||'').trim().toLowerCase();
+    const rows=whatsappContactsCache.filter(x=>!q||[x.student_name,x.parent_name,x.group_name,x.grade_name].join(' ').toLowerCase().includes(q));
+    document.getElementById('whatsappRows').innerHTML=rows.length?rows.map((x,i)=>`<tr>
+      <td><b>${escapeHtml(x.student_name||'—')}</b></td><td>${escapeHtml(x.parent_name||'—')}</td><td>${escapeHtml(x.group_name||x.grade_name||'—')}</td>
+      <td>${x.student_phone?`<button class="secondary-action wa-btn" data-i="${i}" data-kind="student" type="button">فتح واتساب</button>`:'—'}</td>
+      <td>${x.parent_phone?`<button class="secondary-action wa-btn" data-i="${i}" data-kind="parent" type="button">فتح واتساب</button>`:'—'}</td>
+    </tr>`).join(''):'<tr><td colspan="5" class="students-empty">لا توجد أرقام متاحة لهذا الحساب.</td></tr>';
+  };
+  const loadWhatsappCenter=async()=>{
+    const ctx=await hydratePlatformContext();
+    whatsappContactsCache=[];
+    if(ctx?.account_type==='teacher'){
+      if(!teacherPrivateStudentsCache.length)await loadTeacherHub();
+      whatsappContactsCache=teacherPrivateStudentsCache.map(s=>({student_name:s.full_name,parent_name:s.parent_name,group_name:s.group_name,student_phone:s.phone,parent_phone:s.parent_phone}));
+    }else if(['admin','staff'].includes(String(ctx?.account_type||''))){
+      try{
+        const students=await dataApiFetch('/rpc/list_students_admin',{method:'POST',body:'{}'});
+        whatsappContactsCache=(students||[]).map(s=>({student_id:s.student_id,student_name:s.full_name,student_phone:s.phone,parent_name:s.parent_name||'',parent_phone:s.parent_phone||'',grade_name:s.grade_name||''}));
+      }catch{}
+    }
+    renderWhatsapp();
+  };
+  document.getElementById('whatsappTemplate').addEventListener('change',e=>{document.getElementById('whatsappMessage').value=whatsappTemplates[e.target.value]||''});
+  document.getElementById('whatsappSearch').addEventListener('input',renderWhatsapp);
+  document.getElementById('refreshWhatsapp').addEventListener('click',loadWhatsappCenter);
+  document.getElementById('whatsappRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.wa-btn');if(!btn)return;
+    const rows=whatsappContactsCache.filter(x=>!String(document.getElementById('whatsappSearch').value||'').trim()||[x.student_name,x.parent_name,x.group_name,x.grade_name].join(' ').toLowerCase().includes(String(document.getElementById('whatsappSearch').value||'').trim().toLowerCase()));
+    const x=rows[Number(btn.dataset.i)];if(!x)return;
+    openWa(btn.dataset.kind==='parent'?x.parent_phone:x.student_phone,btn.dataset.kind==='parent'?(x.parent_name||x.student_name):x.student_name);
+  });
+
   // ===== ROVEN communications, rooms and personal profile =====
   const fileToBase64=file=>new Promise((resolve,reject)=>{
     if(!file){resolve({name:null,mime:null,base64:null});return}
