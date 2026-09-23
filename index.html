@@ -2010,6 +2010,12 @@
               meeting_url:payload.p_meeting_url,
               agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
               pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'custom',
+              management_mode:pendingRoomCreateRequest.review_response?.management_mode||pendingRoomCreateRequest.management_mode||'teacher',
+              management_fee:Number(pendingRoomCreateRequest.review_response?.management_fee||0),
+              management_fee_basis:pendingRoomCreateRequest.review_response?.management_fee_basis||'monthly',
+              management_internal_email:pendingRoomCreateRequest.review_response?.management_internal_email||pendingRoomCreateRequest.management_internal_email||null,
+              teacher_internal_email:pendingRoomCreateRequest.sender_email||null,
+              teacher_name:pendingRoomCreateRequest.teacher_name||null,
               note:pendingRoomCreateRequest.review_response?.note||null,
               created_at:new Date().toISOString()
             })
@@ -3254,10 +3260,12 @@
       grade:document.getElementById('teacherRoomGrade').value.trim()||null,
       proposed_price:Number(document.getElementById('teacherRoomPrice').value)||0,
       pricing_basis:document.getElementById('teacherRoomPricing').value,
+      management_mode:document.getElementById('teacherRoomManagementMode').value,
       notes:document.getElementById('teacherRoomNotes').value.trim()||null,
       requested_at:new Date().toISOString()
     };
     const recipient=document.getElementById('teacherRoomAdmin').value;
+    payload.management_internal_email=payload.management_mode==='roven'?recipient:null;
     if(!recipient||!payload.room_name||!payload.subject){msg.textContent='اختر الإدارة واكتب اسم القاعة والمادة.';msg.className='student-form-msg error show';return}
     try{
       await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
@@ -3267,6 +3275,7 @@
       msg.className='student-form-msg success show';
       document.getElementById('teacherRoomRequestForm').reset();
       document.getElementById('teacherRoomPricing').value='monthly';
+      document.getElementById('teacherRoomManagementMode').value='teacher';
       await loadTeacherHub();
     }catch(err){msg.textContent=err.message||'تعذر إرسال طلب القاعة';msg.className='student-form-msg error show'}
   });
@@ -3312,7 +3321,7 @@
     panel.style.display=allowed?'':'none';
     if(!allowed)return;
     const tbody=document.getElementById('teacherRoomAdminRows');
-    tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
     try{
       const [inbox,sent]=await Promise.all([
         dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})}),
@@ -3329,7 +3338,7 @@
         const x=teacherSafeJson(m.body);return x?{...x,sender_email:m.sender_email,sender_name:m.sender_name,message_id:m.message_id,sent_at:m.sent_at}:null
       }).filter(x=>x?.request_id);
       adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,{...x,review_response:responses.get(x.request_id)||null}]));
-      let pendingCount=0,approvedCount=0,monthlyTotal=0,sessionTotal=0;
+      let pendingCount=0,approvedCount=0,monthlyTotal=0,sessionTotal=0,managedCount=0,managementMonthlyTotal=0;
       requests.forEach(r=>{
         const response=responses.get(r.request_id);
         const status=response?.status||'pending';
@@ -3339,13 +3348,19 @@
           const price=Number(response?.agreed_price||0);
           if(response?.pricing_basis==='monthly')monthlyTotal+=price;
           if(response?.pricing_basis==='per_session')sessionTotal+=price;
+          if(response?.management_mode==='roven'){
+            managedCount++;
+            if(response?.management_fee_basis==='monthly')managementMonthlyTotal+=Number(response.management_fee||0);
+          }
         }
       });
       document.getElementById('roomPendingCount').textContent=String(pendingCount);
       document.getElementById('roomApprovedCount').textContent=String(approvedCount);
       document.getElementById('roomMonthlyTotal').textContent=monthlyTotal.toFixed(2);
       document.getElementById('roomSessionTotal').textContent=sessionTotal.toFixed(2);
-      if(!requests.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
+      document.getElementById('roomManagedCount').textContent=String(managedCount);
+      document.getElementById('roomManagementMonthlyTotal').textContent=managementMonthlyTotal.toFixed(2);
+      if(!requests.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
       tbody.innerHTML=requests.map(r=>{
         const response=responses.get(r.request_id),status=response?.status||'pending';
         return `<tr>
@@ -3353,6 +3368,7 @@
           <td><b>${escapeHtml(r.room_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.subject||'')} ${r.grade?'• '+escapeHtml(r.grade):''}</span></td>
           <td>${Number(r.proposed_price||0).toFixed(2)}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(teacherPricingLabel[r.pricing_basis]||'')}</span></td>
           <td>${response?Number(response.agreed_price||0).toFixed(2):'—'}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(response?teacherPricingLabel[response.pricing_basis]||'':'')}</span></td>
+          <td>${(response?.management_mode||r.management_mode)==='roven'?'<span class="status active">ROVEN</span><br><span style="font-size:9px;color:var(--muted)">رسوم '+Number(response?.management_fee||0).toFixed(2)+'</span>':'المعلم'}</td>
           <td><span class="room-request-status ${status}">${escapeHtml(teacherRoomStatusLabel[status]||status)}</span></td>
           <td><div class="teacher-room-actions">
             <button class="secondary-action review-teacher-room" type="button" data-request-id="${escapeHtml(r.request_id)}">مراجعة</button>
@@ -3360,7 +3376,7 @@
           </div></td>
         </tr>`;
       }).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="6" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلبات القاعات')+'</td></tr>'}
+    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلبات القاعات')+'</td></tr>'}
   };
 
   document.getElementById('refreshTeacherRoomAdmin').addEventListener('click',loadTeacherRoomRequestsAdmin);
@@ -3373,6 +3389,9 @@
       document.getElementById('teacherRoomReviewTitle').textContent=(r.teacher_name||'المعلم')+' — '+(r.room_name||'القاعة');
       document.getElementById('reviewRoomAgreedPrice').value=Number(r.proposed_price||0);
       document.getElementById('reviewRoomPricing').value=r.pricing_basis||'monthly';
+      document.getElementById('reviewRoomManagementMode').value=r.management_mode||'teacher';
+      document.getElementById('reviewRoomManagementFee').value=Number(r.review_response?.management_fee||0);
+      document.getElementById('reviewRoomManagementFeeBasis').value=r.review_response?.management_fee_basis||'monthly';
       document.getElementById('reviewRoomStatus').value='approved';
       document.getElementById('reviewRoomNote').value='';
       document.getElementById('teacherRoomReviewMsg').className='student-form-msg';
@@ -3406,6 +3425,10 @@
       status:document.getElementById('reviewRoomStatus').value,
       agreed_price:Number(document.getElementById('reviewRoomAgreedPrice').value)||0,
       pricing_basis:document.getElementById('reviewRoomPricing').value,
+      management_mode:document.getElementById('reviewRoomManagementMode').value,
+      management_fee:Number(document.getElementById('reviewRoomManagementFee').value)||0,
+      management_fee_basis:document.getElementById('reviewRoomManagementFeeBasis').value,
+      management_internal_email:document.getElementById('reviewRoomManagementMode').value==='roven'?(await hydratePlatformContext())?.internal_email||null:null,
       note:document.getElementById('reviewRoomNote').value.trim()||null,
       reviewed_at:new Date().toISOString()
     };
