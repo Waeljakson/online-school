@@ -1551,6 +1551,9 @@
               group_name:r?.group_name||payload.p_group_name,
               meeting_provider:payload.p_meeting_provider,
               meeting_url:payload.p_meeting_url,
+              agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
+              pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'custom',
+              note:pendingRoomCreateRequest.review_response?.note||null,
               created_at:new Date().toISOString()
             })
           })});
@@ -2097,7 +2100,7 @@
   const markInternalTeacherMailRead=async rows=>{
     const internal=(rows||[]).filter(m=>{
       const s=String(m.subject||'');
-      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]'));
+      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]')||s.startsWith('[ROOM_CREATED]'));
     });
     await Promise.allSettled(internal.map(m=>dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:m.message_id})})));
   };
@@ -2389,7 +2392,7 @@
       const requests=(inbox||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_REQUEST]')).map(m=>{
         const x=teacherSafeJson(m.body);return x?{...x,sender_email:m.sender_email,sender_name:m.sender_name,message_id:m.message_id,sent_at:m.sent_at}:null
       }).filter(x=>x?.request_id);
-      adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,x]));
+      adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,{...x,review_response:responses.get(x.request_id)||null}]));
       let pendingCount=0,approvedCount=0,monthlyTotal=0,sessionTotal=0;
       requests.forEach(r=>{
         const response=responses.get(r.request_id);
@@ -3021,6 +3024,15 @@
             text:r.status==='approved'
               ?('السعر المتفق: '+Number(r.agreed_price||0).toFixed(2)+' — '+String(teacherPricingLabel[r.pricing_basis]||''))
               :(r.note||'راجع حالة الطلب من لوحة المعلم.'),
+            time:m.sent_at
+          });
+        });
+        (inbox||[]).filter(m=>!m.read_at&&String(m.subject||'').startsWith('[ROOM_CREATED]')).forEach(m=>{
+          const r=teacherSafeJson(m.body)||{};
+          items.push({
+            uid:'room-created:'+m.message_id,section:'teacherhub',messageId:m.message_id,count:1,icon:'🎉',
+            title:'تم إنشاء قاعتك التعليمية',
+            text:(r.group_name||'القاعة')+(r.meeting_url?' — رابط الحصة جاهز':' — يمكنك إدارة الرابط من لوحة المعلم'),
             time:m.sent_at
           });
         });
