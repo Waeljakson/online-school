@@ -198,6 +198,8 @@
     .teacher-private-finance-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.teacher-private-finance-summary>div{background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px;padding:10px 12px}.teacher-private-finance-summary span{display:block;font-size:9px;color:var(--muted)}.teacher-private-finance-summary b{display:block;font-size:16px;margin-top:4px}.private-attendance-toolbar{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;padding:10px;background:#f8fbfd;border-radius:12px}.private-attendance-status{min-width:120px}.private-money-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:700px){.teacher-private-finance-summary{grid-template-columns:repeat(2,1fr)}}
 
     .room-owner-badge{display:inline-flex!important;width:auto!important;margin:0!important;padding:3px 7px;border-radius:999px;font-size:8px!important;font-weight:800}.room-owner-badge.roven{background:#eef4fb;color:#35526f!important}.room-owner-badge.private{background:#fff4d8;color:#8a6500!important}
+
+    .certificate-preview{min-height:330px;border:10px double #d5bd72;border-radius:8px;padding:28px;text-align:center;background:linear-gradient(135deg,#fffef9,#fff9e8);display:flex;flex-direction:column;justify-content:center;align-items:center}.certificate-preview h2{font-size:28px;margin:8px}.certificate-preview h3{font-size:22px;color:#0f766e;margin:8px}.certificate-preview p{margin:5px;color:#5f6368}.certificate-seal{width:72px;height:72px;border-radius:50%;border:4px double #c9a94b;display:grid;place-items:center;font-weight:900;color:#9a7a1d}.whatsapp-note{margin-top:10px;padding:9px 11px;border-radius:10px;background:#edf9f2;border:1px solid #c8ead5;color:#246640;font-size:10px}.exam-question-card{border:1px solid #e5edf4;border-radius:13px;padding:12px;margin-bottom:9px;background:#fbfdff}.exam-question-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.exam-choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.certificate-list-item,.exam-list-item{padding:11px;border:1px solid #e7edf2;border-radius:12px;margin-bottom:8px;background:#fbfdff}.certificate-list-item b,.exam-list-item b{display:block}.certificate-list-item span,.exam-list-item span{font-size:10px;color:var(--muted)}@media(max-width:650px){.exam-choice-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -280,6 +282,11 @@
       <button data-section="education" data-title="الإدارة التعليمية"><span class="ico">🎓</span>الإدارة التعليمية</button>
       <button data-section="attendance" data-title="الحضور والغياب"><span class="ico">✓</span>الحضور والغياب</button>
       <button data-section="rewards" data-title="النقاط والمكافآت"><span class="ico">⭐</span>النقاط والمكافآت</button>
+      <button data-section="assessments" data-title="الاختبارات"><span class="ico">📝</span>الاختبارات</button>
+      <button data-section="certificates" data-title="الشهادات"><span class="ico">🏅</span>الشهادات</button>
+      <button data-section="materials" data-title="المذكرات والكتب"><span class="ico">📚</span>المذكرات والكتب</button>
+      <button data-section="whatsapp" data-title="مركز واتساب"><span class="ico">☎</span>مركز واتساب</button>
+      <button data-section="parenthub" data-title="متابعة الأبناء" style="display:none"><span class="ico">👨‍👩‍👧</span>متابعة الأبناء</button>
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
@@ -458,6 +465,101 @@
           <div class="table-wrap" style="margin-top:14px"><table class="table"><thead><tr><th>الطالب</th><th>المكافأة</th><th>النقاط</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="redemptionRows"><tr><td colspan="5" class="students-empty">لا توجد طلبات معروضة.</td></tr></tbody></table></div>
         </article>
       </section>
+      <section class="module" id="parenthub">
+        <div class="section-toolbar"><div><h2>متابعة الأبناء</h2><p>الحضور والرسوم والنقاط والشهادات ونتائج الاختبارات في حساب ولي الأمر.</p></div><button class="link-btn" id="refreshParentHub" type="button">تحديث</button></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-head"><span>الأبناء المرتبطون</span><span class="stat-icon">👨‍👩‍👧</span></div><div class="value" id="parentChildrenCount">0</div><div class="sub">داخل حساب ولي الأمر</div></div>
+          <div class="stat"><div class="stat-head"><span>إجمالي المتبقي</span><span class="stat-icon">💳</span></div><div class="value" id="parentBalanceTotal">0.00</div><div class="sub">حسب آخر تحديث مالي</div></div>
+          <div class="stat"><div class="stat-head"><span>الشهادات</span><span class="stat-icon">🏅</span></div><div class="value" id="parentCertificatesCount">0</div><div class="sub">شكر وتقدير</div></div>
+          <div class="stat"><div class="stat-head"><span>نتائج الاختبارات</span><span class="stat-icon">📝</span></div><div class="value" id="parentResultsCount">0</div><div class="sub">النتائج المنشورة</div></div>
+        </div>
+        <article class="panel"><div class="panel-head"><div><h3>ملخص الأبناء</h3><p>آخر بيانات متابعة مرسلة إلى حسابك.</p></div><span>📊</span></div><div id="parentChildrenCards" class="cards3"><div class="feature"><b>لا توجد بيانات متابعة بعد.</b></div></div></article>
+        <div class="grid" style="margin-top:15px">
+          <article class="panel"><div class="panel-head"><div><h3>الشهادات والتقدير</h3><p>الشهادات المرسلة لأبنائك.</p></div><span>🏅</span></div><div id="parentCertificatesList"><div class="students-empty">لا توجد شهادات.</div></div></article>
+          <article class="panel"><div class="panel-head"><div><h3>نتائج الاختبارات</h3><p>الدرجات التي تم اعتمادها.</p></div><span>📝</span></div><div id="parentExamResults"><div class="students-empty">لا توجد نتائج.</div></div></article>
+        </div>
+      </section>
+
+      <section class="module" id="certificates">
+        <div class="section-toolbar"><div><h2>الشهادات</h2><p>إنشاء شهادات شكر وتقدير وإرسالها لحساب الطالب.</p></div><button class="link-btn" id="refreshCertificates" type="button">تحديث</button></div>
+        <div class="grid" id="certificateCreateArea">
+          <article class="panel">
+            <div class="panel-head"><div><h3>إصدار شهادة</h3><p>لطلاب ROVEN أو طلاب المعلم الخاصين.</p></div><span>🏅</span></div>
+            <div class="form-grid">
+              <div class="form-field"><label>المصدر</label><select id="certificateSource"><option value="roven">طلاب ROVEN</option><option value="private">طلابي الخاصون</option></select></div>
+              <div class="form-field"><label>الطالب</label><select id="certificateStudent"><option value="">اختر الطالب</option></select></div>
+              <div class="form-field"><label>نوع الشهادة</label><select id="certificateType"><option value="appreciation">شهادة تقدير</option><option value="thanks">شهادة شكر</option><option value="excellence">شهادة تفوق</option><option value="attendance">شهادة التزام</option></select></div>
+              <div class="form-field"><label>عنوان الشهادة</label><input id="certificateTitle" value="شهادة تقدير"></div>
+              <div class="form-field" style="grid-column:1/-1"><label>نص الشهادة</label><textarea id="certificateBody" rows="4" placeholder="تقديرًا لتميزه والتزامه..."></textarea></div>
+            </div>
+            <div class="student-form-msg" id="certificateMsg"></div>
+            <button class="primary-action" id="issueCertificate" type="button" style="margin-top:10px">إصدار وإرسال الشهادة</button>
+          </article>
+          <article class="panel"><div class="panel-head"><div><h3>معاينة</h3><p>تصميم قابل للطباعة.</p></div><span>🖨️</span></div><div id="certificatePreview" class="certificate-preview"><div class="certificate-seal">ROVEN</div><h2>شهادة تقدير</h2><p>تُمنح إلى</p><h3>اسم الطالب</h3><p>تقديرًا لتميزه وجهده.</p><small>ROVEN Online School</small></div></article>
+        </div>
+        <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>الشهادات المستلمة / الصادرة</h3><p>حسب نوع حسابك.</p></div><span>📜</span></div><div id="certificatesList"><div class="students-empty">لا توجد شهادات.</div></div></article>
+      </section>
+
+      <section class="module" id="materials">
+        <div class="section-toolbar"><div><h2>المذكرات والكتب</h2><p>إدارة الملازم والكتب التعليمية وحساب البيع والتحصيل.</p></div><button class="link-btn" id="refreshMaterials" type="button">تحديث</button></div>
+        <div class="grid" id="materialsAdminArea">
+          <article class="panel">
+            <div class="panel-head"><div><h3>إضافة منتج تعليمي</h3><p>مذكرة، كتاب أو ملف رقمي.</p></div><span>📚</span></div>
+            <div class="form-grid">
+              <div class="form-field"><label>النوع</label><select id="materialType"><option value="memo">مذكرة</option><option value="book">كتاب</option><option value="digital">ملف رقمي</option><option value="other">أخرى</option></select></div>
+              <div class="form-field"><label>الاسم</label><input id="materialTitle"></div>
+              <div class="form-field"><label>التكلفة</label><input id="materialCost" type="number" min="0" step="0.01" value="0"></div>
+              <div class="form-field"><label>سعر البيع</label><input id="materialPrice" type="number" min="0" step="0.01" value="0"></div>
+              <div class="form-field"><label>المخزون</label><input id="materialStock" type="number" min="0" placeholder="فارغ = رقمي/غير محدود"></div>
+              <div class="form-field"><label>رابط الملف</label><input id="materialUrl" placeholder="اختياري"></div>
+            </div>
+            <div class="student-form-msg" id="materialMsg"></div>
+            <button class="primary-action" id="saveMaterial" type="button" style="margin-top:10px">حفظ المنتج</button>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>ملخص مالي</h3><p>مبيعات المذكرات والكتب.</p></div><span>💰</span></div>
+            <div class="teacher-money-row"><div><span>قيمة المبيعات</span><b id="materialsSalesTotal">0.00</b></div><div><span>المحصل</span><b class="paid" id="materialsPaidTotal">0.00</b></div><div><span>تكلفة المباع</span><b id="materialsCostTotal">0.00</b></div><div><span>ربح تقديري</span><b id="materialsProfitTotal">0.00</b></div></div>
+          </article>
+        </div>
+        <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>قائمة المنتجات</h3><p>إضافة، بيع أو إيقاف المنتج.</p></div><span>📦</span></div><div class="table-wrap"><table class="table"><thead><tr><th>المنتج</th><th>النوع</th><th>التكلفة</th><th>البيع</th><th>المخزون</th><th>المبيعات</th><th>إجراء</th></tr></thead><tbody id="materialsRows"><tr><td colspan="7" class="students-empty">لا توجد منتجات.</td></tr></tbody></table></div></article>
+      </section>
+
+      <section class="module" id="whatsapp">
+        <div class="section-toolbar"><div><h2>مركز واتساب</h2><p>تجهيز الرسائل وفتح واتساب مباشرة للمستلمين المسموحين لحسابك.</p></div><button class="link-btn" id="refreshWhatsapp" type="button">تحديث الأسماء</button></div>
+        <article class="panel">
+          <div class="form-grid">
+            <div class="form-field"><label>قالب الرسالة</label><select id="whatsappTemplate"><option value="custom">رسالة مخصصة</option><option value="attendance">متابعة الحضور</option><option value="fees">تذكير بالرسوم</option><option value="lesson">موعد الحصة</option><option value="certificate">تهنئة بشهادة</option></select></div>
+            <div class="form-field"><label>بحث</label><input id="whatsappSearch" placeholder="اسم الطالب أو ولي الأمر"></div>
+            <div class="form-field" style="grid-column:1/-1"><label>نص الرسالة</label><textarea id="whatsappMessage" rows="4" placeholder="اكتب الرسالة هنا..."></textarea></div>
+          </div>
+          <div class="whatsapp-note">الإرسال الحالي يفتح WhatsApp بالرسالة جاهزة للمراجعة والإرسال. الإرسال الآلي يحتاج ربط WhatsApp Business Cloud API وحساب أعمال معتمد.</div>
+          <div class="table-wrap" style="margin-top:12px"><table class="table"><thead><tr><th>الطالب</th><th>ولي الأمر</th><th>القاعة / الصف</th><th>واتساب الطالب</th><th>واتساب ولي الأمر</th></tr></thead><tbody id="whatsappRows"><tr><td colspan="5" class="students-empty">اضغط تحديث الأسماء.</td></tr></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="module" id="assessments">
+        <div class="section-toolbar"><div><h2>الاختبارات</h2><p>اختيار من متعدد ومقالي، بوقت محدد أو مفتوح.</p></div><button class="link-btn" id="refreshAssessments" type="button">تحديث</button></div>
+        <div id="assessmentTeacherArea">
+          <div class="grid">
+            <article class="panel"><div class="panel-head"><div><h3>إنشاء اختبار</h3><p>احفظ مسودة ثم انشر للطلاب.</p></div><span>📝</span></div>
+              <div class="form-grid">
+                <div class="form-field"><label>العنوان</label><input id="examTitle"></div>
+                <div class="form-field"><label>المجموعة</label><select id="examGroup"><option value="">اختر المجموعة</option></select></div>
+                <div class="form-field"><label>المدة بالدقائق</label><input id="examDuration" type="number" min="1" placeholder="فارغ = مفتوح"></div>
+                <div class="form-field"><label>تعليمات</label><input id="examInstructions"></div>
+              </div>
+              <div id="examQuestionsBuilder" style="margin-top:12px"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary-action" id="addMcqQuestion" type="button">＋ اختيار من متعدد</button><button class="secondary-action" id="addEssayQuestion" type="button">＋ سؤال مقالي</button><button class="primary-action" id="saveExamDraft" type="button">حفظ الاختبار</button></div>
+              <div class="student-form-msg" id="examBuilderMsg"></div>
+            </article>
+            <article class="panel"><div class="panel-head"><div><h3>اختباراتي</h3><p>المسودات والاختبارات المنشورة.</p></div><span>📋</span></div><div id="teacherExamsList"><div class="students-empty">لا توجد اختبارات.</div></div></article>
+          </div>
+        </div>
+        <div id="assessmentStudentArea" style="display:none">
+          <article class="panel"><div class="panel-head"><div><h3>اختباراتي المتاحة</h3><p>ابدأ الاختبار واتبع الوقت المحدد إن وجد.</p></div><span>⏱️</span></div><div id="studentExamsList"><div class="students-empty">لا توجد اختبارات متاحة.</div></div></article>
+        </div>
+      </section>
+
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
