@@ -178,7 +178,9 @@
       }
     }
 
-  </style>
+  
+    .attendance-status{min-width:130px}.attendance-note{min-width:170px}.reward-card{position:relative}.reward-cost{display:inline-flex;margin-top:9px;padding:5px 9px;border-radius:999px;background:#fff7d9;color:#8a6500;font-weight:800;font-size:11px}.level-badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#edf8f6;color:var(--primary);font-size:10px;font-weight:800}.reward-actions{margin-top:10px}
+</style>
 </head>
 <body>
 
@@ -259,6 +261,7 @@
       <button data-section="students" data-title="الطلاب وأولياء الأمور"><span class="ico">👥</span>الطلاب وأولياء الأمور</button>
       <button data-section="education" data-title="الإدارة التعليمية"><span class="ico">🎓</span>الإدارة التعليمية</button>
       <button data-section="attendance" data-title="الحضور والغياب"><span class="ico">✓</span>الحضور والغياب</button>
+      <button data-section="rewards" data-title="النقاط والمكافآت"><span class="ico">⭐</span>النقاط والمكافآت</button>
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
       <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
@@ -337,7 +340,82 @@
           </div>
         </article>
       </section>
-      <section class="module" id="attendance"><div class="placeholder"><div class="big">✅</div><h2>الحضور والغياب</h2><p>تسجيل حاضر، غائب، متأخر، بعذر أو غادر مبكرًا مع تقارير الطالب والمجموعة.</p></div></section>
+      <section class="module" id="attendance">
+        <div class="section-toolbar">
+          <div><h2>الحضور والغياب</h2><p>السكرتير أو المعلم يسجل حضور طلاب المجموعة في نفس المنصة.</p></div>
+          <button class="link-btn" id="refreshAttendanceGroups" type="button">تحديث المجموعات</button>
+        </div>
+        <article class="panel">
+          <div class="form-grid">
+            <div class="form-field"><label>المجموعة</label><select id="attendanceGroup"><option value="">اختر المجموعة</option></select></div>
+            <div class="form-field"><label>التاريخ</label><input id="attendanceDate" type="date"></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+            <button class="secondary-action" id="loadAttendance" type="button">عرض الطلاب</button>
+            <button class="secondary-action" id="markAllPresent" type="button">تحديد الكل حاضر</button>
+            <button class="primary-action" id="saveAttendance" type="button">حفظ الحضور</button>
+          </div>
+          <div class="student-form-msg" id="attendanceMsg"></div>
+          <div class="table-wrap" style="margin-top:14px">
+            <table class="table">
+              <thead><tr><th>الطالب</th><th>الحالة</th><th>دقائق التأخير</th><th>ملاحظة</th></tr></thead>
+              <tbody id="attendanceRows"><tr><td colspan="4" class="students-empty">اختر المجموعة والتاريخ لعرض الطلاب.</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+      <section class="module" id="rewards">
+        <div class="section-toolbar">
+          <div><h2>النقاط والمكافآت</h2><p>تحفيز الطلاب بالنقاط والمستويات والمكافآت ولوحة المتصدرين.</p></div>
+          <button class="link-btn" id="refreshRewards" type="button">تحديث</button>
+        </div>
+
+        <div class="stats rewards-summary">
+          <div class="stat"><div class="stat-head"><span>رصيدي</span><span class="stat-icon">⭐</span></div><div class="value" id="myPointsBalance">—</div><div class="sub" id="myPointsLevel">مستوى الطالب</div></div>
+          <div class="stat"><div class="stat-head"><span>الأول على المدرسة</span><span class="stat-icon">🏆</span></div><div class="value" id="topStudentPoints" style="font-size:18px">—</div><div class="sub" id="topStudentName">لوحة المتصدرين</div></div>
+        </div>
+
+        <div class="grid rewards-admin-tools">
+          <article class="panel" id="issuePointsPanel">
+            <div class="panel-head"><div><h3>إضافة نقاط لطالب</h3><p>للمعلم والسكرتير والمشرف والإدارة.</p></div><span>⭐</span></div>
+            <div class="form-grid">
+              <div class="form-field"><label>المجموعة</label><select id="pointsGroup"><option value="">اختر المجموعة</option></select></div>
+              <div class="form-field"><label>الطالب</label><select id="pointsStudent"><option value="">اختر الطالب</option></select></div>
+              <div class="form-field"><label>النقاط</label><input id="pointsAmount" type="number" min="-100" max="100" value="10"></div>
+              <div class="form-field"><label>السبب</label><input id="pointsReason" placeholder="مثال: مشاركة متميزة"></div>
+              <div class="form-field"><label>التصنيف</label><select id="pointsCategory">
+                <option value="participation">مشاركة</option><option value="behavior">سلوك إيجابي</option>
+                <option value="homework">واجب</option><option value="attendance">التزام بالحضور</option>
+                <option value="excellence">تفوق</option><option value="bonus">مكافأة إضافية</option>
+                <option value="penalty">خصم نقاط</option><option value="other">أخرى</option>
+              </select></div>
+            </div>
+            <div class="student-form-msg" id="pointsMsg"></div>
+            <button class="primary-action" id="issuePointsBtn" type="button" style="margin-top:10px">إضافة النقاط</button>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>المتصدرون</h3><p>أعلى الطلاب نقاطًا.</p></div><span>🏆</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:520px"><thead><tr><th>#</th><th>الطالب</th><th>الصف</th><th>النقاط</th><th>المستوى</th></tr></thead><tbody id="leaderboardRows"><tr><td colspan="5" class="students-empty">جارٍ التحميل...</td></tr></tbody></table></div>
+          </article>
+        </div>
+
+        <article class="panel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>متجر المكافآت</h3><p>يستبدل الطالب نقاطه بمكافآت ROVEN.</p></div><span>🎁</span></div>
+          <div class="cards3" id="rewardCards"><div class="feature"><b>جارٍ التحميل...</b></div></div>
+        </article>
+
+        <article class="panel" id="rewardAdminPanel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>إدارة المكافآت والطلبات</h3><p>إضافة مكافأة ومتابعة طلبات الاستبدال.</p></div><span>🎁</span></div>
+          <div class="form-grid">
+            <div class="form-field"><label>اسم المكافأة</label><input id="newRewardTitle" placeholder="مثال: شهادة تميز"></div>
+            <div class="form-field"><label>تكلفة النقاط</label><input id="newRewardCost" type="number" min="1" value="100"></div>
+            <div class="form-field"><label>الكمية</label><input id="newRewardStock" type="number" min="0" placeholder="فارغ = غير محدودة"></div>
+            <div class="form-field"><label>الوصف</label><input id="newRewardDescription"></div>
+          </div>
+          <button class="secondary-action" id="createRewardBtn" type="button" style="margin-top:10px">＋ إضافة مكافأة</button>
+          <div class="table-wrap" style="margin-top:14px"><table class="table"><thead><tr><th>الطالب</th><th>المكافأة</th><th>النقاط</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="redemptionRows"><tr><td colspan="5" class="students-empty">لا توجد طلبات معروضة.</td></tr></tbody></table></div>
+        </article>
+      </section>
       <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
@@ -377,7 +455,8 @@
         <div class="cards3" style="grid-template-columns:repeat(4,1fr);margin-bottom:15px">
           <div class="feature"><b>🛡️ مدير نظام</b><span>صلاحية كاملة تشمل المستخدمين والإعدادات وكافة أقسام المدرسة.</span></div>
           <div class="feature"><b>🏫 مدير</b><span>إدارة المدرسة والتعليم والمالية والتقارير، بدون إدارة حسابات مدير النظام.</span></div>
-          <div class="feature"><b>👨‍🏫 معلم</b><span>الوصول إلى مجموعاته وحصصه وطلابه والواجبات والاختبارات المرتبطة به.</span></div>
+          <div class="feature"><b>👨‍🏫 معلم</b><span>إدارة مجموعاته، رابط القاعة، الحضور، الشات والنقاط.</span></div>
+          <div class="feature"><b>📝 سكرتير</b><span>إنشاء المجموعات وربط المعلمين والطلاب وتسجيل الحضور دون صلاحيات مالية.</span></div>
           <div class="feature"><b>🗂️ طاقم إداري</b><span>التسجيل والمتابعة والتحصيل والعمليات الإدارية اليومية.</span></div>
         </div>
 
@@ -426,6 +505,7 @@
               <option value="school_manager">مدير</option>
               <option value="academic_admin">عضو هيئة تعليمية / مشرف أكاديمي</option>
               <option value="finance_admin">مسؤول مالي</option>
+              <option value="secretary">سكرتير</option>
               <option value="teacher">معلم</option>
               <option value="reception">طاقم إداري</option>
             </select>
@@ -434,12 +514,19 @@
       </div>
 
       <div class="form-section teacher-link-box" id="teacherLinkBox">
-        <div class="form-section-title">👨‍🏫 ربط حساب المعلم</div>
-        <div class="form-field">
-          <label>ملف معلم موجود</label>
-          <select id="nuTeacherId"><option value="">إنشاء ملف معلم تلقائيًا</option></select>
-          <div class="form-hint">اختياري. إذا كان المعلم مسجلًا مسبقًا، اختر ملفه. وإلا سينشئ النظام ملف معلم تلقائيًا.</div>
+        <div class="form-section-title">👨‍🏫 ملف المعلم</div>
+        <div class="form-grid">
+          <div class="form-field"><label>طريقة إضافة المعلم</label>
+            <select id="nuTeacherMode">
+              <option value="new">إنشاء ملف معلم جديد</option>
+              <option value="existing">ربط معلم موجود</option>
+            </select>
+          </div>
+          <div class="form-field" id="nuExistingTeacherWrap" style="display:none"><label>اختر المعلم الموجود</label>
+            <select id="nuTeacherId"><option value="">اختر المعلم</option></select>
+          </div>
         </div>
+        <div class="form-hint">إذا اخترت «معلم موجود» سيتم ربط الحساب بملفه الحالي. وإذا اخترت «إنشاء جديد» ينشئ النظام ملف المعلم والحساب معًا.</div>
       </div>
 
       <div class="user-activation-note">
@@ -825,19 +912,21 @@
     const isAdmin=type==='admin';
     let allowed;
     if(type==='admin'){
-      allowed=new Set(['dashboard','students','education','attendance','finance','expenses','reports','mygroups','mail','profile','settings']);
+      allowed=new Set(['dashboard','students','education','attendance','rewards','finance','expenses','reports','mygroups','mail','profile','settings']);
     }else if(type==='staff' && role==='academic_admin'){
-      allowed=new Set(['dashboard','education','attendance','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','education','attendance','rewards','mygroups','mail','profile']);
+    }else if(type==='staff' && role==='secretary'){
+      allowed=new Set(['dashboard','students','education','attendance','rewards','mygroups','mail','profile']);
     }else if(type==='staff' && role==='finance_admin'){
       allowed=new Set(['dashboard','finance','expenses','reports','mail','profile']);
     }else if(type==='staff'){
       allowed=new Set(['dashboard','students','finance','mail','profile']);
     }else if(type==='teacher'){
-      allowed=new Set(['dashboard','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','attendance','rewards','mygroups','mail','profile']);
     }else if(type==='parent'){
       allowed=new Set(['dashboard','mail','profile']);
     }else{
-      allowed=new Set(['dashboard','mygroups','mail','profile']);
+      allowed=new Set(['dashboard','rewards','mygroups','mail','profile']);
     }
 
     document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=allowed.has(btn.dataset.section)?'':'none'});
@@ -970,17 +1059,21 @@
   const userFormMsg=document.getElementById('userFormMsg');
   const userCreationResult=document.getElementById('userCreationResult');
   const saveUserBtn=document.getElementById('saveUserBtn');
-  const roleLabels={super_admin:'مدير نظام',school_manager:'مدير',academic_admin:'عضو هيئة تعليمية',finance_admin:'مسؤول مالي',teacher:'معلم',reception:'طاقم إداري'};
-  const roleIcons={super_admin:'🛡️',school_manager:'🏫',academic_admin:'🎓',finance_admin:'💳',teacher:'👨‍🏫',reception:'🗂️'};
+  const roleLabels={super_admin:'مدير نظام',school_manager:'مدير',academic_admin:'عضو هيئة تعليمية',finance_admin:'مسؤول مالي',secretary:'سكرتير',teacher:'معلم',reception:'طاقم إداري'};
+  const roleIcons={super_admin:'🛡️',school_manager:'🏫',academic_admin:'🎓',finance_admin:'💳',secretary:'📝',teacher:'👨‍🏫',reception:'🗂️'};
 
   const setTeacherLinkVisibility=()=>{
-    document.getElementById('teacherLinkBox').classList.toggle('show',document.getElementById('nuRole').value==='teacher');
+    const isTeacher=document.getElementById('nuRole').value==='teacher';
+    document.getElementById('teacherLinkBox').classList.toggle('show',isTeacher);
+    const existing=isTeacher && document.getElementById('nuTeacherMode').value==='existing';
+    document.getElementById('nuExistingTeacherWrap').style.display=existing?'':'none';
   };
   document.getElementById('nuRole').addEventListener('change',setTeacherLinkVisibility);
+  document.getElementById('nuTeacherMode').addEventListener('change',setTeacherLinkVisibility);
 
   const loadUnlinkedTeachers=async()=>{
     const select=document.getElementById('nuTeacherId');
-    select.innerHTML='<option value="">إنشاء ملف معلم تلقائيًا</option>';
+    select.innerHTML='<option value="">اختر المعلم الموجود</option>';
     try{
       const data=await dataApiFetch('/rpc/list_unlinked_teachers_admin',{method:'POST',body:'{}'});
       (data||[]).forEach(t=>{
@@ -995,6 +1088,7 @@
   const openUserModal=async()=>{
     userModal.classList.add('show');userModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     userFormMsg.className='student-form-msg';userCreationResult.className='registration-result';
+    document.getElementById('nuTeacherMode').value='new';
     setTeacherLinkVisibility();await loadUnlinkedTeachers();
     document.getElementById('nuPassword').value=makeRandomPassword();
   };
@@ -1023,6 +1117,7 @@
             <option value="school_manager" ${u.role==='school_manager'?'selected':''}>مدير</option>
             <option value="academic_admin" ${u.role==='academic_admin'?'selected':''}>عضو هيئة تعليمية</option>
             <option value="finance_admin" ${u.role==='finance_admin'?'selected':''}>مسؤول مالي</option>
+            <option value="secretary" ${u.role==='secretary'?'selected':''}>سكرتير</option>
             <option value="teacher" ${u.role==='teacher'?'selected':''}>معلم</option>
             <option value="reception" ${u.role==='reception'?'selected':''}>طاقم إداري</option>
           </select>
@@ -1068,7 +1163,7 @@
       p_password:document.getElementById('nuPassword').value,
       p_generate_password:false,
       p_role:document.getElementById('nuRole').value,
-      p_teacher_id:document.getElementById('nuRole').value==='teacher'?(document.getElementById('nuTeacherId').value||null):null
+      p_teacher_id:(document.getElementById('nuRole').value==='teacher'&&document.getElementById('nuTeacherMode').value==='existing')?(document.getElementById('nuTeacherId').value||null):null
     };
     if(!payload.p_full_name||!payload.p_email){userFormMsg.textContent='الاسم والبريد الإلكتروني مطلوبان.';userFormMsg.className='student-form-msg error show';return}
     saveUserBtn.disabled=true;saveUserBtn.textContent='جارٍ إنشاء الحساب...';
@@ -1140,10 +1235,10 @@
     teacherSelect.innerHTML='<option value="">جارٍ تحميل المعلمين...</option>';
     try{
       const [teachers,students]=await Promise.all([
-        dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'}),
+        dataApiFetch('/rpc/list_teachers_group_admin',{method:'POST',body:'{}'}),
         dataApiFetch('/rpc/list_active_students_admin',{method:'POST',body:'{}'})
       ]);
-      teacherSelect.innerHTML='<option value="">اختر المعلم</option>'+((teachers||[]).filter(t=>t.status==='active').map(t=>`<option value="${escapeHtml(t.teacher_id)}">${escapeHtml(t.full_name)}${t.specialization?' - '+escapeHtml(t.specialization):''}</option>`).join(''));
+      teacherSelect.innerHTML='<option value="">اختر المعلم</option>'+((teachers||[]).map(t=>`<option value="${escapeHtml(t.teacher_id)}">${escapeHtml(t.full_name)}${t.specialization?' - '+escapeHtml(t.specialization):''}</option>`).join(''));
       groupStudentsCache=Array.isArray(students)?students:[];
       renderGroupStudents('');
     }catch(err){
