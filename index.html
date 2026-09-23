@@ -204,6 +204,8 @@
 .room-owner-badge.managed{background:#e8f7f1;color:#137a59!important}
 .managed-room-teacher{font-size:10px;color:var(--muted);display:block;margin-top:3px}.managed-fee-chip{display:inline-flex;padding:4px 8px;border-radius:999px;background:#e8f7f1;color:#137a59;font-size:9px;font-weight:800}
 .assistant-permissions{display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;padding:10px;background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px}.assistant-permissions label{font-size:11px;display:flex;gap:6px;align-items:center}.assistant-perm-chip{display:inline-flex;padding:3px 7px;border-radius:999px;background:#eef4fb;color:#35526f;font-size:9px;font-weight:800}
+
+    .finance-student-balance{margin-top:10px;padding:10px 12px;border-radius:11px;background:#f8fbfd;border:1px solid #e4edf4;font-size:11px;color:var(--muted)}.finance-student-balance b{color:var(--text)}.payment-void{opacity:.6;text-decoration:line-through}.receipt-code{font-family:monospace;direction:ltr;display:inline-block}.finance-status-void{background:#f3f4f6;color:#64748b}
 </style>
 </head>
 <body>
@@ -586,7 +588,40 @@
         </div>
       </section>
 
-      <section class="module" id="finance"><div class="placeholder"><div class="big">💳</div><h2>الاشتراكات والتحصيل</h2><p>خطط الاشتراك، المديونية، الأقساط، السداد، الإيصالات، الخصومات والمتأخرات.</p></div></section>
+      <section class="module" id="finance">
+        <div class="section-toolbar"><div><h2>الاشتراكات والتحصيل</h2><p>متابعة رسوم طلاب ROVEN وتسجيل الدفعات وإرسال التحديث لولي الأمر.</p></div><button class="link-btn" id="refreshSchoolFinance" type="button">تحديث</button></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-head"><span>إجمالي المستحق</span><span class="stat-icon">🧾</span></div><div class="value" id="schoolFinanceDue">0.00</div><div class="sub">بعد الخصومات</div></div>
+          <div class="stat"><div class="stat-head"><span>إجمالي المحصل</span><span class="stat-icon">✅</span></div><div class="value" id="schoolFinancePaid">0.00</div><div class="sub">الدفعات الفعلية</div></div>
+          <div class="stat"><div class="stat-head"><span>إجمالي المتبقي</span><span class="stat-icon">💳</span></div><div class="value" id="schoolFinanceBalance">0.00</div><div class="sub">المبالغ المطلوب تحصيلها</div></div>
+          <div class="stat"><div class="stat-head"><span>طلاب عليهم رصيد</span><span class="stat-icon">👥</span></div><div class="value" id="schoolFinanceDebtors">0</div><div class="sub">بحاجة للمتابعة</div></div>
+        </div>
+        <div class="grid" style="margin-top:15px">
+          <article class="panel">
+            <div class="panel-head"><div><h3>تسجيل دفعة</h3><p>يتم تحديث حساب الطالب وولي الأمر فورًا.</p></div><span>＋💰</span></div>
+            <form id="schoolPaymentForm">
+              <div class="form-grid">
+                <div class="form-field"><label>الطالب <span class="required">*</span></label><select id="schoolPaymentStudent"><option value="">اختر الطالب</option></select></div>
+                <div class="form-field"><label>المبلغ <span class="required">*</span></label><input id="schoolPaymentAmount" type="number" min="0.01" step="0.01" required></div>
+                <div class="form-field"><label>التاريخ</label><input id="schoolPaymentDate" type="date"></div>
+                <div class="form-field"><label>طريقة الدفع</label><select id="schoolPaymentMethod"><option value="cash">نقدي</option><option value="bank_transfer">تحويل بنكي</option><option value="card">بطاقة</option><option value="wallet">محفظة</option><option value="online">أونلاين</option><option value="other">أخرى</option></select></div>
+                <div class="form-field" style="grid-column:1/-1"><label>ملاحظة</label><input id="schoolPaymentNote" placeholder="رقم تحويل، ملاحظة أو بيان"></div>
+              </div>
+              <div class="finance-student-balance" id="schoolPaymentStudentSummary">اختر طالبًا لعرض الرصيد.</div>
+              <div class="student-form-msg" id="schoolPaymentMsg"></div>
+              <button class="primary-action" type="submit" style="margin-top:10px">حفظ الدفعة وإصدار إيصال</button>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>المتابعة المالية</h3><p>رصيد كل طالب بعد جميع الدفعات.</p></div><span>📊</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:700px"><thead><tr><th>الطالب</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>ولي الأمر</th></tr></thead><tbody id="schoolFinanceStudentsRows"><tr><td colspan="5" class="students-empty">جارٍ التحميل...</td></tr></tbody></table></div>
+          </article>
+        </div>
+        <article class="panel" style="margin-top:15px">
+          <div class="panel-head"><div><h3>سجل الدفعات والإيصالات</h3><p>الإلغاء يحافظ على أثر محاسبي ولا يمسح العملية من التاريخ.</p></div><span>🧾</span></div>
+          <div class="table-wrap"><table class="table" style="min-width:900px"><thead><tr><th>رقم الإيصال</th><th>الطالب</th><th>التاريخ</th><th>الطريقة</th><th>المبلغ</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="schoolPaymentsRows"><tr><td colspan="7" class="students-empty">لا توجد دفعات.</td></tr></tbody></table></div>
+        </article>
+      </section>
       <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
       <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
       <section class="module" id="teacherhub">
