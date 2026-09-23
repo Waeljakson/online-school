@@ -194,6 +194,8 @@
     .account-category-cards{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}.account-category{border:1px solid #e2eaf1;background:#f8fbfd;border-radius:12px;padding:10px 9px;text-align:right;cursor:pointer;font:inherit;color:var(--text)}.account-category span{display:block;font-size:9px;color:var(--muted)}.account-category b{display:block;font-size:18px;margin-top:3px}.account-category.active{border-color:#9dd7cd;background:#edf9f6;color:#0f766e}.account-directory-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px}.account-security-note{font-size:10px;color:#8a6500;background:#fff8df;border:1px solid #f1e2a9;border-radius:10px;padding:8px 10px}.account-password-mask{font-family:monospace;letter-spacing:2px;color:#64748b}.account-type-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:#eef4fb;color:#35526f;font-size:10px;font-weight:800}.account-identity-card{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}.account-identity-card>div{background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px;padding:10px}.account-identity-card span{display:block;font-size:9px;color:var(--muted)}.account-identity-card b{display:block;margin-top:3px;font-size:12px;word-break:break-word}.credential-generate-option{display:flex;gap:8px;align-items:flex-start;font-size:11px;color:var(--muted);margin-top:5px}.teacher-edit-btn{white-space:nowrap}@media(max-width:950px){.account-category-cards{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.account-category-cards{grid-template-columns:repeat(2,1fr)}.account-directory-toolbar{align-items:stretch;flex-direction:column}.account-identity-card{grid-template-columns:1fr}}
 
     .teacher-private-note,.teacher-private-scope-note{font-size:10px;line-height:1.7;padding:9px 11px;border-radius:11px;background:#fff8e5;border:1px solid #f0dfa4;color:#775b00}.teacher-roster-section{border:1px solid #e5edf4;border-radius:14px;padding:12px;background:#fbfdff}.teacher-roster-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.teacher-roster-title b{display:block;font-size:13px}.teacher-roster-title span{display:block;color:var(--muted);font-size:10px;margin-top:3px}.readonly-pill{padding:4px 8px!important;border-radius:999px;background:#eef3f8;color:#5b6f82!important;font-size:9px!important;font-weight:800;white-space:nowrap}.private-student-code{font-family:monospace;direction:ltr;display:inline-block}.private-student-action{white-space:nowrap}@media(max-width:650px){.teacher-roster-title{align-items:flex-start;flex-direction:column}}
+
+    .teacher-private-finance-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.teacher-private-finance-summary>div{background:#f8fbfd;border:1px solid #e5edf4;border-radius:12px;padding:10px 12px}.teacher-private-finance-summary span{display:block;font-size:9px;color:var(--muted)}.teacher-private-finance-summary b{display:block;font-size:16px;margin-top:4px}.private-attendance-toolbar{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;padding:10px;background:#f8fbfd;border-radius:12px}.private-attendance-status{min-width:120px}.private-money-actions{display:flex;gap:5px;flex-wrap:wrap}@media(max-width:700px){.teacher-private-finance-summary{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
@@ -494,10 +496,16 @@
             <button class="primary-action" id="addTeacherPrivateStudent" type="button">＋ إضافة طالب خاص</button>
           </div>
           <div class="teacher-private-note">🔒 طلاب ROVEN الذين أسندتهم لك الإدارة لا يظهرون هنا، ولا يمكنك تعديل بياناتهم أو حذفهم. يظهرون فقط داخل القاعة للتدريس والحضور.</div>
+          <div class="teacher-private-finance-summary">
+            <div><span>المطلوب هذا الشهر</span><b id="privateFeesDueMonth">0.00</b></div>
+            <div><span>المحصل هذا الشهر</span><b class="paid" id="privateFeesCollectedMonth">0.00</b></div>
+            <div><span>المتبقي</span><b class="due" id="privateFeesRemainingMonth">0.00</b></div>
+            <div><span>طلاب عليهم متبقي</span><b id="privateStudentsWithBalance">0</b></div>
+          </div>
           <div class="table-wrap" style="margin-top:12px">
-            <table class="table" style="min-width:760px">
-              <thead><tr><th>الكود</th><th>الطالب</th><th>القاعة الخاصة</th><th>الجوال</th><th>ولي الأمر</th><th>الحالة</th><th>إجراء</th></tr></thead>
-              <tbody id="teacherPrivateStudentsRows"><tr><td colspan="7" class="students-empty">لا يوجد طلاب خاصون بعد.</td></tr></tbody>
+            <table class="table" style="min-width:980px">
+              <thead><tr><th>الكود</th><th>الطالب</th><th>القاعة الخاصة</th><th>الرسوم</th><th>محصل الشهر</th><th>المتبقي</th><th>ولي الأمر</th><th>إجراء</th></tr></thead>
+              <tbody id="teacherPrivateStudentsRows"><tr><td colspan="8" class="students-empty">لا يوجد طلاب خاصون بعد.</td></tr></tbody>
             </table>
           </div>
         </article>
@@ -667,6 +675,29 @@
 
 
 
+<div class="student-modal" id="teacherPrivatePaymentModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:620px">
+    <div class="student-dialog-head">
+      <div><h3 id="teacherPrivatePaymentTitle">تسجيل تحصيل</h3><p id="teacherPrivatePaymentSub">تحصيل خاص بالمعلم ولا يدخل في مالية ROVEN School.</p></div>
+      <button class="close-modal" type="button" id="closeTeacherPrivatePaymentModal">×</button>
+    </div>
+    <form class="student-form" id="teacherPrivatePaymentForm">
+      <input id="privatePaymentStudentId" type="hidden">
+      <div class="form-grid">
+        <div class="form-field"><label>المبلغ <span class="required">*</span></label><input id="privatePaymentAmount" type="number" min="0.01" step="0.01" required></div>
+        <div class="form-field"><label>التاريخ</label><input id="privatePaymentDate" type="date"></div>
+        <div class="form-field"><label>طريقة الدفع</label><select id="privatePaymentMethod"><option value="cash">نقدي</option><option value="bank_transfer">تحويل بنكي</option><option value="wallet">محفظة</option><option value="online">أونلاين</option><option value="other">أخرى</option></select></div>
+        <div class="form-field"><label>ملاحظة</label><input id="privatePaymentNote"></div>
+      </div>
+      <div class="student-form-msg" id="privatePaymentMsg"></div>
+      <div class="student-form-actions">
+        <button class="secondary-action" id="cancelTeacherPrivatePayment" type="button">إلغاء</button>
+        <button class="save-student" type="submit">حفظ التحصيل</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="student-modal" id="teacherPrivateStudentModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:760px">
     <div class="student-dialog-head">
@@ -682,6 +713,8 @@
         <div class="form-field"><label>جوال الطالب</label><input id="privateStudentPhone" inputmode="tel"></div>
         <div class="form-field"><label>اسم ولي الأمر</label><input id="privateStudentParentName"></div>
         <div class="form-field"><label>جوال ولي الأمر</label><input id="privateStudentParentPhone" inputmode="tel"></div>
+        <div class="form-field"><label>الرسوم الشهرية</label><input id="privateStudentMonthlyFee" type="number" min="0" step="0.01" value="0"></div>
+        <div class="form-field"><label>تاريخ الانضمام</label><input id="privateStudentJoinedOn" type="date"></div>
         <div class="form-field"><label>ملاحظات</label><input id="privateStudentNotes"></div>
       </div>
       <div class="teacher-private-scope-note">لن يتم إدراج الطالب في سجل طلاب المدرسة، ولن يظهر لأي معلم آخر.</div>
@@ -708,7 +741,13 @@
 
       <div class="teacher-roster-section" style="margin-top:16px">
         <div class="teacher-roster-title"><div><b>👥 طلابي الخاصون في هذه القاعة</b><span>أنت المسؤول عن إضافتهم وتعديل بياناتهم وربطهم بقاعتك الخاصة.</span></div><button class="secondary-action" id="addPrivateStudentFromRoom" type="button">＋ إضافة طالب</button></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>الكود</th><th>الطالب</th><th>الجوال</th><th>ولي الأمر</th><th>إجراء</th></tr></thead><tbody id="teacherPrivateRoomRows"><tr><td colspan="6" class="students-empty">لا يوجد طلاب خاصون في هذه القاعة.</td></tr></tbody></table></div>
+        <div class="private-attendance-toolbar">
+          <div class="form-field" style="margin:0"><label>تاريخ الحضور الخاص</label><input id="privateAttendanceDate" type="date"></div>
+          <button class="secondary-action" id="markPrivateAllPresent" type="button">الكل حاضر</button>
+          <button class="primary-action" id="savePrivateAttendance" type="button">حفظ حضور طلابي</button>
+        </div>
+        <div class="student-form-msg" id="privateAttendanceMsg"></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>الكود</th><th>الطالب</th><th>الحالة</th><th>الرسوم</th><th>إجراء</th></tr></thead><tbody id="teacherPrivateRoomRows"><tr><td colspan="6" class="students-empty">لا يوجد طلاب خاصون في هذه القاعة.</td></tr></tbody></table></div>
       </div>
     </div>
   </div>
