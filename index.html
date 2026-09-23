@@ -1485,7 +1485,7 @@
     }else if(type==='student'||type==='private_student'){
       allowed=new Set(['dashboard','assessments','certificates','rewards','mygroups','mail','profile']);
     }else if(type==='teacher_assistant'){
-      allowed=new Set(['teacherhub','attendance','materials','whatsapp','mygroups','mail','profile']);
+      allowed=new Set(['assistanthub','whatsapp','mail','profile']);
     }else{
       allowed=new Set(['dashboard','mail','profile']);
     }
@@ -1508,7 +1508,7 @@
     }else if(type==='parent'||type==='private_parent'){
       setTimeout(()=>switchTo('parenthub','متابعة الأبناء'),80);
     }else if(type==='teacher_assistant'){
-      setTimeout(()=>switchTo('teacherhub','لوحة مساعد المعلم'),80);
+      setTimeout(()=>switchTo('assistanthub','لوحة مساعد المعلم'),80);
     }
 
   };
@@ -1567,9 +1567,10 @@
       loginSubmit.disabled=true;loginSubmit.textContent='جارٍ تسجيل الدخول...';
       try{
         if(['student','teacher','parent'].includes(activeRole)){
-          const platformData=await platformLoginRequest(email,pass);
-          const expected=activeRole==='student'?'student':activeRole==='teacher'?'teacher':'parent';
-          if(String(platformData?.account_type)!==expected) throw new Error('نوع الحساب لا يطابق البوابة المختارة.');
+          let platformData=await platformLoginRequest(email,pass);
+          if(activeRole==='teacher')platformData=await decorateAssistantLogin(platformData);
+          const expected=activeRole==='student'?['student','private_student']:activeRole==='teacher'?['teacher','teacher_assistant']:['parent','private_parent'];
+          if(!expected.includes(String(platformData?.account_type))) throw new Error('نوع الحساب لا يطابق البوابة المختارة.');
           enterPlatformPortal(platformData);
           return;
         }
@@ -5196,7 +5197,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
