@@ -1998,28 +1998,28 @@
       groupFormMsg.className='student-form-msg success show';
       if(pendingRoomCreateRequest?.sender_email){
         try{
-          await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
-            p_recipient:pendingRoomCreateRequest.sender_email,
-            p_subject:'[ROOM_CREATED] '+pendingRoomCreateRequest.request_id,
-            p_body:JSON.stringify({
-              request_id:pendingRoomCreateRequest.request_id,
-              status:'created',
-              group_id:r?.group_id||null,
-              group_name:r?.group_name||payload.p_group_name,
-              meeting_provider:payload.p_meeting_provider,
-              meeting_url:payload.p_meeting_url,
-              agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
-              pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'custom',
-              management_mode:pendingRoomCreateRequest.review_response?.management_mode||pendingRoomCreateRequest.management_mode||'teacher',
-              management_fee:Number(pendingRoomCreateRequest.review_response?.management_fee||0),
-              management_fee_basis:pendingRoomCreateRequest.review_response?.management_fee_basis||'monthly',
-              management_internal_email:pendingRoomCreateRequest.review_response?.management_internal_email||pendingRoomCreateRequest.management_internal_email||null,
-              teacher_internal_email:pendingRoomCreateRequest.sender_email||null,
-              teacher_name:pendingRoomCreateRequest.teacher_name||null,
-              note:pendingRoomCreateRequest.review_response?.note||null,
-              created_at:new Date().toISOString()
-            })
-          })});
+          const roomCreatedPayload={
+            request_id:pendingRoomCreateRequest.request_id,
+            status:'created',
+            group_id:r?.group_id||null,
+            group_name:r?.group_name||payload.p_group_name,
+            meeting_provider:payload.p_meeting_provider,
+            meeting_url:payload.p_meeting_url,
+            agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
+            pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'custom',
+            management_mode:pendingRoomCreateRequest.review_response?.management_mode||pendingRoomCreateRequest.management_mode||'teacher',
+            management_fee:Number(pendingRoomCreateRequest.review_response?.management_fee||0),
+            management_fee_basis:pendingRoomCreateRequest.review_response?.management_fee_basis||'monthly',
+            management_internal_email:pendingRoomCreateRequest.review_response?.management_internal_email||pendingRoomCreateRequest.management_internal_email||null,
+            teacher_internal_email:pendingRoomCreateRequest.sender_email||null,
+            teacher_name:pendingRoomCreateRequest.teacher_name||null,
+            note:pendingRoomCreateRequest.review_response?.note||null,
+            created_at:new Date().toISOString()
+          };
+          await sendStructuredMail(pendingRoomCreateRequest.sender_email,'ROOM_CREATED',pendingRoomCreateRequest.request_id,roomCreatedPayload);
+          if(roomCreatedPayload.management_mode==='roven'&&roomCreatedPayload.management_internal_email){
+            await sendStructuredMail(roomCreatedPayload.management_internal_email,'ROOM_MANAGED',pendingRoomCreateRequest.request_id,roomCreatedPayload);
+          }
         }catch{}
         pendingRoomCreateRequest=null;
       }
@@ -4508,7 +4508,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -4772,7 +4772,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
