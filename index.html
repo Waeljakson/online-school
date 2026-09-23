@@ -4777,9 +4777,52 @@
     const box=document.getElementById('directChatContacts');
     if(!silent)box.innerHTML='<div class="students-empty">جارٍ تحميل جهات الاتصال...</div>';
     try{
-      await hydratePlatformContext();
-      const data=await dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'});
-      directChatContactsCache=Array.isArray(data)?data:[];
+      const ctx=await hydratePlatformContext();
+      const baseResult=await Promise.allSettled([
+        dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'}),
+        dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+      ]);
+      const base=baseResult[0].status==='fulfilled'&&Array.isArray(baseResult[0].value)?baseResult[0].value:[];
+      const directory=baseResult[1].status==='fulfilled'&&Array.isArray(baseResult[1].value)?baseResult[1].value:[];
+      const map=new Map();
+      const add=(row,group)=>{
+        if(!row?.account_id||String(row.account_id)===String(ctx?.account_id||''))return;
+        const current=map.get(String(row.account_id))||{};
+        map.set(String(row.account_id),{...current,...row,contact_group:group||row.contact_group||current.contact_group||'جهات الاتصال'});
+      };
+      base.forEach(c=>{
+        const group=c.contact_group||(c.account_type==='admin'||c.account_type==='staff'?'الإدارة':c.account_type==='teacher'?'المعلمون':'جهات الاتصال');
+        add(c,group);
+      });
+
+      if(ctx?.account_type==='teacher'){
+        const [privateResult,groupsResult]=await Promise.allSettled([
+          dataApiFetch('/rpc/teacher_private_students_list',{method:'POST',body:'{}'}),
+          dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'})
+        ]);
+        const privateStudents=privateResult.status==='fulfilled'&&Array.isArray(privateResult.value)?privateResult.value:[];
+        privateStudents.forEach(ps=>{
+          const acct=directory.find(d=>String(d.account_id)===String(ps.platform_account_id||''));
+          if(acct)add(acct,'طلابي الخاصون');
+        });
+
+        const groups=groupsResult.status==='fulfilled'&&Array.isArray(groupsResult.value)?groupsResult.value:[];
+        const rosterResults=await Promise.allSettled(groups.slice(0,40).map(g=>
+          dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:g.group_id,p_on_date:new Date().toISOString().slice(0,10)})})
+        ));
+        const ids=new Set();
+        rosterResults.forEach(r=>(r.status==='fulfilled'&&Array.isArray(r.value)?r.value:[]).forEach(st=>{if(st.student_id)ids.add(String(st.student_id))}));
+        directory.filter(d=>d.account_type==='student'&&ids.has(String(d.student_id||''))).forEach(d=>add(d,'طلاب المنصة'));
+
+        directory.filter(d=>d.internal_email&&(d.account_type==='admin'||(d.account_type==='staff'&&['super_admin','school_manager','academic_admin','secretary','reception'].includes(String(d.role||'')))))
+          .forEach(d=>add(d,'الإدارة'));
+      }
+
+      if(ctx?.account_type==='student'||ctx?.account_type==='private_student'){
+        base.forEach(c=>add(c,c.account_type==='teacher'?'المعلمون':(c.account_type==='admin'||c.account_type==='staff'?'الإدارة':c.contact_group)));
+      }
+
+      directChatContactsCache=[...map.values()];
       renderDirectChatContacts();
       if(!currentDirectPeerId && directChatContactsCache.length){
         await openDirectChatPeer(directChatContactsCache[0].account_id);
@@ -4787,6 +4830,32 @@
     }catch(err){
       if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل جهات الاتصال')+'</div>';
     }
+  };
+
+  const directChatFallbackMessages=async peer=>{
+    const me=currentPlatformAccount||await hydratePlatformContext();
+    const [inbox,sent]=await Promise.all([structuredMail('inbox'),structuredMail('sent')]);
+    const rows=[...inbox,...sent].filter(m=>String(m.subject||'').startsWith('[DIRECT_CHAT_V2]')).map(m=>{
+      const p=mailPayload(m);if(!p)return null;
+      return {
+        message_id:p.message_id||m.message_id,
+        sender_account_id:p.sender_account_id,
+        recipient_account_id:p.recipient_account_id,
+        sender_name:p.sender_name||m.sender_name||'مستخدم',
+        sender_photo:null,
+        body:p.body||'',
+        attachment_name:p.attachment_name||null,
+        attachment_mime:p.attachment_mime||null,
+        attachment_base64:p.attachment_base64||null,
+        created_at:p.created_at||m.sent_at,
+        read_at:m.read_at||null
+      };
+    }).filter(Boolean).filter(m=>
+      (String(m.sender_account_id)===String(me?.account_id||'')&&String(m.recipient_account_id)===String(peer.account_id))||
+      (String(m.sender_account_id)===String(peer.account_id)&&String(m.recipient_account_id)===String(me?.account_id||''))
+    );
+    const dedup=new Map();rows.forEach(m=>dedup.set(String(m.message_id||m.created_at),m));
+    return [...dedup.values()].sort((a,b)=>new Date(a.created_at||0)-new Date(b.created_at||0));
   };
 
   const loadDirectChatMessages=async(silent=false)=>{
@@ -4815,6 +4884,28 @@
       renderDirectChatContacts();
       if(typeof refreshNotifications==='function') refreshNotifications(true).catch(()=>{});
     }catch(err){
+      const peer=directChatContactsCache.find(c=>String(c.account_id)===String(currentDirectPeerId));
+      const legacyProblem=/sender_account_id.*ambiguous|unsupported_action|unknown_custom_action/i.test(String(err?.message||err||''));
+      if(peer&&legacyProblem){
+        try{
+          const rows=await directChatFallbackMessages(peer);
+          if(!rows.length){box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';return}
+          const me=String(currentPlatformAccount?.account_id||'');
+          box.innerHTML=rows.map(m=>{
+            const mine=String(m.sender_account_id)===me;
+            return `<div class="direct-message ${mine?'mine':''}">
+              <span class="platform-avatar">${escapeHtml((m.sender_name||'?')[0])}</span>
+              <div class="direct-bubble">
+                ${m.body?`<div>${escapeHtml(m.body)}</div>`:''}
+                ${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):''}
+                <div class="direct-meta">${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}</div>
+              </div>
+            </div>`;
+          }).join('');
+          box.scrollTop=box.scrollHeight;
+          return;
+        }catch{}
+      }
       if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المحادثة')+'</div>';
     }
   };
@@ -4853,13 +4944,28 @@
       const file=await fileToBase64(input.files?.[0]||null);
       if(!body&&!file.base64){return}
       btn.disabled=true;btn.textContent='جارٍ الإرسال...';
-      await dataApiFetch('/rpc/platform_direct_chat_send',{method:'POST',body:JSON.stringify({
-        p_peer_id:currentDirectPeerId,
-        p_body:body,
-        p_attachment_name:file.name,
-        p_attachment_mime:file.mime,
-        p_attachment_base64:file.base64
-      })});
+      try{
+        await dataApiFetch('/rpc/platform_direct_chat_send',{method:'POST',body:JSON.stringify({
+          p_peer_id:currentDirectPeerId,
+          p_body:body,
+          p_attachment_name:file.name,
+          p_attachment_mime:file.mime,
+          p_attachment_base64:file.base64
+        })});
+      }catch(err){
+        const legacyProblem=/sender_account_id.*ambiguous|unsupported_action|unknown_custom_action/i.test(String(err?.message||err||''));
+        const peer=directChatContactsCache.find(c=>String(c.account_id)===String(currentDirectPeerId));
+        const ctx=await hydratePlatformContext();
+        if(!legacyProblem||!peer?.internal_email)throw err;
+        const payload={
+          message_id:'DC-'+Date.now().toString(36).toUpperCase(),
+          sender_account_id:ctx.account_id,sender_name:ctx.display_name,sender_email:ctx.internal_email,
+          recipient_account_id:peer.account_id,recipient_email:peer.internal_email,
+          body,attachment_name:file.name,attachment_mime:file.mime,attachment_base64:file.base64,
+          created_at:new Date().toISOString()
+        };
+        await sendStructuredMail(peer.internal_email,'DIRECT_CHAT_V2',payload.message_id,payload);
+      }
       document.getElementById('directChatBody').value='';
       input.value='';
       await loadDirectChatMessages();
@@ -4996,7 +5102,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[DIRECT_CHAT_V2]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
