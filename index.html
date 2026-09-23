@@ -2166,7 +2166,7 @@
       dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}),
       dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})}),
       dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'sent'})}),
-      dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+      dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'})
     ]);
 
     const groups=groupsResult.status==='fulfilled'&&Array.isArray(groupsResult.value)?groupsResult.value:[];
@@ -2204,7 +2204,7 @@
     renderTeacherFinance(financeEntries);
 
     const adminSelect=document.getElementById('teacherRoomAdmin');
-    const management=directory.filter(a=>['admin','staff'].includes(String(a.account_type||'')));
+    const management=directory.filter(a=>a.account_type==='admin'||(a.account_type==='staff'&&['academic_admin','secretary'].includes(String(a.role||''))));
     adminSelect.innerHTML='<option value="">اختر الإدارة</option>'+management.map(a=>`<option value="${escapeHtml(a.internal_email)}">${escapeHtml(a.display_name)} — ${escapeHtml(a.internal_email)}</option>`).join('');
 
     const requests=sent.filter(m=>String(m.subject||'').startsWith('[ROOM_REQUEST]')).map(m=>({...teacherSafeJson(m.body),sent_at:m.sent_at})).filter(x=>x?.request_id);
@@ -2859,6 +2859,9 @@
 
   const openNotificationItem=async item=>{
     notificationPopover.classList.remove('show');
+    if(item.messageId){
+      try{await dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:item.messageId})})}catch{}
+    }
     if(item.section==='directchat'){
       switchTo('directchat','شات الإدارة والمعلمين');
       await loadDirectChatContacts();
@@ -2878,6 +2881,12 @@
     }else if(item.section==='rewards'){
       switchTo('rewards','النقاط والمكافآت');
       await loadRewards();
+    }else if(item.section==='education'){
+      switchTo('education','الإدارة التعليمية');
+      await loadTeacherRoomRequestsAdmin();
+    }else if(item.section==='teacherhub'){
+      switchTo('teacherhub','لوحة المعلم');
+      await loadTeacherHub();
     }
     setTimeout(()=>refreshNotifications(true).catch(()=>{}),250);
   };
@@ -2945,12 +2954,33 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
             title:'بريد جديد من '+(m.sender_name||'مستخدم'),
             text:m.subject||m.body||'رسالة جديدة',time:m.sent_at
+          });
+        });
+
+        (inbox||[]).filter(m=>!m.read_at&&String(m.subject||'').startsWith('[ROOM_REQUEST]')).forEach(m=>{
+          const r=teacherSafeJson(m.body)||{};
+          items.push({
+            uid:'room-request:'+m.message_id,section:'education',messageId:m.message_id,count:1,icon:'🏫',
+            title:'طلب فتح قاعة من '+(r.teacher_name||m.sender_name||'معلم'),
+            text:(r.room_name||'قاعة جديدة')+(r.proposed_price?' — سعر مقترح '+Number(r.proposed_price).toFixed(2):''),
+            time:m.sent_at
+          });
+        });
+        (inbox||[]).filter(m=>!m.read_at&&String(m.subject||'').startsWith('[ROOM_RESPONSE]')).forEach(m=>{
+          const r=teacherSafeJson(m.body)||{};
+          items.push({
+            uid:'room-response:'+m.message_id,section:'teacherhub',messageId:m.message_id,count:1,icon:r.status==='approved'?'✅':'🏫',
+            title:r.status==='approved'?'تمت الموافقة على طلب القاعة':'تم تحديث طلب القاعة',
+            text:r.status==='approved'
+              ?('السعر المتفق: '+Number(r.agreed_price||0).toFixed(2)+' — '+String(teacherPricingLabel[r.pricing_basis]||''))
+              :(r.note||'راجع حالة الطلب من لوحة المعلم.'),
+            time:m.sent_at
           });
         });
       }catch{}
