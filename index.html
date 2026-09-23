@@ -742,14 +742,24 @@
     currentPlatformAccount=data||currentPlatformAccount;
     openDashboard();
     const type=String(data?.account_type||'');
-    const isAdmin=type==='admin'||type==='staff';
-    const allowed=isAdmin
-      ? new Set(['dashboard','students','education','attendance','finance','expenses','reports','mygroups','mail','profile','settings'])
-      : type==='teacher'
-        ? new Set(['dashboard','mygroups','mail','profile'])
-        : type==='parent'
-          ? new Set(['dashboard','mail','profile'])
-          : new Set(['dashboard','mygroups','mail','profile']);
+    const role=String(data?.role||'');
+    const isAdmin=type==='admin';
+    let allowed;
+    if(type==='admin'){
+      allowed=new Set(['dashboard','students','education','attendance','finance','expenses','reports','mygroups','mail','profile','settings']);
+    }else if(type==='staff' && role==='academic_admin'){
+      allowed=new Set(['dashboard','education','attendance','mygroups','mail','profile']);
+    }else if(type==='staff' && role==='finance_admin'){
+      allowed=new Set(['dashboard','finance','expenses','reports','mail','profile']);
+    }else if(type==='staff'){
+      allowed=new Set(['dashboard','students','finance','mail','profile']);
+    }else if(type==='teacher'){
+      allowed=new Set(['dashboard','mygroups','mail','profile']);
+    }else if(type==='parent'){
+      allowed=new Set(['dashboard','mail','profile']);
+    }else{
+      allowed=new Set(['dashboard','mygroups','mail','profile']);
+    }
 
     document.querySelectorAll('#nav button').forEach(btn=>{btn.style.display=allowed.has(btn.dataset.section)?'':'none'});
     document.getElementById('bottomNav').style.display=isAdmin?'':'none';
