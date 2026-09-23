@@ -3402,6 +3402,364 @@
     })});
   };
 
+  // ===== Professional assessments =====
+  let currentExamDraftId=null;
+  let teacherExamDefs=[];
+  let studentExamAssignments=[];
+  let activeStudentExam=null;
+  let examTimerHandle=null;
+
+  const examId=()=>('EX-'+Date.now().toString(36).toUpperCase());
+  const examQuestionId=()=>('Q-'+Date.now().toString(36).toUpperCase()+Math.random().toString(36).slice(2,5).toUpperCase());
+
+  const addExamQuestionCard=(type='mcq',data={})=>{
+    const box=document.getElementById('examQuestionsBuilder');
+    const qid=data.id||examQuestionId();
+    const card=document.createElement('div');
+    card.className='exam-question-card';
+    card.dataset.type=type;
+    card.dataset.qid=qid;
+    if(type==='mcq'){
+      const choices=Array.isArray(data.choices)&&data.choices.length===4?data.choices:['','','',''];
+      card.innerHTML=`<div class="exam-question-head"><b>اختيار من متعدد</b><button class="mini-btn remove-exam-question" type="button">حذف</button></div>
+        <div class="form-field"><label>السؤال</label><textarea class="exam-q-text" rows="2">${escapeHtml(data.text||'')}</textarea></div>
+        <div class="exam-choice-grid">
+          ${choices.map((c,i)=>`<div class="form-field"><label>الخيار ${String.fromCharCode(65+i)}</label><input class="exam-q-choice" value="${escapeHtml(c)}"></div>`).join('')}
+        </div>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="form-field"><label>الإجابة الصحيحة</label><select class="exam-q-correct">${[0,1,2,3].map(i=>`<option value="${i}" ${Number(data.correct)===i?'selected':''}>${String.fromCharCode(65+i)}</option>`).join('')}</select></div>
+          <div class="form-field"><label>الدرجة</label><input class="exam-q-points" type="number" min="0.5" step="0.5" value="${Number(data.points||1)}"></div>
+        </div>`;
+    }else{
+      card.innerHTML=`<div class="exam-question-head"><b>سؤال مقالي</b><button class="mini-btn remove-exam-question" type="button">حذف</button></div>
+        <div class="form-field"><label>السؤال</label><textarea class="exam-q-text" rows="3">${escapeHtml(data.text||'')}</textarea></div>
+        <div class="form-field"><label>الدرجة</label><input class="exam-q-points" type="number" min="0.5" step="0.5" value="${Number(data.points||1)}"></div>`;
+    }
+    box.appendChild(card);
+  };
+
+  const readExamBuilderQuestions=()=>[...document.querySelectorAll('#examQuestionsBuilder .exam-question-card')].map(card=>{
+    const type=card.dataset.type;
+    const base={id:card.dataset.qid,type,text:card.querySelector('.exam-q-text').value.trim(),points:Number(card.querySelector('.exam-q-points').value)||1};
+    if(type==='mcq'){
+      base.choices=[...card.querySelectorAll('.exam-q-choice')].map(x=>x.value.trim());
+      base.correct=Number(card.querySelector('.exam-q-correct').value);
+    }
+    return base;
+  });
+
+  const resetExamBuilder=()=>{
+    currentExamDraftId=null;
+    document.getElementById('examTitle').value='';
+    document.getElementById('examDuration').value='';
+    document.getElementById('examInstructions').value='';
+    document.getElementById('examQuestionsBuilder').innerHTML='';
+    addExamQuestionCard('mcq');
+  };
+
+  document.getElementById('addMcqQuestion').addEventListener('click',()=>addExamQuestionCard('mcq'));
+  document.getElementById('addEssayQuestion').addEventListener('click',()=>addExamQuestionCard('essay'));
+  document.getElementById('examQuestionsBuilder').addEventListener('click',e=>{
+    const btn=e.target.closest('.remove-exam-question');if(btn)btn.closest('.exam-question-card')?.remove();
+  });
+
+  const examDefMapFromMail=rows=>{
+    const map=new Map();
+    rows.filter(m=>String(m.subject||'').startsWith('[EXAM_DEF]'))
+      .sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0))
+      .forEach(m=>{const x=mailPayload(m);if(x?.exam_id)map.set(String(x.exam_id),{...x,_mail:m})});
+    return map;
+  };
+
+  const loadExamGroups=async()=>{
+    const ctx=await hydratePlatformContext();
+    const select=document.getElementById('examGroup');
+    try{
+      let groups=[];
+      if(ctx?.account_type==='teacher'){
+        groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+      }else{
+        groups=await dataApiFetch('/rpc/list_study_groups_admin',{method:'POST',body:'{}'});
+      }
+      select.innerHTML='<option value="">اختر المجموعة</option>'+((groups||[]).map(g=>`<option value="${escapeHtml(g.group_id)}">${escapeHtml(g.group_name)}${g.subject_name?' — '+escapeHtml(g.subject_name):''}</option>`).join(''));
+      return Array.isArray(groups)?groups:[];
+    }catch{
+      select.innerHTML='<option value="">لا توجد مجموعات متاحة</option>';
+      return [];
+    }
+  };
+
+  const renderTeacherExamList=()=>{
+    const box=document.getElementById('teacherExamsList');
+    const rows=teacherExamDefs.filter(x=>x.status!=='deleted').sort((a,b)=>new Date(b.updated_at||b.created_at||0)-new Date(a.updated_at||a.created_at||0));
+    box.innerHTML=rows.length?rows.map(ex=>`<div class="exam-list-item">
+      <b>📝 ${escapeHtml(ex.title)}</b>
+      <span>${escapeHtml(ex.group_name||'')} • ${ex.duration_minutes?Number(ex.duration_minutes)+' دقيقة':'وقت مفتوح'} • ${(ex.questions||[]).length} سؤال • ${ex.status==='published'?'منشور':'مسودة'}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="secondary-action exam-edit-btn" data-id="${escapeHtml(ex.exam_id)}" type="button">تعديل</button>
+        <button class="primary-action exam-publish-btn" data-id="${escapeHtml(ex.exam_id)}" type="button">${ex.status==='published'?'إعادة النشر':'نشر للطلاب'}</button>
+        <button class="secondary-action exam-delete-btn" data-id="${escapeHtml(ex.exam_id)}" type="button">حذف</button>
+      </div>
+    </div>`).join(''):'<div class="students-empty">لا توجد اختبارات بعد.</div>';
+  };
+
+  const examScoreMcq=(exam,submission)=>{
+    let score=0,max=0,essayMax=0;
+    for(const q of (exam.questions||[])){
+      const pts=Number(q.points||0);max+=pts;
+      if(q.type==='essay'){essayMax+=pts;continue}
+      if(Number(submission.answers?.[q.id])===Number(q.correct))score+=pts;
+    }
+    return {mcqScore:score,maxScore:max,essayMax};
+  };
+
+  const loadExamSubmissions=async(inbox=null)=>{
+    const rows=inbox||await structuredMail('inbox');
+    const defs=new Map(teacherExamDefs.map(x=>[String(x.exam_id),x]));
+    const graded=latestStructuredBy(rows,'EXAM_GRADED','submission_id');
+    const gradedMap=new Map(graded.map(x=>[String(x.submission_id),x]));
+    const submissions=latestStructuredBy(rows,'EXAM_SUBMISSION','submission_id').sort((a,b)=>new Date(b.submitted_at||0)-new Date(a.submitted_at||0));
+    const tbody=document.getElementById('examSubmissionsRows');
+    if(!submissions.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد إجابات حتى الآن.</td></tr>';return}
+    tbody.innerHTML=submissions.map(s=>{
+      const ex=defs.get(String(s.exam_id));
+      const calc=ex?examScoreMcq(ex,s):{mcqScore:0,maxScore:0,essayMax:0};
+      const g=gradedMap.get(String(s.submission_id));
+      const resultText=g?Number(g.score||0).toFixed(2)+' / '+Number(g.max_score||calc.maxScore).toFixed(2):'لم تعتمد';
+      return `<tr>
+        <td><b>${escapeHtml(s.exam_title||ex?.title||'اختبار')}</b></td>
+        <td>${escapeHtml(s.student_name||'طالب')}</td>
+        <td>${calc.mcqScore.toFixed(2)}</td>
+        <td>${calc.essayMax?('من '+calc.essayMax.toFixed(2)):'لا يوجد'}</td>
+        <td>${escapeHtml(resultText)}</td>
+        <td>${g?'<span class="status active">معتمد</span>':`<button class="secondary-action grade-exam-submission" type="button" data-submission-id="${escapeHtml(s.submission_id)}">تصحيح واعتماد</button>`}</td>
+      </tr>`;
+    }).join('');
+  };
+
+  document.getElementById('saveExamDraft').addEventListener('click',async()=>{
+    const msg=document.getElementById('examBuilderMsg');
+    const ctx=await hydratePlatformContext();
+    const title=document.getElementById('examTitle').value.trim();
+    const groupId=document.getElementById('examGroup').value;
+    const groupName=document.getElementById('examGroup').selectedOptions[0]?.textContent||'';
+    const questions=readExamBuilderQuestions();
+    if(!title||!groupId||!questions.length||questions.some(q=>!q.text||(q.type==='mcq'&&q.choices.some(c=>!c)))){
+      msg.textContent='اكتب عنوان الاختبار واختر المجموعة وأكمل جميع الأسئلة والاختيارات.';
+      msg.className='student-form-msg error show';return;
+    }
+    const ex={
+      exam_id:currentExamDraftId||examId(),title,group_id:groupId,group_name:groupName,
+      instructions:document.getElementById('examInstructions').value.trim()||null,
+      duration_minutes:document.getElementById('examDuration').value?Number(document.getElementById('examDuration').value):null,
+      questions,status:'draft',
+      teacher_name:ctx?.display_name||'المعلم',
+      teacher_internal_email:ctx?.internal_email||null,
+      created_at:new Date().toISOString(),updated_at:new Date().toISOString()
+    };
+    const old=teacherExamDefs.find(x=>x.exam_id===ex.exam_id);
+    if(old?.status==='published')ex.status='published';
+    try{
+      await sendStructuredMail(ctx.internal_email,'EXAM_DEF',ex.exam_id,ex);
+      msg.textContent='تم حفظ الاختبار.';
+      msg.className='student-form-msg success show';
+      resetExamBuilder();await loadAssessments();
+    }catch(err){msg.textContent=err.message||'تعذر حفظ الاختبار';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('teacherExamsList').addEventListener('click',async e=>{
+    const edit=e.target.closest('.exam-edit-btn'),publish=e.target.closest('.exam-publish-btn'),del=e.target.closest('.exam-delete-btn');
+    const id=(edit||publish||del)?.dataset.id;if(!id)return;
+    const ex=teacherExamDefs.find(x=>String(x.exam_id)===String(id));if(!ex)return;
+    const ctx=await hydratePlatformContext();
+    if(edit){
+      currentExamDraftId=ex.exam_id;
+      document.getElementById('examTitle').value=ex.title||'';
+      document.getElementById('examGroup').value=ex.group_id||'';
+      document.getElementById('examDuration').value=ex.duration_minutes||'';
+      document.getElementById('examInstructions').value=ex.instructions||'';
+      document.getElementById('examQuestionsBuilder').innerHTML='';
+      (ex.questions||[]).forEach(q=>addExamQuestionCard(q.type,q));
+      window.scrollTo({top:document.getElementById('assessments').offsetTop,behavior:'smooth'});
+      return;
+    }
+    if(del){
+      if(!confirm('حذف هذا الاختبار؟'))return;
+      await sendStructuredMail(ctx.internal_email,'EXAM_DEF',ex.exam_id,{...ex,status:'deleted',updated_at:new Date().toISOString()});
+      await loadAssessments();return;
+    }
+    if(publish){
+      try{
+        const [roster,directory]=await Promise.all([
+          dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:ex.group_id,p_on_date:new Date().toISOString().slice(0,10)})}),
+          dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'})
+        ]);
+        const dir=Array.isArray(directory)?directory:[];
+        let sent=0;
+        const safeQuestions=(ex.questions||[]).map(q=>q.type==='mcq'?{id:q.id,type:q.type,text:q.text,points:q.points,choices:q.choices}:{id:q.id,type:q.type,text:q.text,points:q.points});
+        for(const s of (roster||[])){
+          const acct=dir.find(a=>String(a.username||'')===String(s.student_no||''))||
+                     dir.find(a=>a.account_type==='student'&&String(a.display_name||'')===String(s.student_name||''));
+          if(!acct?.internal_email)continue;
+          const assignment={
+            assignment_id:ex.exam_id+'-'+String(s.student_id),
+            exam_id:ex.exam_id,exam_title:ex.title,group_id:ex.group_id,group_name:ex.group_name,
+            instructions:ex.instructions,duration_minutes:ex.duration_minutes,
+            questions:safeQuestions,teacher_name:ctx.display_name,teacher_internal_email:ctx.internal_email,
+            student_id:s.student_id,student_name:s.student_name,
+            assigned_at:new Date().toISOString()
+          };
+          await sendStructuredMail(acct.internal_email,'EXAM_ASSIGN',ex.exam_id,assignment);sent++;
+        }
+        await sendStructuredMail(ctx.internal_email,'EXAM_DEF',ex.exam_id,{...ex,status:'published',published_at:new Date().toISOString(),updated_at:new Date().toISOString()});
+        alert('تم نشر الاختبار إلى '+sent+' طالب.');
+        await loadAssessments();
+      }catch(err){alert(err.message||'تعذر نشر الاختبار')}
+    }
+  });
+
+  const takeExamModal=document.getElementById('takeExamModal');
+  const closeTakeExam=()=>{
+    if(examTimerHandle){clearInterval(examTimerHandle);examTimerHandle=null}
+    takeExamModal.classList.remove('show');takeExamModal.setAttribute('aria-hidden','true');document.body.style.overflow='';
+  };
+  document.getElementById('closeTakeExam').addEventListener('click',closeTakeExam);
+
+  const renderStudentExamQuestions=assignment=>{
+    const box=document.getElementById('takeExamQuestions');
+    box.innerHTML=(assignment.questions||[]).map((q,i)=>`<div class="exam-answer-block" data-qid="${escapeHtml(q.id)}" data-qtype="${escapeHtml(q.type)}">
+      <h4>${i+1}. ${escapeHtml(q.text)} <span style="font-size:10px;color:var(--muted)">(${Number(q.points||0)} درجة)</span></h4>
+      ${q.type==='mcq'?(q.choices||[]).map((c,j)=>`<label><input type="radio" name="answer-${escapeHtml(q.id)}" value="${j}"> ${escapeHtml(c)}</label>`).join(''):`<textarea class="essay-answer" rows="4" style="width:100%" placeholder="اكتب إجابتك هنا..."></textarea>`}
+    </div>`).join('');
+  };
+
+  const startExamTimer=assignment=>{
+    const timer=document.getElementById('examTimer');
+    if(examTimerHandle){clearInterval(examTimerHandle);examTimerHandle=null}
+    if(!assignment.duration_minutes){timer.textContent='وقت مفتوح';return}
+    const ctx=currentPlatformAccount||{};
+    const key='roven_exam_start_'+String(ctx.account_id||ctx.username||'')+'_'+assignment.exam_id;
+    let started=Number(localStorage.getItem(key)||0);
+    if(!started){started=Date.now();localStorage.setItem(key,String(started))}
+    const tick=()=>{
+      const total=Number(assignment.duration_minutes)*60;
+      const elapsed=Math.floor((Date.now()-started)/1000);
+      const left=Math.max(0,total-elapsed);
+      timer.textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+      if(left<=0){clearInterval(examTimerHandle);examTimerHandle=null;document.getElementById('takeExamForm').requestSubmit()}
+    };
+    tick();examTimerHandle=setInterval(tick,1000);
+  };
+
+  const openStudentExam=assignment=>{
+    activeStudentExam=assignment;
+    document.getElementById('takeExamId').value=assignment.exam_id;
+    document.getElementById('takeExamTitle').textContent=assignment.exam_title||'الاختبار';
+    document.getElementById('takeExamMeta').textContent=(assignment.group_name||'')+(assignment.instructions?' — '+assignment.instructions:'');
+    document.getElementById('takeExamMsg').className='student-form-msg';
+    renderStudentExamQuestions(assignment);
+    takeExamModal.classList.add('show');takeExamModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    startExamTimer(assignment);
+  };
+
+  document.getElementById('studentExamsList').addEventListener('click',e=>{
+    const btn=e.target.closest('.start-exam-btn');if(!btn)return;
+    const ex=studentExamAssignments.find(x=>String(x.exam_id)===String(btn.dataset.id));if(ex)openStudentExam(ex);
+  });
+
+  document.getElementById('takeExamForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    if(!activeStudentExam)return;
+    const msg=document.getElementById('takeExamMsg');
+    const ctx=await hydratePlatformContext();
+    const answers={};
+    document.querySelectorAll('#takeExamQuestions .exam-answer-block').forEach(block=>{
+      const qid=block.dataset.qid,qtype=block.dataset.qtype;
+      if(qtype==='mcq'){
+        const checked=block.querySelector('input[type="radio"]:checked');
+        answers[qid]=checked?Number(checked.value):null;
+      }else answers[qid]=block.querySelector('.essay-answer')?.value.trim()||'';
+    });
+    const inbox=await structuredMail('inbox');
+    const parentLink=latestStructuredBy(inbox,'STUDENT_PARENT_LINK','link_id').slice(-1)[0]||null;
+    const submission={
+      submission_id:'SUB-'+Date.now().toString(36).toUpperCase(),
+      exam_id:activeStudentExam.exam_id,exam_title:activeStudentExam.exam_title,
+      student_name:ctx?.display_name||activeStudentExam.student_name||'طالب',
+      student_account_id:ctx?.account_id||null,student_internal_email:ctx?.internal_email||null,
+      parent_internal_email:parentLink?.parent_internal_email||null,
+      answers,submitted_at:new Date().toISOString()
+    };
+    try{
+      await sendStructuredMail(activeStudentExam.teacher_internal_email,'EXAM_SUBMISSION',submission.submission_id,submission);
+      localStorage.setItem('roven_exam_submitted_'+String(ctx?.account_id||ctx?.username||'')+'_'+activeStudentExam.exam_id,'1');
+      msg.textContent='تم تسليم الاختبار بنجاح.';
+      msg.className='student-form-msg success show';
+      setTimeout(async()=>{closeTakeExam();await loadAssessments()},600);
+    }catch(err){msg.textContent=err.message||'تعذر تسليم الاختبار';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('examSubmissionsRows').addEventListener('click',async e=>{
+    const btn=e.target.closest('.grade-exam-submission');if(!btn)return;
+    const inbox=await structuredMail('inbox');
+    const submission=latestStructuredBy(inbox,'EXAM_SUBMISSION','submission_id').find(x=>x.submission_id===btn.dataset.submissionId);
+    if(!submission)return;
+    const exam=teacherExamDefs.find(x=>String(x.exam_id)===String(submission.exam_id));if(!exam)return;
+    const calc=examScoreMcq(exam,submission);
+    let essayScore=0;
+    if(calc.essayMax>0){
+      const raw=prompt('درجة الأسئلة المقالية من '+calc.essayMax.toFixed(2),'0');
+      if(raw===null)return;
+      essayScore=Math.max(0,Math.min(calc.essayMax,Number(raw)||0));
+    }
+    const total=calc.mcqScore+essayScore;
+    const result={
+      result_id:'RES-'+Date.now().toString(36).toUpperCase(),
+      submission_id:submission.submission_id,exam_id:exam.exam_id,exam_title:exam.title,
+      student_name:submission.student_name,score:total,max_score:calc.maxScore,
+      mcq_score:calc.mcqScore,essay_score:essayScore,graded_at:new Date().toISOString()
+    };
+    const ctx=await hydratePlatformContext();
+    try{
+      if(submission.student_internal_email)await sendStructuredMail(submission.student_internal_email,'EXAM_RESULT',result.result_id,result);
+      if(submission.parent_internal_email)await sendStructuredMail(submission.parent_internal_email,'EXAM_RESULT_PARENT',result.result_id,result);
+      await sendStructuredMail(ctx.internal_email,'EXAM_GRADED',submission.submission_id,result);
+      await loadAssessments();
+    }catch(err){alert(err.message||'تعذر اعتماد النتيجة')}
+  });
+
+  const loadAssessments=async()=>{
+    const ctx=await hydratePlatformContext();
+    const teacherArea=document.getElementById('assessmentTeacherArea');
+    const studentArea=document.getElementById('assessmentStudentArea');
+    const isStudent=['student','private_student'].includes(String(ctx?.account_type||''));
+    const canTeach=['teacher','admin'].includes(String(ctx?.account_type||''))||(ctx?.account_type==='staff'&&ctx?.role==='academic_admin');
+    teacherArea.style.display=canTeach?'':'none';
+    studentArea.style.display=isStudent?'':'none';
+
+    if(canTeach){
+      await loadExamGroups();
+      const inbox=await structuredMail('inbox');
+      teacherExamDefs=[...examDefMapFromMail(inbox).values()];
+      renderTeacherExamList();
+      await loadExamSubmissions(inbox);
+      if(!document.querySelector('#examQuestionsBuilder .exam-question-card'))addExamQuestionCard('mcq');
+    }
+    if(isStudent){
+      const inbox=await structuredMail('inbox');
+      if(typeof forwardStudentArtifactsToParent==='function')await forwardStudentArtifactsToParent(inbox);
+      const resultMap=new Map(latestStructuredBy(inbox,'EXAM_RESULT','exam_id').map(x=>[String(x.exam_id),x]));
+      studentExamAssignments=latestStructuredBy(inbox,'EXAM_ASSIGN','exam_id').sort((a,b)=>new Date(b.assigned_at||0)-new Date(a.assigned_at||0));
+      const box=document.getElementById('studentExamsList');
+      box.innerHTML=studentExamAssignments.length?studentExamAssignments.map(ex=>{
+        const res=resultMap.get(String(ex.exam_id));
+        const submitted=localStorage.getItem('roven_exam_submitted_'+String(ctx.account_id||ctx.username||'')+'_'+ex.exam_id)==='1';
+        return `<div class="exam-list-item"><b>📝 ${escapeHtml(ex.exam_title)}</b><span>${escapeHtml(ex.group_name||'')} • ${ex.duration_minutes?Number(ex.duration_minutes)+' دقيقة':'وقت مفتوح'}</span><div style="margin-top:8px">${res?`<span class="status active">النتيجة: ${Number(res.score||0).toFixed(2)} / ${Number(res.max_score||0).toFixed(2)}</span>`:submitted?'<span class="status watch">تم التسليم — بانتظار النتيجة</span>':`<button class="primary-action start-exam-btn" type="button" data-id="${escapeHtml(ex.exam_id)}">ابدأ الاختبار</button>`}</div></div>`;
+      }).join(''):'<div class="students-empty">لا توجد اختبارات متاحة.</div>';
+    }
+  };
+  document.getElementById('refreshAssessments').addEventListener('click',loadAssessments);
+
   const persistParentLink=async(r,payload)=>{
     if(!r?.parent_username)return;
     const directory=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
