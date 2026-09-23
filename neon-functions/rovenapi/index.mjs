@@ -81,6 +81,26 @@ async function ensureSchema(){
       is_active boolean not null default true,
       updated_at timestamptz not null default now()
     )`;
+    await sql`alter table public.teacher_assistant_links add column if not exists contact_email text`;
+    await sql`alter table public.teacher_assistant_links add column if not exists contact_phone text`;
+    await sql`create table if not exists public.platform_direct_messages_v2(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      sender_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      recipient_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      body text,
+      attachment_name text,
+      attachment_mime text,
+      attachment_base64 text,
+      created_at timestamptz not null default now(),
+      read_at timestamptz,
+      check(sender_account_id<>recipient_account_id),
+      check(coalesce(length(trim(body)),0)>0 or attachment_base64 is not null)
+    )`;
+    await sql`create index if not exists pdm2_sender_recipient_idx
+      on public.platform_direct_messages_v2(school_id,sender_account_id,recipient_account_id,created_at desc)`;
+    await sql`create index if not exists pdm2_recipient_unread_idx
+      on public.platform_direct_messages_v2(school_id,recipient_account_id,read_at,created_at desc)`;
     await sql`create table if not exists public.platform_certificates(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -218,8 +238,139 @@ async function delegatedGroups(linkId){
   return await sql`select group_id from public.teacher_assistant_groups where link_id=${linkId}`;
 }
 
+async function directChatBaseContacts(a){
+  const contacts=new Map();
+  const add=(row,group,relation)=>{if(row?.account_id&&String(row.account_id)!==String(a.account_id))contacts.set(String(row.account_id),{...row,contact_group:group,relation_type:relation,profile_photo:null})};
+
+  // School administration is available to teachers and students.
+  if(['teacher','student','private_student','teacher_assistant','parent','private_parent'].includes(String(a.account_type||''))){
+    const admins=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
+      from public.platform_accounts pa
+      left join public.app_users u on u.id=pa.app_user_id
+      where pa.school_id=${a.school_id} and pa.is_active=true
+        and (pa.account_type='admin' or (pa.account_type='staff' and coalesce(u.role,'') in ('super_admin','school_manager','academic_admin','secretary','reception')))
+      order by case when coalesce(u.role,'') in ('super_admin','school_manager') then 0 else 1 end,pa.display_name`;
+    admins.forEach(x=>add(x,'الإدارة','administration'));
+  }
+
+  if(a.account_type==='teacher'){
+    // ROVEN students assigned to this teacher.
+    if(a.teacher_id){
+      const schoolStudents=await sql`select distinct pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,null::text role
+        from public.courses c
+        join public.study_groups g on g.course_id=c.id
+        join public.enrollments en on en.group_id=g.id and en.status='active'
+        join public.students st on st.id=en.student_id and st.status='active'
+        join public.platform_accounts pa on pa.student_id=st.id and pa.is_active=true
+        where c.teacher_id=${a.teacher_id} and c.school_id=${a.school_id}`;
+      schoolStudents.forEach(x=>add(x,'طلاب المنصة','roven_student'));
+    }
+    // Private students owned by this teacher.
+    const privateStudents=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,null::text role
+      from public.teacher_private_students ps
+      join public.platform_accounts pa on pa.id=ps.platform_account_id and pa.is_active=true
+      where ps.school_id=${a.school_id} and ps.teacher_account_id=${a.account_id} and ps.status='active'
+      order by ps.full_name`;
+    privateStudents.forEach(x=>add(x,'طلابي الخاصون','private_student'));
+  }
+
+  if(a.account_type==='student'&&a.student_id){
+    const teachers=await sql`select distinct pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
+      from public.enrollments en
+      join public.study_groups g on g.id=en.group_id
+      join public.courses c on c.id=g.course_id
+      join public.teachers t on t.id=c.teacher_id
+      join public.platform_accounts pa on pa.teacher_id=t.id and pa.is_active=true
+      left join public.app_users u on u.id=pa.app_user_id
+      where en.student_id=${a.student_id} and en.status='active' and c.school_id=${a.school_id}`;
+    teachers.forEach(x=>add(x,'معلموك','teacher'));
+  }
+
+  if(a.account_type==='private_student'){
+    const owner=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
+      from public.teacher_private_students ps
+      join public.platform_accounts pa on pa.id=ps.teacher_account_id and pa.is_active=true
+      left join public.app_users u on u.id=pa.app_user_id
+      where ps.platform_account_id=${a.account_id} and ps.status='active' limit 1`;
+    owner.forEach(x=>add(x,'المعلم','teacher'));
+  }
+
+  if(a.account_type==='teacher_assistant'){
+    const link=await assistantLink(a);
+    if(link){
+      const teacher=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
+        from public.platform_accounts pa left join public.app_users u on u.id=pa.app_user_id
+        where pa.id=${link.teacher_account_id} and pa.is_active=true limit 1`;
+      teacher.forEach(x=>add(x,'المعلم','teacher'));
+    }
+  }
+
+  // Admin/management can contact teachers directly.
+  if(a.account_type==='admin'||(a.account_type==='staff'&&['super_admin','school_manager','academic_admin','secretary','reception'].includes(String(a.role||'')))){
+    const teachers=await sql`select pa.id account_id,pa.display_name,pa.account_type,pa.account_code,pa.username,pa.internal_email,u.role
+      from public.platform_accounts pa left join public.app_users u on u.id=pa.app_user_id
+      where pa.school_id=${a.school_id} and pa.account_type='teacher' and pa.is_active=true
+      order by pa.display_name`;
+    teachers.forEach(x=>add(x,'المعلمون','teacher'));
+  }
+  return [...contacts.values()];
+}
+async function directChatPeerAllowed(a,peerId){
+  return (await directChatBaseContacts(a)).some(x=>String(x.account_id)===String(peerId));
+}
+
 async function custom(action,a,p){
   await ensureSchema();
+
+  if(action==='platform_direct_chat_contacts'){
+    const contacts=await directChatBaseContacts(a);
+    const msgs=await sql`select id,sender_account_id,recipient_account_id,body,attachment_name,created_at,read_at
+      from public.platform_direct_messages_v2
+      where school_id=${a.school_id} and (sender_account_id=${a.account_id} or recipient_account_id=${a.account_id})
+      order by created_at desc limit 2000`;
+    return contacts.map(c=>{
+      const rel=msgs.filter(m=>(String(m.sender_account_id)===String(a.account_id)&&String(m.recipient_account_id)===String(c.account_id))||
+                               (String(m.recipient_account_id)===String(a.account_id)&&String(m.sender_account_id)===String(c.account_id)));
+      const last=rel[0]||null;
+      return {...c,last_message:last?.body|| (last?.attachment_name?'ملف مرفق':''),
+        last_at:last?.created_at||null,
+        unread_count:rel.filter(m=>String(m.recipient_account_id)===String(a.account_id)&&!m.read_at).length};
+    }).sort((x,y)=>{
+      if(x.last_at||y.last_at)return new Date(y.last_at||0)-new Date(x.last_at||0);
+      return String(x.contact_group||'').localeCompare(String(y.contact_group||''),'ar')||String(x.display_name||'').localeCompare(String(y.display_name||''),'ar');
+    });
+  }
+
+  if(action==='platform_direct_chat_list'){
+    const peer=String(p.p_peer_id||'');
+    if(!peer||!(await directChatPeerAllowed(a,peer)))throw new Error('chat_peer_not_allowed');
+    await sql`update public.platform_direct_messages_v2
+      set read_at=coalesce(read_at,now())
+      where school_id=${a.school_id} and sender_account_id=${peer}::uuid and recipient_account_id=${a.account_id} and read_at is null`;
+    return await sql`select m.id message_id,m.sender_account_id,m.recipient_account_id,m.body,
+      m.attachment_name,m.attachment_mime,m.attachment_base64,m.created_at,m.read_at,
+      pa.display_name sender_name,null::text sender_photo
+      from public.platform_direct_messages_v2 m
+      join public.platform_accounts pa on pa.id=m.sender_account_id
+      where m.school_id=${a.school_id}
+        and ((m.sender_account_id=${a.account_id} and m.recipient_account_id=${peer}::uuid)
+          or (m.sender_account_id=${peer}::uuid and m.recipient_account_id=${a.account_id}))
+      order by m.created_at asc`;
+  }
+
+  if(action==='platform_direct_chat_send'){
+    const peer=String(p.p_peer_id||'');
+    if(!peer||!(await directChatPeerAllowed(a,peer)))throw new Error('chat_peer_not_allowed');
+    const body=String(p.p_body||'').trim();
+    const attachment=String(p.p_attachment_base64||'')||null;
+    if(!body&&!attachment)throw new Error('empty_message');
+    return (await sql`insert into public.platform_direct_messages_v2(
+      school_id,sender_account_id,recipient_account_id,body,attachment_name,attachment_mime,attachment_base64
+    ) values(
+      ${a.school_id},${a.account_id},${peer}::uuid,${body||null},${p.p_attachment_name||null},
+      ${p.p_attachment_mime||null},${attachment}
+    ) returning id message_id,sender_account_id,recipient_account_id,body,attachment_name,attachment_mime,created_at,read_at`)[0];
+  }
 
   if(action==='teacher_private_students_list'){
     const link=await assistantLink(a);
@@ -388,9 +539,10 @@ async function custom(action,a,p){
       ${String(p.p_name||'مساعد المعلم').trim()},crypt(${pw},gen_salt('bf',10)),true
     ) returning *`)[0];
     const link=(await sql`insert into public.teacher_assistant_links(
-      school_id,teacher_account_id,assistant_account_id,permissions
+      school_id,teacher_account_id,assistant_account_id,permissions,contact_email,contact_phone
     ) values(
-      ${a.school_id},${a.account_id},${acct.id},${JSON.stringify(p.p_permissions||{})}::jsonb
+      ${a.school_id},${a.account_id},${acct.id},${JSON.stringify(p.p_permissions||{})}::jsonb,
+      ${p.p_email||null},${p.p_phone||null}
     ) returning *`)[0];
     for(const gid of (p.p_group_ids||[])){
       await sql`insert into public.teacher_assistant_groups(link_id,group_id)
@@ -975,6 +1127,7 @@ export default{
         'exam_my_available','exam_get','exam_submit','exam_attempts_owned','exam_grade_essay',
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
         'teacher_roven_contacts','school_contacts','archive_school_entity',
+        'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
         'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
         'admin_entity_set_active','admin_entity_delete'
       ]);
