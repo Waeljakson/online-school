@@ -1376,6 +1376,92 @@
 
   const roleBadge=role=>'<span class="role-badge role-'+escapeHtml(role)+'">'+(roleIcons[role]||'•')+' '+escapeHtml(roleLabels[role]||role)+'</span>';
 
+  let accountDirectoryCache=[];
+  let accountDirectoryFilter='all';
+
+  const accountClassLabel=a=>{
+    if(a.account_type==='teacher')return 'معلم';
+    if(a.account_type==='student')return 'طالب';
+    if(a.account_type==='parent')return 'ولي أمر';
+    if(a.account_type==='admin')return roleLabels[a.role]||'إدارة';
+    if(a.account_type==='staff')return roleLabels[a.role]||'هيئة / موظف';
+    return a.account_type||'مستخدم';
+  };
+
+  const renderAccountDirectory=()=>{
+    const tbody=document.getElementById('accountDirectoryRows');
+    const q=String(document.getElementById('accountDirectorySearch').value||'').trim().toLowerCase();
+    const rows=accountDirectoryCache.filter(a=>{
+      const filterOk=accountDirectoryFilter==='all'||a.account_type===accountDirectoryFilter;
+      const text=[a.display_name,a.account_code,a.username,a.internal_email,accountClassLabel(a)].join(' ').toLowerCase();
+      return filterOk&&(!q||text.includes(q));
+    });
+
+    if(!rows.length){
+      tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا توجد حسابات مطابقة.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML=rows.map(a=>`<tr>
+      <td><strong>${escapeHtml(a.display_name||'مستخدم')}</strong></td>
+      <td><span class="account-type-badge">${escapeHtml(accountClassLabel(a))}</span></td>
+      <td><b>${escapeHtml(a.account_code||'—')}</b></td>
+      <td><b>${escapeHtml(a.username||'—')}</b></td>
+      <td><span class="internal-email">${escapeHtml(a.internal_email||'—')}</span></td>
+      <td><span class="account-password-mask">••••••••</span><br><span style="font-size:9px;color:var(--muted)">غير قابلة للعرض</span></td>
+      <td><span class="status ${a.is_active===false?'watch':'active'}">${a.is_active===false?'موقوف':'نشط'}</span></td>
+      <td><button class="secondary-action manage-account-credentials" type="button" data-account-id="${escapeHtml(a.account_id||'')}">إدارة الدخول</button></td>
+    </tr>`).join('');
+  };
+
+  const updateAccountDirectoryCounts=()=>{
+    const count=t=>accountDirectoryCache.filter(a=>t==='all'||a.account_type===t).length;
+    document.getElementById('countAllAccounts').textContent=count('all');
+    document.getElementById('countAdminAccounts').textContent=count('admin');
+    document.getElementById('countStaffAccounts').textContent=count('staff');
+    document.getElementById('countTeacherAccounts').textContent=count('teacher');
+    document.getElementById('countStudentAccounts').textContent=count('student');
+    document.getElementById('countParentAccounts').textContent=count('parent');
+  };
+
+  const loadAccountDirectory=async()=>{
+    const tbody=document.getElementById('accountDirectoryRows');
+    tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل جميع حسابات المنصة...</td></tr>';
+    try{
+      const [profile,directory,systemUsers]=await Promise.all([
+        dataApiFetch('/rpc/platform_my_profile',{method:'POST',body:'{}'}),
+        dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'}),
+        dataApiFetch('/rpc/list_system_users_admin',{method:'POST',body:'{}'})
+      ]);
+
+      const roleByAccount=new Map((systemUsers||[]).filter(x=>x.account_id).map(x=>[String(x.account_id),x.role]));
+      const combined=[];
+      if(profile?.account_id)combined.push({...profile,is_active:true});
+      (directory||[]).forEach(a=>combined.push({...a,is_active:true}));
+
+      const dedup=new Map();
+      combined.forEach(a=>{
+        const id=String(a.account_id||'');
+        if(!id)return;
+        dedup.set(id,{...a,role:a.role||roleByAccount.get(id)||null});
+      });
+      accountDirectoryCache=[...dedup.values()].sort((a,b)=>String(a.display_name||'').localeCompare(String(b.display_name||''),'ar'));
+      updateAccountDirectoryCounts();
+      renderAccountDirectory();
+    }catch(err){
+      tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(String(err.message||'تعذر تحميل دليل الحسابات'))+'</td></tr>';
+    }
+  };
+
+  document.getElementById('refreshAccountDirectory').addEventListener('click',loadAccountDirectory);
+  document.getElementById('accountDirectorySearch').addEventListener('input',renderAccountDirectory);
+  document.querySelectorAll('.account-category').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('.account-category').forEach(x=>x.classList.remove('active'));
+    btn.classList.add('active');
+    accountDirectoryFilter=btn.dataset.accountFilter||'all';
+    renderAccountDirectory();
+  }));
+
   const loadSystemUsers=async()=>{
     const tbody=document.getElementById('systemUsersRows');
     tbody.innerHTML='<tr><td colspan="6" class="students-empty">جارٍ تحميل المستخدمين...</td></tr>';
@@ -1427,6 +1513,106 @@
     }
   };
   document.getElementById('refreshUsers').addEventListener('click',loadSystemUsers);
+
+  const accountCredentialsModal=document.getElementById('accountCredentialsModal');
+  const credentialsMsg=document.getElementById('credentialsMsg');
+  const credentialsResult=document.getElementById('credentialsResult');
+
+  const findAccountRecord=accountId=>{
+    const fromDirectory=accountDirectoryCache.find(a=>String(a.account_id)===String(accountId));
+    if(fromDirectory)return fromDirectory;
+    const t=teachersAdminCache.find(x=>String(x.account_id)===String(accountId));
+    if(t)return {
+      account_id:t.account_id,display_name:t.full_name,account_code:t.account_code,
+      username:t.username,internal_email:t.internal_email,account_type:'teacher',is_active:t.status==='active'
+    };
+    return null;
+  };
+
+  const openAccountCredentials=accountId=>{
+    const a=findAccountRecord(accountId);
+    if(!a){alert('تعذر العثور على بيانات الحساب. حدّث القائمة وحاول مرة أخرى.');return}
+    document.getElementById('credentialsAccountId').value=a.account_id||'';
+    document.getElementById('credentialsDisplayName').textContent=a.display_name||'—';
+    document.getElementById('credentialsAccountCode').textContent=a.account_code||'—';
+    document.getElementById('credentialsInternalEmail').textContent=a.internal_email||'—';
+    document.getElementById('credentialsUsername').value=a.username||a.account_code||'';
+    document.getElementById('credentialsPassword').value='';
+    document.getElementById('credentialsGeneratePassword').checked=true;
+    document.getElementById('accountCredentialsTitle').textContent=a.account_type==='teacher'?'تعديل حساب المعلم':'إدارة بيانات الدخول';
+    document.getElementById('accountCredentialsSub').textContent=(a.display_name||'المستخدم')+' — يمكنك تعديل اسم المستخدم أو إصدار باسورد جديد.';
+    credentialsMsg.className='student-form-msg';
+    credentialsResult.className='registration-result';
+    credentialsResult.innerHTML='';
+    accountCredentialsModal.classList.add('show');
+    accountCredentialsModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  };
+
+  const closeAccountCredentials=()=>{
+    accountCredentialsModal.classList.remove('show');
+    accountCredentialsModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  document.getElementById('closeAccountCredentials').addEventListener('click',closeAccountCredentials);
+  document.getElementById('cancelAccountCredentials').addEventListener('click',closeAccountCredentials);
+  accountCredentialsModal.addEventListener('click',e=>{if(e.target===accountCredentialsModal)closeAccountCredentials()});
+
+  document.getElementById('generateCredentialsPassword').addEventListener('click',()=>{
+    document.getElementById('credentialsPassword').value=makeRandomPassword();
+    document.getElementById('credentialsGeneratePassword').checked=false;
+  });
+
+  document.getElementById('accountDirectoryRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.manage-account-credentials');
+    if(btn)openAccountCredentials(btn.dataset.accountId);
+  });
+
+  document.getElementById('teachersRows').addEventListener('click',e=>{
+    const btn=e.target.closest('.teacher-edit-btn');
+    if(!btn)return;
+    if(!btn.dataset.accountId){alert('هذا المعلم لا يملك حساب دخول مرتبطًا حتى الآن.');return}
+    openAccountCredentials(btn.dataset.accountId);
+  });
+
+  document.getElementById('accountCredentialsForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const accountId=document.getElementById('credentialsAccountId').value;
+    const username=document.getElementById('credentialsUsername').value.trim();
+    const password=document.getElementById('credentialsPassword').value;
+    const generate=document.getElementById('credentialsGeneratePassword').checked;
+    if(!accountId||!username){credentialsMsg.textContent='اسم المستخدم مطلوب.';credentialsMsg.className='student-form-msg error show';return}
+    if(!generate && password && password.length<8){credentialsMsg.textContent='كلمة المرور يجب ألا تقل عن 8 أحرف.';credentialsMsg.className='student-form-msg error show';return}
+
+    const btn=document.getElementById('saveAccountCredentials');
+    btn.disabled=true;btn.textContent='جارٍ إعادة التعيين...';
+    credentialsMsg.className='student-form-msg';credentialsResult.className='registration-result';
+
+    try{
+      const r=await dataApiFetch('/rpc/platform_reset_account_admin',{method:'POST',body:JSON.stringify({
+        p_account_id:accountId,p_username:username,p_password:password||null,p_generate_password:generate||!password
+      })});
+      const newPassword=r?.generated_password||password||'';
+      credentialsResult.innerHTML=`<h4>✓ تم تحديث بيانات الدخول</h4><div class="result-grid">
+        <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||username)}</b></div>
+        <div class="result-item"><span>كلمة المرور الجديدة</span><b style="direction:ltr">${escapeHtml(newPassword)}</b></div>
+        <div class="result-item"><span>كود الحساب</span><b>${escapeHtml(r?.account_code||'—')}</b></div>
+        <div class="result-item"><span>بريد ROVEN</span><b>${escapeHtml(r?.internal_email||'—')}</b></div>
+      </div><div style="margin-top:10px"><button class="secondary-action" type="button" id="copyGeneratedPassword">نسخ اليوزر والباسورد</button></div>`;
+      credentialsResult.className='registration-result show';
+      credentialsMsg.textContent='تم إلغاء الجلسات القديمة. المستخدم لازم يدخل بالباسورد الجديد.';
+      credentialsMsg.className='student-form-msg success show';
+      document.getElementById('copyGeneratedPassword')?.addEventListener('click',async()=>{
+        const txt='اسم المستخدم: '+String(r?.username||username)+'\nكلمة المرور: '+String(newPassword);
+        try{await navigator.clipboard.writeText(txt);document.getElementById('copyGeneratedPassword').textContent='تم النسخ ✓'}catch{}
+      });
+      await Promise.allSettled([loadAccountDirectory(),loadTeachers()]);
+    }catch(err){
+      const m=String(err.message||'تعذر إعادة تعيين الحساب');
+      credentialsMsg.textContent=m.includes('username_already_used')?'اسم المستخدم مستخدم بالفعل لحساب آخر.':m;
+      credentialsMsg.className='student-form-msg error show';
+    }finally{btn.disabled=false;btn.textContent='حفظ / إعادة تعيين'}
+  });
 
   newUserForm.addEventListener('submit',async e=>{
     e.preventDefault();userFormMsg.className='student-form-msg';userCreationResult.className='registration-result';
@@ -1652,12 +1838,14 @@
     return (base||rate).toFixed(2)+' ج';
   };
 
+  let teachersAdminCache=[];
   const loadTeachers=async()=>{
     const tbody=document.getElementById('teachersRows');
-    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل المعلمين...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل المعلمين...</td></tr>';
     try{
       const data=await dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'});
-      if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
+      if(!Array.isArray(data)||!data.length){teachersAdminCache=[];tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا يوجد معلمون مسجلون بعد.</td></tr>';return}
+      teachersAdminCache=data;
       tbody.innerHTML=data.map(t=>`<tr>
         <td><b>${escapeHtml(t.account_code||t.employee_no||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.employee_no||'')}</span></td>
         <td><strong>${escapeHtml(t.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.internal_email||t.email||'')}</span></td>
@@ -1666,8 +1854,9 @@
         <td>${escapeHtml(t.phone||'—')}</td>
         <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
         <td><span class="status ${t.status==='active'?'active':'watch'}">${t.status==='active'?'نشط':'غير نشط'}</span></td>
+        <td><button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل المعلم</button></td>
       </tr>`).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المعلمين')+'</td></tr>'}
+    }catch(err){tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المعلمين')+'</td></tr>'}
   };
   document.getElementById('refreshTeachers').addEventListener('click',loadTeachers);
 
@@ -3200,7 +3389,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings')loadSystemUsers();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
