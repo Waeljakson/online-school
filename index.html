@@ -2407,6 +2407,8 @@
   const teacherRoomStatusLabel={pending:'قيد المراجعة',approved:'تمت الموافقة',created:'تم إنشاء القاعة',rejected:'مرفوض'};
   let adminRoomRequestCache=new Map();
   let teacherPrivateStudentsCache=[];
+  let teacherPrivatePaymentsCache=[];
+  let teacherPrivateAttendanceCache=[];
   let teacherPrivateGroupIds=new Set();
   let teacherHubGroupsCache=[];
   let currentTeacherStudentsGroupId='';
@@ -2421,6 +2423,35 @@
     return [...map.values()].filter(x=>x.status!=='deleted').sort((a,b)=>String(a.full_name||'').localeCompare(String(b.full_name||''),'ar'));
   };
 
+  const teacherPrivatePaymentRecords=rows=>(rows||[])
+    .filter(m=>String(m.subject||'').startsWith('[PRIVATE_PAYMENT]'))
+    .map(m=>({...teacherSafeJson(m.body),_sent_at:m.sent_at}))
+    .filter(x=>x?.private_student_id&&Number(x.amount)>0);
+
+  const teacherPrivateAttendanceRecords=rows=>(rows||[])
+    .filter(m=>String(m.subject||'').startsWith('[PRIVATE_ATTENDANCE]'))
+    .map(m=>({...teacherSafeJson(m.body),_sent_at:m.sent_at}))
+    .filter(x=>x?.group_id&&x?.date&&Array.isArray(x.records));
+
+  const privateMonthKey=date=>{
+    const d=date?new Date(String(date).length===10?String(date)+'T12:00:00':date):new Date();
+    if(Number.isNaN(d.getTime()))return '';
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  };
+
+  const privatePaymentsForStudent=(studentId,monthKey=privateMonthKey())=>teacherPrivatePaymentsCache
+    .filter(p=>String(p.private_student_id)===String(studentId)&&privateMonthKey(p.date||p._sent_at)===monthKey)
+    .reduce((sum,p)=>sum+Number(p.amount||0),0);
+
+  const privateAttendanceMap=(groupId,date)=>{
+    const map=new Map();
+    teacherPrivateAttendanceCache
+      .filter(x=>String(x.group_id)===String(groupId)&&String(x.date)===String(date))
+      .sort((a,b)=>new Date(a._sent_at||a.saved_at||0)-new Date(b._sent_at||b.saved_at||0))
+      .forEach(batch=>(batch.records||[]).forEach(r=>{if(r.private_student_id)map.set(String(r.private_student_id),r.status||'present')}));
+    return map;
+  };
+
   const privateStudentCode=()=>('TPS-'+Date.now().toString(36).toUpperCase()).slice(0,18);
 
   const privateStudentsByGroup=groupId=>teacherPrivateStudentsCache.filter(s=>String(s.group_id||'')===String(groupId));
@@ -2428,44 +2459,85 @@
   const renderTeacherPrivateStudents=()=>{
     const tbody=document.getElementById('teacherPrivateStudentsRows');
     if(!tbody)return;
+    const monthKey=privateMonthKey();
+    let totalDue=0,totalCollected=0,withBalance=0;
+    teacherPrivateStudentsCache.forEach(s=>{
+      const fee=Math.max(0,Number(s.monthly_fee||0));
+      const collected=privatePaymentsForStudent(s.private_student_id,monthKey);
+      const remaining=Math.max(0,fee-collected);
+      totalDue+=fee;totalCollected+=collected;if(remaining>0.001)withBalance++;
+    });
+    document.getElementById('privateFeesDueMonth').textContent=totalDue.toFixed(2);
+    document.getElementById('privateFeesCollectedMonth').textContent=totalCollected.toFixed(2);
+    document.getElementById('privateFeesRemainingMonth').textContent=Math.max(0,totalDue-totalCollected).toFixed(2);
+    document.getElementById('privateStudentsWithBalance').textContent=String(withBalance);
+
     if(!teacherPrivateStudentsCache.length){
-      tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد طلاب خاصون بعد. أضف طالبًا بعد إنشاء قاعتك الخاصة.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا يوجد طلاب خاصون بعد. أضف طالبًا بعد إنشاء قاعتك الخاصة.</td></tr>';
       return;
     }
-    tbody.innerHTML=teacherPrivateStudentsCache.map(s=>`<tr>
-      <td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
-      <td><b>${escapeHtml(s.full_name||'—')}</b></td>
-      <td>${escapeHtml(s.group_name||'—')}</td>
-      <td>${escapeHtml(s.phone||'—')}</td>
-      <td>${escapeHtml(s.parent_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(s.parent_phone||'')}</span></td>
-      <td><span class="status active">خاص بالمعلم</span></td>
-      <td><button class="secondary-action private-student-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button></td>
-    </tr>`).join('');
+    tbody.innerHTML=teacherPrivateStudentsCache.map(s=>{
+      const fee=Math.max(0,Number(s.monthly_fee||0));
+      const collected=privatePaymentsForStudent(s.private_student_id,monthKey);
+      const remaining=Math.max(0,fee-collected);
+      return `<tr>
+        <td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
+        <td><b>${escapeHtml(s.full_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">من ${escapeHtml(s.joined_on||'—')}</span></td>
+        <td>${escapeHtml(s.group_name||'—')}</td>
+        <td><b>${fee.toFixed(2)}</b></td>
+        <td><b class="paid">${collected.toFixed(2)}</b></td>
+        <td><b class="${remaining>0?'due':'paid'}">${remaining.toFixed(2)}</b></td>
+        <td>${escapeHtml(s.parent_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(s.parent_phone||'')}</span></td>
+        <td><div class="private-money-actions">
+          <button class="secondary-action collect-private-payment" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تحصيل</button>
+          <button class="secondary-action private-student-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button>
+        </div></td>
+      </tr>`;
+    }).join('');
   };
-
   const renderPrivateStudentsForRoom=groupId=>{
     const tbody=document.getElementById('teacherPrivateRoomRows');
     const addBtn=document.getElementById('addPrivateStudentFromRoom');
+    const attendanceDate=document.getElementById('privateAttendanceDate');
+    const saveBtn=document.getElementById('savePrivateAttendance');
+    const markBtn=document.getElementById('markPrivateAllPresent');
     if(!tbody||!addBtn)return;
     const isPrivateRoom=teacherPrivateGroupIds.has(String(groupId));
     addBtn.style.display=isPrivateRoom?'':'none';
+    if(saveBtn)saveBtn.style.display=isPrivateRoom?'':'none';
+    if(markBtn)markBtn.style.display=isPrivateRoom?'':'none';
+    if(attendanceDate)attendanceDate.disabled=!isPrivateRoom;
     if(!isPrivateRoom){
-      tbody.innerHTML='<tr><td colspan="6" class="students-empty">هذه قاعة ROVEN School؛ لا يمكن إضافة طلابك الخاصين إليها.</td></tr>';
+      tbody.innerHTML='<tr><td colspan="6" class="students-empty">هذه قاعة ROVEN School؛ لا يمكن إضافة أو إدارة طلابك الخاصين فيها.</td></tr>';
       return;
     }
     const rows=privateStudentsByGroup(groupId);
+    if(!attendanceDate.value)attendanceDate.value=new Date().toISOString().slice(0,10);
+    const attendance=privateAttendanceMap(groupId,attendanceDate.value);
     if(!rows.length){
       tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا يوجد طلاب خاصون في هذه القاعة بعد.</td></tr>';
       return;
     }
-    tbody.innerHTML=rows.map((s,i)=>`<tr>
-      <td>${i+1}</td><td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
-      <td><b>${escapeHtml(s.full_name||'—')}</b></td><td>${escapeHtml(s.phone||'—')}</td>
-      <td>${escapeHtml(s.parent_name||'—')}</td>
-      <td><button class="secondary-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button></td>
-    </tr>`).join('');
+    tbody.innerHTML=rows.map((s,i)=>{
+      const status=attendance.get(String(s.private_student_id))||'present';
+      return `<tr data-private-student-id="${escapeHtml(s.private_student_id)}">
+        <td>${i+1}</td>
+        <td><span class="private-student-code">${escapeHtml(s.private_code||'—')}</span></td>
+        <td><b>${escapeHtml(s.full_name||'—')}</b></td>
+        <td><select class="private-attendance-status">
+          <option value="present" ${status==='present'?'selected':''}>حاضر</option>
+          <option value="absent" ${status==='absent'?'selected':''}>غائب</option>
+          <option value="late" ${status==='late'?'selected':''}>متأخر</option>
+          <option value="excused" ${status==='excused'?'selected':''}>بعذر</option>
+        </select></td>
+        <td>${Number(s.monthly_fee||0).toFixed(2)}</td>
+        <td><div class="private-money-actions">
+          <button class="secondary-action collect-private-payment" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تحصيل</button>
+          <button class="secondary-action edit-private-student" type="button" data-private-student-id="${escapeHtml(s.private_student_id)}">تعديل</button>
+        </div></td>
+      </tr>`;
+    }).join('');
   };
-
   const parseScheduleSessions=schedule=>{
     let value=schedule;
     if(typeof value==='string'){try{value=JSON.parse(value)}catch{value={}}}
@@ -2475,7 +2547,7 @@
   const markInternalTeacherMailRead=async rows=>{
     const internal=(rows||[]).filter(m=>{
       const s=String(m.subject||'');
-      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]')||s.startsWith('[ROOM_CREATED]')||s.startsWith('[PRIVATE_STUDENT]'));
+      return !m.read_at && (s.startsWith('[TEACHER_FINANCE]')||s.startsWith('[TAUGHT_LESSON]')||s.startsWith('[ROOM_RESPONSE]')||s.startsWith('[ROOM_CREATED]')||s.startsWith('[PRIVATE_STUDENT]')||s.startsWith('[PRIVATE_PAYMENT]')||s.startsWith('[PRIVATE_ATTENDANCE]'));
     });
     await Promise.allSettled(internal.map(m=>dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:m.message_id})})));
   };
@@ -2580,6 +2652,8 @@
     );
     teacherPrivateStudentsCache=teacherPrivateStudentRecords(inbox)
       .filter(s=>teacherPrivateGroupIds.has(String(s.group_id||'')));
+    teacherPrivatePaymentsCache=teacherPrivatePaymentRecords(inbox);
+    teacherPrivateAttendanceCache=teacherPrivateAttendanceRecords(inbox);
     renderTeacherPrivateStudents();
 
     markInternalTeacherMailRead(inbox).catch(()=>{});
@@ -2674,6 +2748,8 @@
     document.getElementById('privateStudentPhone').value=student?.phone||'';
     document.getElementById('privateStudentParentName').value=student?.parent_name||'';
     document.getElementById('privateStudentParentPhone').value=student?.parent_phone||'';
+    document.getElementById('privateStudentMonthlyFee').value=Number(student?.monthly_fee||0);
+    document.getElementById('privateStudentJoinedOn').value=student?.joined_on||new Date().toISOString().slice(0,10);
     document.getElementById('privateStudentNotes').value=student?.notes||'';
     document.getElementById('teacherPrivateStudentModalTitle').textContent=student?'تعديل الطالب الخاص':'إضافة طالب خاص';
     document.getElementById('deleteTeacherPrivateStudent').style.display=student?'':'none';
@@ -2734,6 +2810,8 @@
       phone:document.getElementById('privateStudentPhone').value.trim()||null,
       parent_name:document.getElementById('privateStudentParentName').value.trim()||null,
       parent_phone:document.getElementById('privateStudentParentPhone').value.trim()||null,
+      monthly_fee:Math.max(0,Number(document.getElementById('privateStudentMonthlyFee').value)||0),
+      joined_on:document.getElementById('privateStudentJoinedOn').value||new Date().toISOString().slice(0,10),
       notes:document.getElementById('privateStudentNotes').value.trim()||null,
       group_id:group.group_id,
       group_name:group.group_name,
@@ -3254,7 +3332,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -3518,7 +3596,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
