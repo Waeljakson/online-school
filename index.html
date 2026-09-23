@@ -1960,6 +1960,7 @@
       const contact=directChatContactsCache.find(c=>String(c.account_id)===String(currentDirectPeerId));
       if(contact)contact.unread_count=0;
       renderDirectChatContacts();
+      if(typeof refreshNotifications==='function') refreshNotifications(true).catch(()=>{});
     }catch(err){
       if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المحادثة')+'</div>';
     }
@@ -2039,6 +2040,7 @@
     try{
       const data=await dataApiFetch('/rpc/platform_group_chat_list',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId})});
       if(!Array.isArray(data)||!data.length){box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';return}
+      if(typeof markGroupNotificationSeen==='function') markGroupNotificationSeen(currentRoomGroupId,data);
       box.innerHTML=data.map(m=>`<div class="chat-msg">
         ${m.sender_photo?`<img class="platform-avatar" src="${escapeHtml(m.sender_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((m.sender_name||'?')[0])}</span>`}
         <div class="bubble"><div class="meta"><b>${escapeHtml(m.sender_name||'مستخدم')}</b> • ${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}</div>
@@ -2125,7 +2127,7 @@
       tbody.innerHTML=data.map(m=>{
         const person=folder==='sent'?(m.recipient_name+' • '+m.recipient_email):(m.sender_name+' • '+m.sender_email);
         const unread=folder!=='sent'&&!m.read_at;
-        return `<tr class="mail-row ${unread?'unread':''}">
+        return `<tr class="mail-row ${unread?'unread':''}" data-message-id="${escapeHtml(m.message_id||'')}" data-unread="${unread?'1':'0'}">
           <td>${escapeHtml(person||'—')}</td>
           <td><div class="mail-subject">${escapeHtml(m.subject||'(بدون موضوع)')}</div><span style="font-size:10px;color:var(--muted)">${escapeHtml((m.body||'').slice(0,100))}</span></td>
           <td>${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):'—'}</td>
@@ -2216,6 +2218,264 @@
       msg.className='student-form-msg error show';
     }
   });
+
+  // ===== Unified notifications =====
+  const notificationBell=document.getElementById('notificationBell');
+  const notificationCount=document.getElementById('notificationCount');
+  const notificationPopover=document.getElementById('notificationPopover');
+  const notificationList=document.getElementById('notificationList');
+  const notificationSummary=document.getElementById('notificationSummary');
+  const browserNotificationsBtn=document.getElementById('enableBrowserNotifications');
+  let notificationItems=[];
+  let notificationBootstrapped=false;
+  let notificationBusy=false;
+
+  const notificationAccountKey=()=>String(currentPlatformAccount?.account_id||currentPlatformAccount?.username||'anonymous');
+  const notifStoreKey=name=>'roven_notify_'+notificationAccountKey()+'_'+name;
+  const getStoredMap=name=>{try{return JSON.parse(localStorage.getItem(notifStoreKey(name))||'{}')||{}}catch{return {}}};
+  const setStoredMap=(name,obj)=>{try{localStorage.setItem(notifStoreKey(name),JSON.stringify(obj))}catch{}};
+
+  const markGroupNotificationSeen=(groupId,messages=[])=>{
+    if(!groupId||!Array.isArray(messages)||!messages.length)return;
+    const latest=messages[messages.length-1];
+    if(!latest?.created_at)return;
+    const seen=getStoredMap('group_seen');
+    seen[String(groupId)]=String(latest.created_at);
+    setStoredMap('group_seen',seen);
+  };
+
+  const notifyBrowser=item=>{
+    if(!notificationBootstrapped||!('Notification' in window)||Notification.permission!=='granted')return;
+    const announced=getStoredMap('announced');
+    if(announced[item.uid])return;
+    try{
+      const n=new Notification(item.title,{body:item.text||'',icon:'assets/rivan-logo.jpg',tag:item.uid});
+      n.onclick=()=>{window.focus();openNotificationItem(item);n.close()};
+      announced[item.uid]=Date.now();
+      const entries=Object.entries(announced).sort((a,b)=>b[1]-a[1]).slice(0,200);
+      setStoredMap('announced',Object.fromEntries(entries));
+    }catch{}
+  };
+
+  const setNavNotificationBadge=(section,count)=>{
+    const btn=document.querySelector('#nav button[data-section="'+section+'"]');
+    if(!btn)return;
+    let badge=btn.querySelector('.nav-notify');
+    if(count>0){
+      if(!badge){badge=document.createElement('span');badge.className='nav-notify';btn.appendChild(badge)}
+      badge.textContent=count>99?'99+':String(count);
+    }else if(badge){badge.remove()}
+  };
+
+  const renderNotifications=()=>{
+    const total=notificationItems.reduce((sum,x)=>sum+Number(x.count||1),0);
+    notificationCount.textContent=total>99?'99+':String(total);
+    notificationCount.classList.toggle('show',total>0);
+    notificationSummary.textContent=total?total+' إشعار غير مقروء':'لا توجد إشعارات جديدة';
+
+    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0};
+    notificationItems.forEach(x=>{if(sectionCounts[x.section]!==undefined)sectionCounts[x.section]+=Number(x.count||1)});
+    Object.entries(sectionCounts).forEach(([k,v])=>setNavNotificationBadge(k,v));
+
+    if(!notificationItems.length){
+      notificationList.innerHTML='<div class="students-empty">لا توجد إشعارات جديدة.</div>';
+      return;
+    }
+    notificationList.innerHTML=notificationItems.slice(0,40).map((n,i)=>`<button class="notification-item" type="button" data-notification-index="${i}">
+      <span class="notification-icon">${escapeHtml(n.icon||'🔔')}</span>
+      <span class="notification-body"><b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.text||'')}</span></span>
+      <span class="notification-time">${n.time?escapeHtml(new Date(n.time).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'})):''}</span>
+    </button>`).join('');
+  };
+
+  const openNotificationItem=async item=>{
+    notificationPopover.classList.remove('show');
+    if(item.section==='directchat'){
+      switchTo('directchat','شات الإدارة والمعلمين');
+      await loadDirectChatContacts();
+      if(item.peerId)await openDirectChatPeer(item.peerId);
+    }else if(item.section==='mail'){
+      switchTo('mail','بريد روفين');
+      if(item.messageId){
+        try{await dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:item.messageId})})}catch{}
+      }
+      await loadMailbox('inbox');
+    }else if(item.section==='mygroups'){
+      switchTo('mygroups','مجموعاتي والقاعات');
+      await loadPlatformGroups();
+      if(item.group){
+        try{await openGroupRoom(item.group)}catch{}
+      }
+    }else if(item.section==='rewards'){
+      switchTo('rewards','النقاط والمكافآت');
+      await loadRewards();
+    }
+    setTimeout(()=>refreshNotifications(true).catch(()=>{}),250);
+  };
+
+  notificationList.addEventListener('click',e=>{
+    const btn=e.target.closest('.notification-item');if(!btn)return;
+    const item=notificationItems[Number(btn.dataset.notificationIndex)];
+    if(item)openNotificationItem(item);
+  });
+
+  notificationBell.addEventListener('click',e=>{
+    e.stopPropagation();
+    notificationPopover.classList.toggle('show');
+    if(notificationPopover.classList.contains('show'))refreshNotifications(true).catch(()=>{});
+  });
+  document.addEventListener('click',e=>{if(!notificationPopover.contains(e.target)&&!notificationBell.contains(e.target))notificationPopover.classList.remove('show')});
+
+  const updateBrowserNotificationButton=()=>{
+    if(!('Notification' in window)){browserNotificationsBtn.style.display='none';return}
+    if(Notification.permission==='granted'){
+      browserNotificationsBtn.textContent='مفعّلة ✓';
+      browserNotificationsBtn.classList.add('browser-notification-enabled');
+    }else if(Notification.permission==='denied'){
+      browserNotificationsBtn.textContent='محظورة من المتصفح';
+      browserNotificationsBtn.disabled=true;
+    }else{
+      browserNotificationsBtn.textContent='تفعيل إشعارات المتصفح';
+      browserNotificationsBtn.disabled=false;
+    }
+  };
+  browserNotificationsBtn.addEventListener('click',async()=>{
+    if(!('Notification' in window))return;
+    try{await Notification.requestPermission()}catch{}
+    updateBrowserNotificationButton();
+  });
+  updateBrowserNotificationButton();
+
+  const refreshNotifications=async(silent=false)=>{
+    if(notificationBusy)return;
+    notificationBusy=true;
+    try{
+      const ctx=await hydratePlatformContext();
+      if(!ctx?.account_id){notificationItems=[];renderNotifications();return}
+      const items=[];
+      const me=String(ctx.account_id);
+      const role=String(ctx.role||''),type=String(ctx.account_type||'');
+
+      // Direct admin/teacher chat unread.
+      if(type==='teacher'||type==='admin'||type==='staff'){
+        try{
+          const contacts=await dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'});
+          (contacts||[]).filter(c=>Number(c.unread_count||0)>0).forEach(c=>{
+            items.push({
+              uid:'direct:'+c.account_id+':'+String(c.last_at||''),
+              section:'directchat',peerId:c.account_id,count:Number(c.unread_count||1),icon:'💬',
+              title:'رسالة جديدة من '+(c.display_name||'مستخدم'),
+              text:c.last_message||'لديك رسالة جديدة في الشات المباشر.',time:c.last_at
+            });
+          });
+        }catch{}
+      }
+
+      // Internal mail unread.
+      try{
+        const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
+        (inbox||[]).filter(m=>!m.read_at).slice(0,20).forEach(m=>{
+          items.push({
+            uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
+            title:'بريد جديد من '+(m.sender_name||'مستخدم'),
+            text:m.subject||m.body||'رسالة جديدة',time:m.sent_at
+          });
+        });
+      }catch{}
+
+      // New messages in educational groups. First check seeds the current latest message without browser popup.
+      if(['student','teacher','admin','staff'].includes(type)){
+        try{
+          const groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+          const seen=getStoredMap('group_seen');
+          for(const g of (groups||[]).slice(0,30)){
+            try{
+              const messages=await dataApiFetch('/rpc/platform_group_chat_list',{method:'POST',body:JSON.stringify({p_group_id:g.group_id})});
+              if(!Array.isArray(messages)||!messages.length)continue;
+              const incoming=[...messages].reverse().find(m=>String(m.sender_account_id)!==me);
+              const latest=messages[messages.length-1];
+              const lastSeen=seen[String(g.group_id)];
+              if(!lastSeen){
+                seen[String(g.group_id)]=String(latest.created_at||'');
+                continue;
+              }
+              if(incoming?.created_at && new Date(incoming.created_at)>new Date(lastSeen)){
+                items.push({
+                  uid:'group:'+g.group_id+':'+incoming.message_id,section:'mygroups',count:1,icon:'👥',
+                  title:'رسالة جديدة في '+g.group_name,
+                  text:(incoming.sender_name||'عضو المجموعة')+(incoming.body?' — '+incoming.body:' أرسل ملفًا جديدًا'),
+                  time:incoming.created_at,
+                  group:{group_id:g.group_id,group_name:g.group_name,meeting_provider:g.meeting_provider,meeting_url:g.meeting_url}
+                });
+              }
+            }catch{}
+          }
+          setStoredMap('group_seen',seen);
+        }catch{}
+      }
+
+      // Student receives notification when points change.
+      if(type==='student'){
+        try{
+          const summary=await dataApiFetch('/rpc/platform_student_points_summary',{method:'POST',body:'{}'});
+          const recent=Array.isArray(summary?.recent)?summary.recent:[];
+          const latest=recent[0];
+          if(latest?.created_at){
+            const seen=getStoredMap('points_seen'),prev=seen.latest;
+            if(prev && new Date(latest.created_at)>new Date(prev)){
+              items.push({
+                uid:'points:'+latest.created_at,section:'rewards',count:1,icon:Number(latest.points)>=0?'⭐':'📉',
+                title:Number(latest.points)>=0?'حصلت على نقاط جديدة':'تم تعديل رصيد نقاطك',
+                text:(Number(latest.points)>0?'+':'')+Number(latest.points)+' نقطة — '+String(latest.reason||''),
+                time:latest.created_at
+              });
+            }
+            seen.latest=String(latest.created_at);setStoredMap('points_seen',seen);
+          }
+        }catch{}
+      }
+
+      // Management/secretary sees new reward requests.
+      if(type==='admin'||(type==='staff'&&['academic_admin','secretary'].includes(role))){
+        try{
+          const requests=await dataApiFetch('/rpc/platform_reward_redemptions_admin',{method:'POST',body:'{}'});
+          const seen=getStoredMap('reward_requests_seen');
+          const prev=seen.latest||'';
+          const newest=(requests||[])[0]?.requested_at||'';
+          if(prev){
+            (requests||[]).filter(r=>r.status==='requested'&&r.requested_at&&new Date(r.requested_at)>new Date(prev)).forEach(r=>{
+              items.push({
+                uid:'reward-request:'+r.redemption_id,section:'rewards',count:1,icon:'🎁',
+                title:'طلب مكافأة جديد',
+                text:(r.student_name||'طالب')+' طلب '+(r.reward_title||'مكافأة'),time:r.requested_at
+              });
+            });
+          }
+          if(newest){seen.latest=String(newest);setStoredMap('reward_requests_seen',seen)}
+        }catch{}
+      }
+
+      notificationItems=items.sort((a,b)=>new Date(b.time||0)-new Date(a.time||0));
+      renderNotifications();
+      notificationItems.forEach(notifyBrowser);
+      notificationBootstrapped=true;
+    }finally{
+      notificationBusy=false;
+    }
+  };
+
+  document.getElementById('mailRows').addEventListener('click',async e=>{
+    const tr=e.target.closest('.mail-row');
+    if(!tr||mailFolder==='sent'||tr.dataset.unread!=='1'||!tr.dataset.messageId)return;
+    try{
+      await dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:tr.dataset.messageId})});
+      tr.classList.remove('unread');tr.dataset.unread='0';
+      await refreshNotifications(true);
+    }catch{}
+  });
+
+  setTimeout(()=>refreshNotifications(true).catch(()=>{}),1800);
+  setInterval(()=>refreshNotifications(true).catch(()=>{}),15000);
 
     const students=[
     {name:'أحمد محمد علي',grade:'أول ثانوي',attendance:'96%',balance:'مسدد',status:'نشط'},
