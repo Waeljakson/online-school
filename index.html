@@ -217,7 +217,7 @@
           <div class="panel-head"><div><h3>الطلاب المسجلون</h3><p>أحدث الطلاب المسجلين في النظام</p></div><button class="link-btn" id="refreshStudents" type="button">تحديث</button></div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>رقم الطالب</th><th>اسم الطالب</th><th>اسم المستخدم</th><th>الجوال</th><th>تاريخ التسجيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <thead><tr><th>كود الطالب</th><th>اسم الطالب</th><th>اسم المستخدم</th><th>الجوال</th><th>تاريخ التسجيل</th><th>الحالة</th><th>إجراء</th></tr></thead>
               <tbody id="registeredStudentsRows"><tr><td colspan="7" class="students-empty">افتح هذا القسم بعد تسجيل الدخول لعرض الطلاب.</td></tr></tbody>
             </table>
           </div>
@@ -646,9 +646,9 @@
 (function(){
   const roles={
     student:{label:'اسم المستخدم أو رقم الطالب',placeholder:'أدخل اسم المستخدم أو رقم الطالب',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
-    parent:{label:'رقم الجوال أو البريد الإلكتروني',placeholder:'أدخل رقم الجوال أو البريد',button:'دخول ولي الأمر',subtitle:'تابع حضور الأبناء ونتائجهم ومدفوعاتهم من حساب واحد.'},
-    teacher:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل البريد أو رقم الجوال',button:'دخول المعلم',subtitle:'إدارة الحصص والحضور والواجبات والاختبارات والمجموعات.'},
-    admin:{label:'البريد الإلكتروني أو رقم الجوال',placeholder:'أدخل بيانات حساب الإدارة',button:'دخول الإدارة',subtitle:'الوصول إلى الإدارة التعليمية والمالية والتقارير والصلاحيات.'}
+    parent:{label:'اسم المستخدم أو كود ولي الأمر',placeholder:'أدخل اسم المستخدم أو الكود',button:'دخول ولي الأمر',subtitle:'تابع حضور الأبناء ونتائجهم ومدفوعاتهم من حساب واحد.'},
+    teacher:{label:'اسم المستخدم أو كود المعلم',placeholder:'أدخل اسم المستخدم أو كود المعلم',button:'دخول المعلم',subtitle:'إدارة الحصص والحضور والواجبات والاختبارات والمجموعات.'},
+    admin:{label:'اسم المستخدم أو البريد الإلكتروني',placeholder:'أدخل اسم المستخدم أو البريد',button:'دخول الإدارة',subtitle:'الوصول إلى الإدارة التعليمية والمالية والتقارير والصلاحيات.'}
   };
   let activeRole='student';
   const roleGrid=document.getElementById('roleGrid'),identityLabel=document.getElementById('identityLabel'),identity=document.getElementById('identity'),loginSubmit=document.getElementById('loginSubmit'),loginSubtitle=document.getElementById('loginSubtitle'),password=document.getElementById('password'),loginError=document.getElementById('loginError');
@@ -1275,7 +1275,7 @@
       const data=await dataApiFetch('/rpc/list_students_admin',{method:'POST',body:'{}'});
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا يوجد طلاب مسجلون بعد.</td></tr>';return}
       tbody.innerHTML=data.map(s=>`<tr>
-        <td><b>${escapeHtml(s.student_no)}</b></td>
+        <td><b>${escapeHtml(s.account_code||s.student_no)}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(s.student_no||'')}</span></td>
         <td>${escapeHtml(s.full_name)}</td>
         <td>${escapeHtml(s.username||'لم يُنشأ')}</td>
         <td>${escapeHtml(s.phone||'—')}</td>
@@ -1326,8 +1326,12 @@
         <div class="result-item"><span>الفاتورة</span><b>${escapeHtml(r?.invoice_no||'لا توجد')}</b></div>
         <div class="result-item"><span>المدفوع</span><b>${Number(r?.paid||0).toFixed(2)}</b></div>
         <div class="result-item"><span>المتبقي</span><b>${Number(r?.balance||0).toFixed(2)}</b></div>
+        <div class="result-item"><span>كود الطالب</span><b>${escapeHtml(r?.account_code||r?.student_no||'—')}</b></div>
         <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||r?.student_no||'—')}</b></div>
         <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
+        <div class="result-item"><span>بريد الطالب الداخلي</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
+        <div class="result-item"><span>حساب ولي الأمر</span><b>${escapeHtml(r?.parent_username||'—')}</b></div>
+        <div class="result-item"><span>كلمة مرور ولي الأمر</span><b style="direction:ltr">${escapeHtml(r?.parent_generated_password||'—')}</b></div>
       </div>`;
       registrationResult.className='registration-result show';
       studentFormMsg.textContent='تم حفظ بيانات الطالب وولي الأمر والاشتراك في قاعدة البيانات.';
@@ -1380,7 +1384,7 @@
       setEditValue('esRelationship',s.relationship||'guardian');
       setEditValue('esUsername',s.username||s.student_no);
       setEditValue('esPassword','');
-      document.getElementById('editStudentNoLabel').textContent='رقم الطالب: '+(s.student_no||'—');
+      document.getElementById('editStudentNoLabel').textContent='كود الطالب: '+(s.account_code||s.student_no||'—')+' • رقم الملف: '+(s.student_no||'—');
     }catch(err){
       editStudentMsg.textContent=err.message||'تعذر تحميل بيانات الطالب.';
       editStudentMsg.className='student-form-msg error show';
@@ -1632,7 +1636,12 @@
       pendingProfilePhoto=null;document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
       msg.textContent=newPass?'تم حفظ الصورة وتغيير كلمة المرور. استخدم كلمة المرور الجديدة في الدخول القادم.':'تم حفظ الصورة الشخصية.';
       msg.className='student-form-msg success show';
-      await loadProfile();
+      if(newPass && platformSessionToken){
+        platformSessionToken='';
+        currentPlatformAccount=null;
+      }else{
+        await loadProfile();
+      }
     }catch(err){
       const m=String(err.message||'');
       msg.textContent=m.includes('old_password_incorrect')?'كلمة المرور الحالية غير صحيحة.':(m.includes('password_too_short')?'كلمة المرور الجديدة قصيرة.':m);
