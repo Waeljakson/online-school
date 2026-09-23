@@ -577,12 +577,12 @@
                 <div class="form-field"><label>تعليمات</label><input id="examInstructions"></div>
               </div>
               <div id="examQuestionsBuilder" style="margin-top:12px"></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary-action" id="addMcqQuestion" type="button">＋ اختيار من متعدد</button><button class="secondary-action" id="addEssayQuestion" type="button">＋ سؤال مقالي</button><button class="primary-action" id="saveExamDraft" type="button">حفظ الاختبار</button></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="secondary-action" id="addMcqQuestion" type="button">＋ اختيار من متعدد</button><button class="secondary-action" id="addTrueFalseQuestion" type="button">＋ صح / غلط</button><button class="secondary-action" id="addEssayQuestion" type="button">＋ سؤال مقالي</button><button class="primary-action" id="saveExamDraft" type="button">حفظ الاختبار</button></div>
               <div class="student-form-msg" id="examBuilderMsg"></div>
             </article>
             <article class="panel"><div class="panel-head"><div><h3>اختباراتي</h3><p>المسودات والاختبارات المنشورة.</p></div><span>📋</span></div><div id="teacherExamsList"><div class="students-empty">لا توجد اختبارات.</div></div></article>
           </div>
-          <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>إجابات الطلاب</h3><p>التصحيح الآلي للاختيار من متعدد وتصحيح المقال يدويًا.</p></div><span>✅</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الاختبار</th><th>الطالب</th><th>اختيار من متعدد</th><th>المقالي</th><th>النتيجة</th><th>إجراء</th></tr></thead><tbody id="examSubmissionsRows"><tr><td colspan="6" class="students-empty">لا توجد إجابات.</td></tr></tbody></table></div></article>
+          <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>إجابات الطلاب</h3><p>التصحيح الآلي للاختيار من متعدد وصح/غلط، وتصحيح المقال يدويًا.</p></div><span>✅</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الاختبار</th><th>الطالب</th><th>التصحيح الآلي</th><th>المقالي</th><th>النتيجة</th><th>إجراء</th></tr></thead><tbody id="examSubmissionsRows"><tr><td colspan="6" class="students-empty">لا توجد إجابات.</td></tr></tbody></table></div></article>
         </div>
         <div id="assessmentStudentArea" style="display:none">
           <article class="panel"><div class="panel-head"><div><h3>اختباراتي المتاحة</h3><p>ابدأ الاختبار واتبع الوقت المحدد إن وجد.</p></div><span>⏱️</span></div><div id="studentExamsList"><div class="students-empty">لا توجد اختبارات متاحة.</div></div></article>
@@ -4288,6 +4288,14 @@
           <div class="form-field"><label>الإجابة الصحيحة</label><select class="exam-q-correct">${[0,1,2,3].map(i=>`<option value="${i}" ${Number(data.correct)===i?'selected':''}>${String.fromCharCode(65+i)}</option>`).join('')}</select></div>
           <div class="form-field"><label>الدرجة</label><input class="exam-q-points" type="number" min="0.5" step="0.5" value="${Number(data.points||1)}"></div>
         </div>`;
+    }else if(type==='true_false'){
+      const correct=String(data.correct??'true');
+      card.innerHTML=`<div class="exam-question-head"><b>صح / غلط</b><button class="mini-btn remove-exam-question" type="button">حذف</button></div>
+        <div class="form-field"><label>العبارة</label><textarea class="exam-q-text" rows="2">${escapeHtml(data.text||'')}</textarea></div>
+        <div class="form-grid" style="margin-top:8px">
+          <div class="form-field"><label>الإجابة الصحيحة</label><select class="exam-q-correct"><option value="true" ${correct==='true'?'selected':''}>صح</option><option value="false" ${correct==='false'?'selected':''}>غلط</option></select></div>
+          <div class="form-field"><label>الدرجة</label><input class="exam-q-points" type="number" min="0.5" step="0.5" value="${Number(data.points||1)}"></div>
+        </div>`;
     }else{
       card.innerHTML=`<div class="exam-question-head"><b>سؤال مقالي</b><button class="mini-btn remove-exam-question" type="button">حذف</button></div>
         <div class="form-field"><label>السؤال</label><textarea class="exam-q-text" rows="3">${escapeHtml(data.text||'')}</textarea></div>
@@ -4302,6 +4310,8 @@
     if(type==='mcq'){
       base.choices=[...card.querySelectorAll('.exam-q-choice')].map(x=>x.value.trim());
       base.correct=Number(card.querySelector('.exam-q-correct').value);
+    }else if(type==='true_false'){
+      base.correct=card.querySelector('.exam-q-correct').value;
     }
     return base;
   });
@@ -4322,6 +4332,7 @@
   };
 
   document.getElementById('addMcqQuestion').addEventListener('click',()=>addExamQuestionCard('mcq'));
+  document.getElementById('addTrueFalseQuestion').addEventListener('click',()=>addExamQuestionCard('true_false'));
   document.getElementById('addEssayQuestion').addEventListener('click',()=>addExamQuestionCard('essay'));
   document.getElementById('examQuestionsBuilder').addEventListener('click',e=>{
     const btn=e.target.closest('.remove-exam-question');if(btn)btn.closest('.exam-question-card')?.remove();
@@ -4372,7 +4383,10 @@
     for(const q of (exam.questions||[])){
       const pts=Number(q.points||0);max+=pts;
       if(q.type==='essay'){essayMax+=pts;continue}
-      if(Number(submission.answers?.[q.id])===Number(q.correct))score+=pts;
+      const answer=submission.answers?.[q.id];
+      if(q.type==='true_false'){
+        if(String(answer)===String(q.correct))score+=pts;
+      }else if(Number(answer)===Number(q.correct))score+=pts;
     }
     return {mcqScore:score,maxScore:max,essayMax};
   };
@@ -4477,7 +4491,9 @@
         ]);
         const dir=Array.isArray(directory)?directory:[];
         let sent=0;
-        const safeQuestions=(ex.questions||[]).map(q=>q.type==='mcq'?{id:q.id,type:q.type,text:q.text,points:q.points,choices:q.choices}:{id:q.id,type:q.type,text:q.text,points:q.points});
+        const safeQuestions=(ex.questions||[]).map(q=>q.type==='mcq'
+          ?{id:q.id,type:q.type,text:q.text,points:q.points,choices:q.choices}
+          :{id:q.id,type:q.type,text:q.text,points:q.points});
         for(const s of (roster||[])){
           const acct=dir.find(a=>String(a.username||'')===String(s.student_no||''))||
                      dir.find(a=>a.account_type==='student'&&String(a.display_name||'')===String(s.student_name||''));
@@ -4513,7 +4529,11 @@
     const box=document.getElementById('takeExamQuestions');
     box.innerHTML=(assignment.questions||[]).map((q,i)=>`<div class="exam-answer-block" data-qid="${escapeHtml(q.id)}" data-qtype="${escapeHtml(q.type)}">
       <h4>${i+1}. ${escapeHtml(q.text)} <span style="font-size:10px;color:var(--muted)">(${Number(q.points||0)} درجة)</span></h4>
-      ${q.type==='mcq'?(q.choices||[]).map((c,j)=>`<label><input type="radio" name="answer-${escapeHtml(q.id)}" value="${j}"> ${escapeHtml(c)}</label>`).join(''):`<textarea class="essay-answer" rows="4" style="width:100%" placeholder="اكتب إجابتك هنا..."></textarea>`}
+      ${q.type==='mcq'
+        ?(q.choices||[]).map((c,j)=>`<label><input type="radio" name="answer-${escapeHtml(q.id)}" value="${j}"> ${escapeHtml(c)}</label>`).join('')
+        :q.type==='true_false'
+          ?`<label><input type="radio" name="answer-${escapeHtml(q.id)}" value="true"> صح</label><label><input type="radio" name="answer-${escapeHtml(q.id)}" value="false"> غلط</label>`
+          :`<textarea class="essay-answer" rows="4" style="width:100%" placeholder="اكتب إجابتك هنا..."></textarea>`}
     </div>`).join('');
   };
 
@@ -4570,6 +4590,9 @@
       if(qtype==='mcq'){
         const checked=block.querySelector('input[type="radio"]:checked');
         answers[qid]=checked?Number(checked.value):null;
+      }else if(qtype==='true_false'){
+        const checked=block.querySelector('input[type="radio"]:checked');
+        answers[qid]=checked?checked.value:null;
       }else answers[qid]=block.querySelector('.essay-answer')?.value.trim()||'';
     });
     const inbox=await structuredMail('inbox');
