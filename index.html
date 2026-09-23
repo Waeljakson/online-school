@@ -2244,7 +2244,7 @@
       const price=Number(response.agreed_price??0);
       const group=groups.find(g=>String(g.group_name||'').trim()===String(req.room_name||'').trim());
       const studentCount=group?Number(studentCountByGroup.get(String(group.group_id))||0):0;
-      const taughtForGroup=group?lessonMarkers.filter(x=>String(x.group_id||'')===String(group.group_id)).length:0;
+      const taughtForGroup=group?new Set(lessonMarkers.filter(x=>String(x.group_id||'')===String(group.group_id)).map(x=>String(x.date||''))).size:0;
       if(response.pricing_basis==='per_student')expectedTotal+=price*studentCount;
       else if(response.pricing_basis==='per_session')expectedTotal+=price*taughtForGroup;
       else expectedTotal+=price;
