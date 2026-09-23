@@ -623,8 +623,65 @@
           <div class="table-wrap"><table class="table" style="min-width:900px"><thead><tr><th>رقم الإيصال</th><th>الطالب</th><th>التاريخ</th><th>الطريقة</th><th>المبلغ</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="schoolPaymentsRows"><tr><td colspan="7" class="students-empty">لا توجد دفعات.</td></tr></tbody></table></div>
         </article>
       </section>
-      <section class="module" id="expenses"><div class="placeholder"><div class="big">💰</div><h2>المصروفات والإيرادات</h2><p>إدارة المصروفات والتصنيفات والإيرادات الأخرى والتدفق النقدي.</p></div></section>
-      <section class="module" id="reports"><div class="placeholder"><div class="big">📊</div><h2>التقارير</h2><p>تقارير مالية وتعليمية وإدارية قابلة للطباعة والتصدير.</p></div></section>
+      <section class="module" id="expenses">
+        <div class="section-toolbar">
+          <div><h2>المصروفات والإيرادات</h2><p>دفتر الحركة المالية الفعلية للمصروفات والإيرادات الأخرى.</p></div>
+          <button class="link-btn" id="refreshSchoolLedger" type="button">تحديث</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="stat-head"><span>إيرادات أخرى</span><span class="stat-icon">↗</span></div><div class="value" id="ledgerIncomeValue">—</div><div class="sub">غير تحصيل اشتراكات الطلاب</div></div>
+          <div class="stat"><div class="stat-head"><span>إجمالي المصروفات</span><span class="stat-icon">↘</span></div><div class="value" id="ledgerExpenseValue">—</div><div class="sub">من الحركات المسجلة</div></div>
+          <div class="stat"><div class="stat-head"><span>صافي الحركة</span><span class="stat-icon">₤</span></div><div class="value" id="ledgerNetValue">—</div><div class="sub">الإيرادات الأخرى − المصروفات</div></div>
+        </div>
+        <div class="grid" style="margin-top:15px">
+          <article class="panel">
+            <div class="panel-head"><div><h3>تسجيل حركة مالية</h3><p>كل حركة تُحفظ باسم من قام بتسجيلها.</p></div><span>🧾</span></div>
+            <form id="schoolLedgerForm">
+              <div class="form-grid">
+                <div class="form-field"><label>نوع الحركة</label><select id="ledgerType"><option value="expense">مصروف</option><option value="income">إيراد آخر</option></select></div>
+                <div class="form-field"><label>التاريخ</label><input id="ledgerDate" type="date" required></div>
+                <div class="form-field"><label>التصنيف</label><select id="ledgerCategory">
+                  <option value="رواتب">رواتب</option><option value="تشغيل">تشغيل</option><option value="إيجار">إيجار</option><option value="تسويق">تسويق</option><option value="تقنية">تقنية</option><option value="مطبوعات ومذكرات">مطبوعات ومذكرات</option><option value="صيانة">صيانة</option><option value="إيراد آخر">إيراد آخر</option><option value="أخرى">أخرى</option>
+                </select></div>
+                <div class="form-field"><label>المبلغ</label><input id="ledgerAmount" type="number" min="0.01" step="0.01" required></div>
+                <div class="form-field"><label>طريقة الدفع / التحصيل</label><select id="ledgerMethod"><option value="cash">نقدي</option><option value="bank_transfer">تحويل بنكي</option><option value="card">بطاقة</option><option value="wallet">محفظة</option><option value="online">أونلاين</option><option value="other">أخرى</option></select></div>
+                <div class="form-field"><label>البيان</label><input id="ledgerNote" placeholder="وصف مختصر للحركة"></div>
+              </div>
+              <div class="student-form-msg" id="ledgerMsg"></div>
+              <button class="primary-action" type="submit" style="margin-top:10px">حفظ الحركة</button>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h3>آخر الحركات</h3><p>سجل فعلي قابل للمراجعة والإلغاء.</p></div><span>📒</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:760px"><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>البيان</th><th>الطريقة</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody id="schoolLedgerRows"><tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr></tbody></table></div>
+          </article>
+        </div>
+      </section>
+      <section class="module" id="reports">
+        <div class="section-toolbar">
+          <div><h2>التقارير</h2><p>ملخص إداري ومالي مباشر من بيانات النظام الفعلية.</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+            <div class="form-field" style="min-width:145px"><label>من</label><input id="reportFrom" type="date"></div>
+            <div class="form-field" style="min-width:145px"><label>إلى</label><input id="reportTo" type="date"></div>
+            <button class="secondary-action" id="refreshManagementReport" type="button">تحديث</button>
+            <button class="primary-action" id="printManagementReport" type="button">طباعة التقرير</button>
+          </div>
+        </div>
+        <div id="reportPrintable">
+          <div class="stats">
+            <div class="stat"><div class="stat-head"><span>الطلاب</span><span class="stat-icon">👥</span></div><div class="value" id="reportStudentsValue">—</div><div class="sub">مسجلون بالنظام</div></div>
+            <div class="stat"><div class="stat-head"><span>المعلمون</span><span class="stat-icon">👨‍🏫</span></div><div class="value" id="reportTeachersValue">—</div><div class="sub">الحسابات النشطة</div></div>
+            <div class="stat"><div class="stat-head"><span>التحصيل بالفترة</span><span class="stat-icon">↗</span></div><div class="value" id="reportCollectedValue">—</div><div class="sub" id="reportCollectedSub">حسب الفترة المحددة</div></div>
+            <div class="stat"><div class="stat-head"><span>صافي التدفق</span><span class="stat-icon">₤</span></div><div class="value" id="reportNetValue">—</div><div class="sub">التحصيل + الإيرادات الأخرى − المصروفات</div></div>
+          </div>
+          <div class="grid" style="margin-top:15px">
+            <article class="panel"><div class="panel-head"><div><h3>الملخص المالي</h3><p>القيم الحالية والفترة المختارة.</p></div><span>💳</span></div><div id="reportFinanceSummary" class="teacher-agreement-summary"></div></article>
+            <article class="panel"><div class="panel-head"><div><h3>الملخص التعليمي</h3><p>أعداد فعلية من قاعدة البيانات.</p></div><span>🎓</span></div><div id="reportEducationSummary" class="teacher-agreement-summary"></div></article>
+          </div>
+          <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>الطلاب ذوو الأرصدة المستحقة</h3><p>أعلى الأرصدة الحالية.</p></div><span>⚠️</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الطالب</th><th>الصف</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th><th>ولي الأمر</th></tr></thead><tbody id="reportDebtorsRows"><tr><td colspan="6" class="students-empty">جارٍ تحميل التقرير...</td></tr></tbody></table></div></article>
+          <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>الحركة المالية خلال الفترة</h3><p>تحصيل الطلاب والإيرادات الأخرى والمصروفات.</p></div><span>📊</span></div><div class="table-wrap"><table class="table"><thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>المبلغ</th></tr></thead><tbody id="reportMovementRows"><tr><td colspan="4" class="students-empty">جارٍ تحميل الحركة...</td></tr></tbody></table></div></article>
+        </div>
+      </section>
       <section class="module" id="teacherhub">
         <div class="teacher-hero">
           <div><span class="teacher-kicker">ROVEN Teacher Workspace</span><h2 id="teacherHubName">لوحة المعلم</h2><p>كل ما يخص حصصك وطلابك وقاعاتك وحساباتك الخاصة في مكان واحد.</p></div>
@@ -1667,7 +1724,16 @@
       }catch(err){loginError.textContent='تعذر إرسال رابط الاستعادة الآن. حاول مرة أخرى.';loginError.classList.add('show')}
     });
   }
-  document.getElementById('previewDashboard').addEventListener('click',()=>{document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');window.scrollTo(0,0)});
+  document.getElementById('previewDashboard').addEventListener('click',()=>{
+    document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');
+    ['dashboardStudentsValue','dashboardTeachersValue','dashboardRevenueValue','dashboardDueValue'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='—'});
+    const notes={dashboardStudentsSub:'سجّل الدخول لعرض البيانات الفعلية',dashboardTeachersSub:'سجّل الدخول لعرض البيانات الفعلية',dashboardRevenueSub:'سجّل الدخول لعرض التحصيل الفعلي',dashboardDueSub:'سجّل الدخول لعرض المستحقات الفعلية',dashboardLessonsCount:'سجّل الدخول لعرض جدول اليوم'};
+    Object.entries(notes).forEach(([id,value])=>{const el=document.getElementById(id);if(el)el.textContent=value});
+    const chart=document.getElementById('dashboardRevenueChart');if(chart)chart.innerHTML='<div class="students-empty" style="width:100%;align-self:center">المعاينة لا تعرض بيانات وهمية. سجّل الدخول لعرض بيانات المدرسة.</div>';
+    const lessons=document.getElementById('dashboardLessonsList');if(lessons)lessons.innerHTML='<div class="students-empty">سجّل الدخول لعرض الحصص الفعلية.</div>';
+    const rows=document.getElementById('studentRows');if(rows)rows.innerHTML='<tr><td colspan="5" class="students-empty">سجّل الدخول لعرض الطلاب الفعليين.</td></tr>';
+    window.scrollTo(0,0)
+  });
 
   // Remove any service worker/cache from previous broken Vite deployment.
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
@@ -5840,8 +5906,170 @@
   setTimeout(()=>refreshNotifications(true).catch(()=>{}),1800);
   setInterval(()=>refreshNotifications(true).catch(()=>{}),15000);
 
-    const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='dashboard')loadAdminDashboard();if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='finance')loadSchoolFinance();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  
+  // ===== School expense/income ledger =====
+  let schoolLedgerEntriesCache=[];
+  let schoolLedgerVoidsCache=new Set();
+  const schoolLedgerEntryRecords=rows=>latestStructuredBy(rows,'SCHOOL_LEDGER_ENTRY','entry_id');
+  const schoolLedgerVoidSet=rows=>new Set(latestStructuredBy(rows,'SCHOOL_LEDGER_VOID','entry_id').map(x=>String(x.entry_id)));
+  const ledgerMethodLabel={cash:'نقدي',bank_transfer:'تحويل بنكي',card:'بطاقة',wallet:'محفظة',online:'أونلاين',other:'أخرى'};
+
+  const renderSchoolLedger=()=>{
+    const rows=document.getElementById('schoolLedgerRows');if(!rows)return;
+    const active=schoolLedgerEntriesCache.filter(x=>!schoolLedgerVoidsCache.has(String(x.entry_id)));
+    const income=active.filter(x=>x.type==='income').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const expense=active.filter(x=>x.type==='expense').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    document.getElementById('ledgerIncomeValue').textContent=dashboardMoney(income);
+    document.getElementById('ledgerExpenseValue').textContent=dashboardMoney(expense);
+    document.getElementById('ledgerNetValue').textContent=dashboardMoney(income-expense);
+    rows.innerHTML=active.length?active.sort((a,b)=>new Date(b.date||b.recorded_at||0)-new Date(a.date||a.recorded_at||0)).slice(0,80).map(x=>`<tr>
+      <td>${escapeHtml(x.date||'—')}</td>
+      <td><span class="status ${x.type==='income'?'active':'watch'}">${x.type==='income'?'إيراد':'مصروف'}</span></td>
+      <td>${escapeHtml(x.category||'أخرى')}</td>
+      <td>${escapeHtml(x.note||'—')}</td>
+      <td>${escapeHtml(ledgerMethodLabel[x.method]||x.method||'—')}</td>
+      <td><b class="${x.type==='income'?'paid':'due'}">${dashboardMoney(x.amount)}</b></td>
+      <td><button class="secondary-action void-ledger-entry" type="button" data-entry-id="${escapeHtml(x.entry_id)}" style="color:#b42318">إلغاء</button></td>
+    </tr>`).join(''):'<tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr>';
+  };
+
+  const loadSchoolLedger=async()=>{
+    const rows=document.getElementById('schoolLedgerRows');if(rows)rows.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل الحركات الفعلية...</td></tr>';
+    const inbox=await structuredMail('inbox');
+    schoolLedgerEntriesCache=schoolLedgerEntryRecords(inbox);
+    schoolLedgerVoidsCache=schoolLedgerVoidSet(inbox);
+    renderSchoolLedger();
+    const date=document.getElementById('ledgerDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);
+  };
+
+  document.getElementById('refreshSchoolLedger')?.addEventListener('click',loadSchoolLedger);
+  document.getElementById('schoolLedgerForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('ledgerMsg');msg.className='student-form-msg';
+    const amount=Number(document.getElementById('ledgerAmount').value)||0;
+    if(amount<=0){msg.textContent='أدخل مبلغًا صحيحًا.';msg.className='student-form-msg error show';return}
+    const ctx=await hydratePlatformContext();
+    const entry={
+      entry_id:'LED-'+Date.now().toString(36).toUpperCase(),
+      type:document.getElementById('ledgerType').value,
+      date:document.getElementById('ledgerDate').value||new Date().toISOString().slice(0,10),
+      category:document.getElementById('ledgerCategory').value,
+      amount,
+      method:document.getElementById('ledgerMethod').value,
+      note:document.getElementById('ledgerNote').value.trim()||null,
+      recorded_by:ctx?.display_name||'ROVEN',
+      recorded_at:new Date().toISOString()
+    };
+    try{
+      await sendSchoolPaymentToManagement('SCHOOL_LEDGER_ENTRY',entry.entry_id,entry);
+      msg.textContent='تم حفظ الحركة المالية.';msg.className='student-form-msg success show';
+      document.getElementById('ledgerAmount').value='';document.getElementById('ledgerNote').value='';
+      await loadSchoolLedger();
+    }catch(err){msg.textContent=err.message||'تعذر حفظ الحركة';msg.className='student-form-msg error show'}
+  });
+  document.getElementById('schoolLedgerRows')?.addEventListener('click',async e=>{
+    const btn=e.target.closest('.void-ledger-entry');if(!btn)return;
+    const entry=schoolLedgerEntriesCache.find(x=>String(x.entry_id)===String(btn.dataset.entryId));if(!entry)return;
+    if(!confirm('إلغاء هذه الحركة المالية؟ ستظل محفوظة في سجل المراجعة كحركة ملغاة.'))return;
+    try{
+      await sendSchoolPaymentToManagement('SCHOOL_LEDGER_VOID',entry.entry_id,{entry_id:entry.entry_id,voided_at:new Date().toISOString()});
+      await loadSchoolLedger();
+    }catch(err){alert(err.message||'تعذر إلغاء الحركة')}
+  });
+
+  // ===== Management reports =====
+  const reportDateInRange=(dateLike,from,to)=>{
+    if(!dateLike)return false;
+    const d=new Date(dateLike);if(Number.isNaN(d.getTime()))return false;
+    const start=from?new Date(from+'T00:00:00'):null,end=to?new Date(to+'T23:59:59'):null;
+    return (!start||d>=start)&&(!end||d<=end);
+  };
+  const initReportDates=()=>{
+    const from=document.getElementById('reportFrom'),to=document.getElementById('reportTo');if(!from||!to)return;
+    const now=new Date();
+    if(!from.value)from.value=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
+    if(!to.value)to.value=now.toISOString().slice(0,10);
+  };
+
+  const loadManagementReport=async()=>{
+    initReportDates();
+    const from=document.getElementById('reportFrom')?.value||'',to=document.getElementById('reportTo')?.value||'';
+    const [studentsResult,teachersResult,groupsResult,inboxResult]=await Promise.allSettled([
+      dataApiFetch('/rpc/list_students_admin',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/list_teachers_admin',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/list_study_groups_admin',{method:'POST',body:'{}'}),
+      structuredMail('inbox')
+    ]);
+    const students=studentsResult.status==='fulfilled'&&Array.isArray(studentsResult.value)?studentsResult.value:[];
+    const teachers=teachersResult.status==='fulfilled'&&Array.isArray(teachersResult.value)?teachersResult.value:[];
+    const groups=groupsResult.status==='fulfilled'&&Array.isArray(groupsResult.value)?groupsResult.value:[];
+    const inbox=inboxResult.status==='fulfilled'&&Array.isArray(inboxResult.value)?inboxResult.value:[];
+    const links=latestStructuredBy(inbox,'PARENT_LINK_MASTER','student_no');
+    const payments=schoolPaymentRecords(inbox),paymentVoids=schoolPaymentVoidSet(inbox);
+    const ledger=schoolLedgerEntryRecords(inbox),ledgerVoids=schoolLedgerVoidSet(inbox);
+    const activeLedger=ledger.filter(x=>!ledgerVoids.has(String(x.entry_id))&&reportDateInRange(x.date||x.recorded_at,from,to));
+    const periodPayments=payments.filter(x=>!paymentVoids.has(String(x.payment_id))&&reportDateInRange(x.date||x.recorded_at||x._mail?.sent_at,from,to));
+    let initialCollected=0;
+    links.forEach(l=>{if(reportDateInRange(l.created_at||l.joined_on,from,to))initialCollected+=Number(l.paid||0)});
+    const paymentCollected=periodPayments.reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const collected=initialCollected+paymentCollected;
+    const otherIncome=activeLedger.filter(x=>x.type==='income').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const expenses=activeLedger.filter(x=>x.type==='expense').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const net=collected+otherIncome-expenses;
+    let totalDue=0;
+    const debtors=links.map(l=>({link:l,fin:financeForLink(l)})).filter(x=>x.fin.balance>0.001).sort((a,b)=>b.fin.balance-a.fin.balance);
+    debtors.forEach(x=>totalDue+=x.fin.balance);
+
+    const activeStudents=students.filter(x=>!x.status||x.status==='active').length;
+    const activeTeachers=teachers.filter(x=>!x.status||x.status==='active').length;
+    const activeGroups=groups.filter(x=>x.is_active!==false).length;
+    document.getElementById('reportStudentsValue').textContent=String(activeStudents);
+    document.getElementById('reportTeachersValue').textContent=String(activeTeachers);
+    document.getElementById('reportCollectedValue').textContent=dashboardMoney(collected);
+    document.getElementById('reportCollectedSub').textContent=(from||'البداية')+' ← '+(to||'اليوم');
+    document.getElementById('reportNetValue').textContent=dashboardMoney(net);
+
+    document.getElementById('reportFinanceSummary').innerHTML=
+      '<div><span>تحصيل الطلاب</span><b>'+escapeHtml(dashboardMoney(collected))+'</b></div>'+
+      '<div><span>إيرادات أخرى</span><b>'+escapeHtml(dashboardMoney(otherIncome))+'</b></div>'+
+      '<div><span>المصروفات</span><b>'+escapeHtml(dashboardMoney(expenses))+'</b></div>'+
+      '<div><span>صافي التدفق</span><b>'+escapeHtml(dashboardMoney(net))+'</b></div>'+
+      '<div><span>المستحقات الحالية</span><b>'+escapeHtml(dashboardMoney(totalDue))+'</b></div>'+
+      '<div><span>طلاب عليهم مستحقات</span><b>'+debtors.length+'</b></div>';
+    document.getElementById('reportEducationSummary').innerHTML=
+      '<div><span>طلاب نشطون</span><b>'+activeStudents+'</b></div>'+
+      '<div><span>معلمون نشطون</span><b>'+activeTeachers+'</b></div>'+
+      '<div><span>مجموعات نشطة</span><b>'+activeGroups+'</b></div>'+
+      '<div><span>إجمالي المسجلين</span><b>'+students.length+'</b></div>'+
+      '<div><span>إجمالي المعلمين</span><b>'+teachers.length+'</b></div>'+
+      '<div><span>إجمالي المجموعات</span><b>'+groups.length+'</b></div>';
+
+    document.getElementById('reportDebtorsRows').innerHTML=debtors.length?debtors.slice(0,50).map(({link,fin})=>`<tr>
+      <td><b>${escapeHtml(link.student_name||'طالب')}</b></td><td>${escapeHtml([link.grade,link.stage].filter(Boolean).join(' • ')||'—')}</td>
+      <td>${dashboardMoney(fin.due)}</td><td class="paid">${dashboardMoney(fin.paid)}</td><td class="due"><b>${dashboardMoney(fin.balance)}</b></td><td>${escapeHtml(link.parent_name||'—')}</td>
+    </tr>`).join(''):'<tr><td colspan="6" class="students-empty">لا توجد أرصدة مستحقة حاليًا.</td></tr>';
+
+    const movements=[];
+    periodPayments.forEach(x=>movements.push({date:x.date||x.recorded_at,type:'تحصيل طالب',note:x.student_name||x.receipt_no||'دفعة طالب',amount:Number(x.amount||0),sign:1}));
+    links.forEach(l=>{if(Number(l.paid||0)>0&&reportDateInRange(l.created_at||l.joined_on,from,to))movements.push({date:String(l.created_at||l.joined_on||'').slice(0,10),type:'دفعة تسجيل',note:l.student_name||'طالب',amount:Number(l.paid||0),sign:1})});
+    activeLedger.forEach(x=>movements.push({date:x.date||String(x.recorded_at||'').slice(0,10),type:x.type==='income'?'إيراد آخر':'مصروف',note:(x.category||'')+(x.note?' — '+x.note:''),amount:Number(x.amount||0),sign:x.type==='income'?1:-1}));
+    movements.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    document.getElementById('reportMovementRows').innerHTML=movements.length?movements.slice(0,100).map(x=>`<tr><td>${escapeHtml(x.date||'—')}</td><td><span class="status ${x.sign>0?'active':'watch'}">${escapeHtml(x.type)}</span></td><td>${escapeHtml(x.note||'—')}</td><td><b class="${x.sign>0?'paid':'due'}">${x.sign<0?'-':''}${dashboardMoney(x.amount)}</b></td></tr>`).join(''):'<tr><td colspan="4" class="students-empty">لا توجد حركة مالية في الفترة المحددة.</td></tr>';
+  };
+
+  document.getElementById('refreshManagementReport')?.addEventListener('click',loadManagementReport);
+  document.getElementById('reportFrom')?.addEventListener('change',loadManagementReport);
+  document.getElementById('reportTo')?.addEventListener('change',loadManagementReport);
+  document.getElementById('printManagementReport')?.addEventListener('click',()=>{
+    const content=document.getElementById('reportPrintable')?.innerHTML||'';
+    const from=document.getElementById('reportFrom')?.value||'',to=document.getElementById('reportTo')?.value||'';
+    const logo=new URL('assets/rivan-logo.jpg',location.href).href;
+    const w=window.open('','_blank','width=1100,height=750');if(!w)return;
+    w.document.write('<html dir="rtl"><head><title>تقرير ROVEN</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"><style>@page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Cairo,Arial;color:#172331;margin:0}.report-head{text-align:center;border-bottom:2px solid #0f766e;padding-bottom:12px;margin-bottom:16px}.report-head img{width:90px;height:90px;object-fit:contain}.report-head h1{margin:4px 0;font-size:22px}.report-head p{margin:0;font-size:11px}.stats,.teacher-agreement-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat,.panel,.teacher-agreement-summary>div{border:1px solid #dfe7eb;border-radius:10px;padding:10px}.stat-head,.panel-head{display:flex;justify-content:space-between}.stat .value{font-size:18px;font-weight:800}.sub,.stat-head span,.panel-head p{font-size:9px;color:#708090}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.panel{margin-top:10px}.panel h3{margin:0;font-size:14px}table{width:100%;border-collapse:collapse;font-size:9px}th,td{padding:6px;border-bottom:1px solid #e7ebef;text-align:right}.status{padding:2px 5px;border-radius:8px}.paid{color:#147d52}.due{color:#b26a00}.primary-action,.secondary-action,.link-btn,.stat-icon{display:none!important}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="report-head"><img src="'+logo+'"><h1>ROVEN Online School — التقرير الإداري والمالي</h1><p>الفترة: '+from+' إلى '+to+'</p></div>'+content+'<script>window.addEventListener("load",()=>window.print())<\/script></body></html>');w.document.close();
+  });
+
+  const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='dashboard')loadAdminDashboard();if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='finance')loadSchoolFinance();if(id==='expenses')loadSchoolLedger();if(id==='reports')loadManagementReport();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
