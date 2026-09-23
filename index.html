@@ -499,6 +499,7 @@
           <article class="panel"><div class="panel-head"><div><h3>الشهادات والتقدير</h3><p>الشهادات المرسلة لأبنائك.</p></div><span>🏅</span></div><div id="parentCertificatesList"><div class="students-empty">لا توجد شهادات.</div></div></article>
           <article class="panel"><div class="panel-head"><div><h3>نتائج الاختبارات</h3><p>الدرجات التي تم اعتمادها.</p></div><span>📝</span></div><div id="parentExamResults"><div class="students-empty">لا توجد نتائج.</div></div></article>
         </div>
+        <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>سجل الرسوم والسداد</h3><p>كل دفعة مسجلة على الأبناء مع الرصيد المحدث.</p></div><span>💳</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الطالب</th><th>رقم الإيصال</th><th>التاريخ</th><th>المبلغ</th><th>الحالة</th></tr></thead><tbody id="parentPaymentsRows"><tr><td colspan="5" class="students-empty">لا توجد دفعات.</td></tr></tbody></table></div></article>
       </section>
 
       <section class="module" id="certificates">
@@ -4559,6 +4560,166 @@
     return [...map.values()];
   };
 
+  let schoolFinanceLinksCache=[];
+  let schoolPaymentsCache=[];
+  let schoolPaymentVoidsCache=new Set();
+
+  const schoolPaymentRecords=rows=>(rows||[])
+    .filter(m=>String(m.subject||'').startsWith('[SCHOOL_PAYMENT]'))
+    .map(m=>({...mailPayload(m),_mail:m}))
+    .filter(x=>x?.payment_id&&Number(x.amount)>0);
+
+  const schoolPaymentVoidSet=rows=>new Set((rows||[])
+    .filter(m=>String(m.subject||'').startsWith('[SCHOOL_PAYMENT_VOID]'))
+    .map(m=>mailPayload(m))
+    .filter(Boolean)
+    .map(x=>String(x.payment_id)));
+
+  const financeForLink=link=>{
+    const due=Math.max(0,Number(link.fee||0)-Number(link.discount||0));
+    const extras=schoolPaymentsCache.filter(p=>
+      !schoolPaymentVoidsCache.has(String(p.payment_id)) &&
+      (
+        (link.student_id&&String(p.student_id||'')===String(link.student_id)) ||
+        (link.student_no&&String(p.student_no||'')===String(link.student_no))
+      )
+    );
+    const extraPaid=extras.reduce((s,p)=>s+Number(p.amount||0),0);
+    const initialPaid=Number(link.paid||0);
+    const paid=initialPaid+extraPaid;
+    return {due,paid,balance:Math.max(0,due-paid),payments:extras};
+  };
+
+  const renderSchoolFinance=()=>{
+    const studentSelect=document.getElementById('schoolPaymentStudent');
+    const rows=document.getElementById('schoolFinanceStudentsRows');
+    const paymentsRows=document.getElementById('schoolPaymentsRows');
+    if(!studentSelect||!rows||!paymentsRows)return;
+
+    let totalDue=0,totalPaid=0,totalBalance=0,debtors=0;
+    schoolFinanceLinksCache.forEach(l=>{
+      const f=financeForLink(l);totalDue+=f.due;totalPaid+=f.paid;totalBalance+=f.balance;if(f.balance>0.001)debtors++;
+    });
+    document.getElementById('schoolFinanceDue').textContent=totalDue.toFixed(2);
+    document.getElementById('schoolFinancePaid').textContent=totalPaid.toFixed(2);
+    document.getElementById('schoolFinanceBalance').textContent=totalBalance.toFixed(2);
+    document.getElementById('schoolFinanceDebtors').textContent=String(debtors);
+
+    studentSelect.innerHTML='<option value="">اختر الطالب</option>'+schoolFinanceLinksCache.map(l=>{
+      const f=financeForLink(l);
+      return `<option value="${escapeHtml(String(l.student_no||l.student_id||''))}">${escapeHtml(l.student_name||'طالب')} — متبقي ${f.balance.toFixed(2)}</option>`;
+    }).join('');
+
+    rows.innerHTML=schoolFinanceLinksCache.length?schoolFinanceLinksCache.map(l=>{
+      const f=financeForLink(l);
+      return `<tr>
+        <td><b>${escapeHtml(l.student_name||'طالب')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(l.student_no||'')}</span></td>
+        <td>${f.due.toFixed(2)}</td><td><b class="paid">${f.paid.toFixed(2)}</b></td>
+        <td><b class="${f.balance>0?'due':'paid'}">${f.balance.toFixed(2)}</b></td>
+        <td>${escapeHtml(l.parent_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(l.parent_phone||'')}</span></td>
+      </tr>`;
+    }).join(''):'<tr><td colspan="5" class="students-empty">لا توجد روابط مالية لطلاب مسجلين.</td></tr>';
+
+    const all=[...schoolPaymentsCache].sort((a,b)=>new Date(b.date||b._mail?.sent_at||0)-new Date(a.date||a._mail?.sent_at||0));
+    paymentsRows.innerHTML=all.length?all.map(p=>{
+      const voided=schoolPaymentVoidsCache.has(String(p.payment_id));
+      return `<tr class="${voided?'payment-void':''}">
+        <td><span class="receipt-code">${escapeHtml(p.receipt_no||p.payment_id)}</span></td>
+        <td>${escapeHtml(p.student_name||'—')}</td><td>${escapeHtml(p.date||'—')}</td>
+        <td>${escapeHtml(({cash:'نقدي',bank_transfer:'تحويل',card:'بطاقة',wallet:'محفظة',online:'أونلاين',other:'أخرى'}[p.method]||p.method||'—'))}</td>
+        <td><b>${Number(p.amount||0).toFixed(2)}</b></td>
+        <td><span class="status ${voided?'finance-status-void':'active'}">${voided?'ملغي':'معتمد'}</span></td>
+        <td>${voided?'—':`<button class="secondary-action void-school-payment" type="button" data-payment-id="${escapeHtml(p.payment_id)}" style="color:#b42318">إلغاء الدفعة</button>`}</td>
+      </tr>`;
+    }).join(''):'<tr><td colspan="7" class="students-empty">لا توجد دفعات مسجلة.</td></tr>';
+  };
+
+  const loadSchoolFinance=async()=>{
+    const msg=document.getElementById('schoolPaymentMsg');if(msg)msg.className='student-form-msg';
+    try{
+      const [inbox]=await Promise.all([structuredMail('inbox')]);
+      schoolFinanceLinksCache=latestStructuredBy(inbox,'PARENT_LINK_MASTER','student_no');
+      schoolPaymentsCache=schoolPaymentRecords(inbox);
+      schoolPaymentVoidsCache=schoolPaymentVoidSet(inbox);
+      renderSchoolFinance();
+      document.getElementById('schoolPaymentDate').value=document.getElementById('schoolPaymentDate').value||new Date().toISOString().slice(0,10);
+      document.getElementById('schoolPaymentStudentSummary').textContent='اختر طالبًا لعرض الرصيد.';
+    }catch(err){
+      document.getElementById('schoolFinanceStudentsRows').innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المالية')+'</td></tr>';
+    }
+  };
+
+  document.getElementById('refreshSchoolFinance')?.addEventListener('click',loadSchoolFinance);
+
+  document.getElementById('schoolPaymentStudent')?.addEventListener('change',e=>{
+    const key=e.target.value;
+    const l=schoolFinanceLinksCache.find(x=>String(x.student_no||x.student_id||'')===String(key));
+    const summary=document.getElementById('schoolPaymentStudentSummary');
+    if(!l){summary.textContent='اختر طالبًا لعرض الرصيد.';return}
+    const f=financeForLink(l);
+    summary.innerHTML='المستحق: <b>'+f.due.toFixed(2)+'</b> • المدفوع: <b class="paid">'+f.paid.toFixed(2)+'</b> • المتبقي: <b class="due">'+f.balance.toFixed(2)+'</b>';
+    document.getElementById('schoolPaymentAmount').value=f.balance>0?f.balance.toFixed(2):'';
+  });
+
+  const sendSchoolPaymentToManagement=async(prefix,id,payload)=>{
+    const ctx=await hydratePlatformContext();
+    const directory=await accountDirectorySafe();
+    const targets=new Set(directory.filter(a=>a.internal_email&&(
+      a.account_type==='admin'||(a.account_type==='staff'&&['academic_admin','finance_admin','secretary','reception'].includes(String(a.role||'')))
+    )).map(a=>a.internal_email));
+    if(ctx?.internal_email)targets.add(ctx.internal_email);
+    for(const email of targets){try{await sendStructuredMail(email,prefix,id,payload)}catch{}}
+  };
+
+  document.getElementById('schoolPaymentForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('schoolPaymentMsg');msg.className='student-form-msg';
+    const key=document.getElementById('schoolPaymentStudent').value;
+    const link=schoolFinanceLinksCache.find(x=>String(x.student_no||x.student_id||'')===String(key));
+    if(!link){msg.textContent='اختر الطالب.';msg.className='student-form-msg error show';return}
+    const amount=Number(document.getElementById('schoolPaymentAmount').value)||0;
+    const current=financeForLink(link);
+    if(amount<=0){msg.textContent='أدخل مبلغًا صحيحًا.';msg.className='student-form-msg error show';return}
+    if(amount>current.balance+0.001){msg.textContent='المبلغ أكبر من الرصيد المتبقي.';msg.className='student-form-msg error show';return}
+    const ctx=await hydratePlatformContext();
+    const payment={
+      payment_id:'PAY-'+Date.now().toString(36).toUpperCase(),
+      receipt_no:'ROV-RC-'+Date.now().toString(36).toUpperCase(),
+      student_id:link.student_id||null,student_no:link.student_no||null,student_name:link.student_name,
+      parent_name:link.parent_name,parent_internal_email:link.parent_internal_email||null,
+      student_internal_email:link.student_internal_email||null,
+      amount,
+      date:document.getElementById('schoolPaymentDate').value||new Date().toISOString().slice(0,10),
+      method:document.getElementById('schoolPaymentMethod').value,
+      note:document.getElementById('schoolPaymentNote').value.trim()||null,
+      recorded_by:ctx?.display_name||'ROVEN',
+      recorded_at:new Date().toISOString()
+    };
+    try{
+      await sendSchoolPaymentToManagement('SCHOOL_PAYMENT',payment.payment_id,payment);
+      if(payment.parent_internal_email)await sendStructuredMail(payment.parent_internal_email,'PARENT_PAYMENT',payment.payment_id,payment);
+      if(payment.student_internal_email)await sendStructuredMail(payment.student_internal_email,'STUDENT_PAYMENT',payment.payment_id,payment);
+      msg.textContent='تم تسجيل الدفعة وإرسال التحديث لولي الأمر. رقم الإيصال: '+payment.receipt_no;
+      msg.className='student-form-msg success show';
+      document.getElementById('schoolPaymentAmount').value='';document.getElementById('schoolPaymentNote').value='';
+      await loadSchoolFinance();
+    }catch(err){msg.textContent=err.message||'تعذر تسجيل الدفعة';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('schoolPaymentsRows')?.addEventListener('click',async e=>{
+    const btn=e.target.closest('.void-school-payment');if(!btn)return;
+    const p=schoolPaymentsCache.find(x=>String(x.payment_id)===String(btn.dataset.paymentId));if(!p)return;
+    if(!confirm('إلغاء هذه الدفعة؟ سيعود المبلغ إلى رصيد الطالب ويظهر الإلغاء لولي الأمر.'))return;
+    const ctx=await hydratePlatformContext();
+    const voidEvent={payment_id:p.payment_id,receipt_no:p.receipt_no,student_id:p.student_id,student_no:p.student_no,student_name:p.student_name,amount:p.amount,voided_by:ctx?.display_name||'ROVEN',voided_at:new Date().toISOString()};
+    try{
+      await sendSchoolPaymentToManagement('SCHOOL_PAYMENT_VOID',p.payment_id,voidEvent);
+      if(p.parent_internal_email)await sendStructuredMail(p.parent_internal_email,'PARENT_PAYMENT_VOID',p.payment_id,voidEvent);
+      if(p.student_internal_email)await sendStructuredMail(p.student_internal_email,'STUDENT_PAYMENT_VOID',p.payment_id,voidEvent);
+      await loadSchoolFinance();
+    }catch(err){alert(err.message||'تعذر إلغاء الدفعة')}
+  });
+
   const loadParentHub=async()=>{
     const ctx=await hydratePlatformContext();
     const box=document.getElementById('parentChildrenCards');
@@ -4573,9 +4734,20 @@
     const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
     const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
     const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
+    const parentPayments=latestStructuredBy(inbox,'PARENT_PAYMENT','payment_id');
+    const parentVoids=new Set(latestStructuredBy(inbox,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
 
+    const parentFinanceFor=x=>{
+      const due=Math.max(0,Number(x.fee||0)-Number(x.discount||0));
+      const extra=parentPayments.filter(p=>!parentVoids.has(String(p.payment_id))&&(
+        (x.student_id&&String(p.student_id||'')===String(x.student_id))||
+        (x.student_no&&String(p.student_no||'')===String(x.student_no))
+      )).reduce((s,p)=>s+Number(p.amount||0),0);
+      const paid=Number(x.paid||0)+extra;
+      return {due,paid,balance:Math.max(0,due-paid)};
+    };
     document.getElementById('parentChildrenCount').textContent=String(links.length);
-    document.getElementById('parentBalanceTotal').textContent=links.reduce((s,x)=>s+Number(x.balance||0),0).toFixed(2);
+    document.getElementById('parentBalanceTotal').textContent=links.reduce((s,x)=>s+parentFinanceFor(x).balance,0).toFixed(2);
     document.getElementById('parentCertificatesCount').textContent=String(certs.length);
     document.getElementById('parentResultsCount').textContent=String(results.length);
 
@@ -4583,17 +4755,25 @@
       const att=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
       const pts=points.filter(a=>String(a.student_id||a.student_name)===String(x.student_id||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
       const attLabel={present:'حاضر',absent:'غائب',late:'متأخر',excused:'بعذر',left_early:'غادر مبكرًا'}[att?.status]||'لا يوجد';
+      const fin=parentFinanceFor(x);
       return `<div class="feature">
         <b>👤 ${escapeHtml(x.student_name||'الطالب')}</b>
         <span>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — ')||'')}</span>
         <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <span>المدفوع: <b class="paid">${Number(x.paid||0).toFixed(2)}</b></span>
-          <span>المتبقي: <b class="due">${Number(x.balance||0).toFixed(2)}</b></span>
+          <span>المدفوع: <b class="paid">${fin.paid.toFixed(2)}</b></span>
+          <span>المتبقي: <b class="due">${fin.balance.toFixed(2)}</b></span>
           <span>آخر حضور: <b>${escapeHtml(attLabel)}</b></span>
           <span>النقاط: <b>${pts?Number(pts.balance||0):'—'}</b></span>
         </div>
       </div>`;
     }).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
+
+    const parentPaymentsRows=document.getElementById('parentPaymentsRows');
+    const sortedPayments=[...parentPayments].sort((a,b)=>new Date(b.date||b._mail?.sent_at||0)-new Date(a.date||a._mail?.sent_at||0));
+    parentPaymentsRows.innerHTML=sortedPayments.length?sortedPayments.map(p=>{
+      const voided=parentVoids.has(String(p.payment_id));
+      return `<tr class="${voided?'payment-void':''}"><td>${escapeHtml(p.student_name||'—')}</td><td><span class="receipt-code">${escapeHtml(p.receipt_no||p.payment_id)}</span></td><td>${escapeHtml(p.date||'—')}</td><td><b>${Number(p.amount||0).toFixed(2)}</b></td><td><span class="status ${voided?'finance-status-void':'active'}">${voided?'ملغي':'معتمد'}</span></td></tr>`;
+    }).join(''):'<tr><td colspan="5" class="students-empty">لا توجد دفعات مسجلة.</td></tr>';
 
     const certBox=document.getElementById('parentCertificatesList');
     certBox.innerHTML=certs.length?certs.map(c=>`<div class="certificate-list-item"><b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b><span>${escapeHtml(c.student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleDateString('ar-EG'))}</span><p style="font-size:11px;margin:6px 0 0">${escapeHtml(c.body||'')}</p></div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
@@ -5164,7 +5344,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -5428,7 +5608,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',
@@ -5572,7 +5752,7 @@
   const render=q=>{rows.innerHTML=students.filter(s=>!q||s.name.includes(q)||s.grade.includes(q)).map(s=>`<tr><td><div class="student-cell"><span class="mini-avatar">${s.name[0]}</span><b>${s.name}</b></div></td><td>${s.grade}</td><td>${s.attendance}</td><td><span class="${s.balance==='مسدد'?'paid':'due'}">${s.balance}</span></td><td><span class="status ${s.status==='نشط'?'':'watch'}">${s.status}</span></td></tr>`).join('')};
   render(''); document.getElementById('studentSearch').addEventListener('input',e=>render(e.target.value.trim()));
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='finance')loadSchoolFinance();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
