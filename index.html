@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1805" />
+  <meta name="roven-build" content="20260924-1815" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1069,9 +1069,12 @@
         <div class="private-credential-head"><div><span>بطاقة دخول الطالب</span><b id="privateCredentialStudentName">—</b></div><button class="secondary-action" id="copyPrivateStudentCredentials" type="button">نسخ البيانات</button></div>
         <div class="private-credential-grid">
           <div><span>اسم الطالب</span><b id="privateCredentialName">—</b></div>
+          <div><span>اسم المجموعة</span><b id="privateCredentialGroup">—</b></div>
+          <div><span>المادة</span><b id="privateCredentialSubject">—</b></div>
           <div><span>اسم المستخدم</span><b id="privateCredentialUsername" dir="ltr">—</b></div>
           <div><span>كلمة المرور</span><b id="privateCredentialPassword" dir="ltr">—</b></div>
         </div>
+        <div id="privateCredentialStatus" class="private-parent-credential" style="display:none"></div>
         <div id="privateParentCredentials" class="private-parent-credential" style="display:none"></div>
       </div>
       <div class="form-grid">
@@ -1554,7 +1557,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1805';
+  window.__ROVEN_BUILD__='20260924-1815';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3087,22 +3090,35 @@
   };
   const roomPricingText=value=>({monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'}[value]||value||'');
 
-  const renderPrivateCredentialCard=(result,name)=>{
+  const renderPrivateCredentialCard=(result,name,groupId)=>{
     const card=document.getElementById('privateStudentCredentialsCard');
-    if(!result||!result.student_username||!result.student_password){
-      card.style.display='none';privateCredentialCurrent=null;return;
-    }
+    const group=teacherRoomContractsCache.find(x=>String(x.group_id)===String(groupId||result?.group_id||''))
+      ||teacherHubGroupsCache.find(x=>String(x.group_id)===String(groupId||result?.group_id||''))
+      ||null;
+    const groupName=group?.group_name||group?.name||result?.group_name||'—';
+    const subject=group?.subject_name||group?.subject||result?.subject_name||result?.subject||'—';
+    const hasCredentials=Boolean(result?.student_username&&result?.student_password);
     privateCredentialCurrent={
-      name:name||result.full_name||'الطالب',
-      username:result.student_username,
-      password:result.student_password,
-      parent_username:result.parent_username||null,
-      parent_password:result.parent_password||null
+      name:name||result?.full_name||'الطالب',
+      group:groupName,
+      subject,
+      username:hasCredentials?result.student_username:null,
+      password:hasCredentials?result.student_password:null,
+      parent_username:result?.parent_username||null,
+      parent_password:result?.parent_password||null
     };
     document.getElementById('privateCredentialStudentName').textContent=privateCredentialCurrent.name;
     document.getElementById('privateCredentialName').textContent=privateCredentialCurrent.name;
-    document.getElementById('privateCredentialUsername').textContent=privateCredentialCurrent.username;
-    document.getElementById('privateCredentialPassword').textContent=privateCredentialCurrent.password;
+    document.getElementById('privateCredentialGroup').textContent=privateCredentialCurrent.group;
+    document.getElementById('privateCredentialSubject').textContent=privateCredentialCurrent.subject;
+    document.getElementById('privateCredentialUsername').textContent=privateCredentialCurrent.username||'لم يُنشأ الحساب بعد';
+    document.getElementById('privateCredentialPassword').textContent=privateCredentialCurrent.password||'—';
+    const copyBtn=document.getElementById('copyPrivateStudentCredentials');
+    copyBtn.disabled=!hasCredentials;
+    copyBtn.title=hasCredentials?'نسخ بيانات الدخول':'لم يتم إنشاء حساب دخول فعلي بعد';
+    const status=document.getElementById('privateCredentialStatus');
+    status.style.display=hasCredentials?'none':'';
+    status.innerHTML=hasCredentials?'':'<b>تنبيه</b><br>تم حفظ الطالب، لكن خدمة إنشاء حسابات الطلاب الخاصة لم تُنشئ اسم المستخدم وكلمة المرور بعد.';
     const parent=document.getElementById('privateParentCredentials');
     if(privateCredentialCurrent.parent_username){
       parent.style.display='';
@@ -3113,7 +3129,8 @@
 
   document.getElementById('copyPrivateStudentCredentials')?.addEventListener('click',async()=>{
     if(!privateCredentialCurrent)return;
-    let txt='ROVEN Online School\nاسم الطالب: '+privateCredentialCurrent.name+'\nاسم المستخدم: '+privateCredentialCurrent.username+'\nكلمة المرور: '+privateCredentialCurrent.password;
+    if(!privateCredentialCurrent.username||!privateCredentialCurrent.password){alert('لم يتم إنشاء حساب دخول فعلي لهذا الطالب بعد.');return}
+    let txt='ROVEN Online School\nاسم الطالب: '+privateCredentialCurrent.name+'\nاسم المجموعة: '+privateCredentialCurrent.group+'\nالمادة: '+privateCredentialCurrent.subject+'\nاسم المستخدم: '+privateCredentialCurrent.username+'\nكلمة المرور: '+privateCredentialCurrent.password;
     if(privateCredentialCurrent.parent_username){
       txt+='\n\nحساب ولي الأمر\nاسم المستخدم: '+privateCredentialCurrent.parent_username+'\nكلمة المرور: '+(privateCredentialCurrent.parent_password||'');
     }
@@ -3188,7 +3205,7 @@
         p_notes:document.getElementById('privateStudentNotes').value.trim()||null
       })});
       if(!id){
-        renderPrivateCredentialCard(result,name);
+        renderPrivateCredentialCard(result,name,groupId);
         msg.textContent='تم إنشاء الطالب وحساب الدخول. بطاقة البيانات جاهزة للنسخ.';
       }else msg.textContent='تم تحديث بيانات الطالب.';
       msg.className='student-form-msg success show';
@@ -3220,7 +3237,7 @@
           await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',fallbackId,record);
           msg.textContent=id?'تم تحديث بيانات الطالب الخاص.':'تم حفظ الطالب الخاص بنجاح.';
           msg.className='student-form-msg success show';
-          renderPrivateCredentialCard(null,name);
+          renderPrivateCredentialCard(null,name,groupId);
           if(typeof loadTeacherHub==='function')await loadTeacherHub();
           return;
         }catch(fallbackErr){
