@@ -1720,6 +1720,7 @@
 
   };
 
+  let auditRpcAction=null;
   const dataApiFetch=async(path,options={})=>{
     if(path.startsWith('/rpc/')){
       const action=path.slice('/rpc/'.length).split('?')[0];
@@ -1727,7 +1728,11 @@
       if(options.body){
         try{payload=typeof options.body==='string'?JSON.parse(options.body):options.body}catch{payload={}}
       }
-      return callRovenRpc(action,payload);
+      const result=await callRovenRpc(action,payload);
+      if(auditRpcAction){
+        try{await auditRpcAction(action,payload,result)}catch{}
+      }
+      return result;
     }
 
     const parsed=new URL(path,'https://roven.local');
@@ -2530,7 +2535,9 @@
     const ctx=await hydratePlatformContext();
     if(type==='account'&&String(id)===String(ctx?.account_id||'')&&!active)throw new Error('cannot_disable_current_account');
     try{
-      return await dataApiFetch('/rpc/admin_entity_set_active',{method:'POST',body:JSON.stringify({p_type:type,p_id:id,p_active:active})});
+      const r=await dataApiFetch('/rpc/admin_entity_set_active',{method:'POST',body:JSON.stringify({p_type:type,p_id:id,p_active:active})});
+      await recordAudit('status',active?'تفعيل':'إيقاف',type,id,label,{active});
+      return r;
     }catch(err){
       if(!active&&isUnknownAdminAction(err))return await dataApiFetch('/rpc/archive_school_entity',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
       throw err;
@@ -2541,7 +2548,9 @@
     const ctx=await hydratePlatformContext();
     if(type==='account'&&String(id)===String(ctx?.account_id||''))throw new Error('cannot_delete_current_account');
     try{
-      return await dataApiFetch('/rpc/admin_entity_delete',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
+      const r=await dataApiFetch('/rpc/admin_entity_delete',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
+      await recordAudit('delete','حذف منطقي',type,id,label,{soft_delete:true});
+      return r;
     }catch(err){
       if(isUnknownAdminAction(err))return await dataApiFetch('/rpc/archive_school_entity',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
       throw err;
@@ -2569,6 +2578,7 @@
         <td>${escapeHtml(s.joined_on||'—')}</td>
         <td><span class="status ${s.status==='active'&&s.account_active!==false?'active':'watch'}">${s.status==='active'&&s.account_active!==false?'نشط':'غير نشط'}</span></td>
         <td><div class="admin-row-actions">
+          <button class="secondary-action student-360-btn" type="button" data-id="${escapeHtml(s.student_id)}" data-name="${escapeHtml(s.full_name||'الطالب')}">360°</button>
           <button class="secondary-action edit-student-btn" type="button" data-id="${escapeHtml(s.student_id)}">تعديل</button>
           <button class="secondary-action student-state-btn ${s.status==='active'&&s.account_active!==false?'inactive-action':'activate-action'}" type="button" data-id="${escapeHtml(s.student_id)}" data-active="${s.status==='active'&&s.account_active!==false?'1':'0'}">${s.status==='active'&&s.account_active!==false?'إيقاف':'تفعيل'}</button>
           <button class="secondary-action danger-action delete-student-btn" type="button" data-id="${escapeHtml(s.student_id)}" data-name="${escapeHtml(s.full_name||'الطالب')}">حذف</button>
@@ -2684,6 +2694,8 @@
   };
 
   document.getElementById('registeredStudentsRows').addEventListener('click',async e=>{
+    const profile=e.target.closest('.student-360-btn');
+    if(profile){openStudent360(profile.dataset.id,profile.dataset.name);return}
     const edit=e.target.closest('.edit-student-btn');
     if(edit){openEditStudent(edit.dataset.id);return}
     const state=e.target.closest('.student-state-btn');
@@ -3471,6 +3483,366 @@
       p_recipient:recipient,p_subject:'['+prefix+'] '+String(id||Date.now()),p_body:JSON.stringify(payload||{})
     })});
   };
+
+  // ===== Shared schedule parser =====
+  const parseScheduleSessions=value=>{
+    if(!value)return [];
+    let data=value;
+    if(typeof data==='string'){try{data=JSON.parse(data)}catch{return []}}
+    if(Array.isArray(data))return data.filter(Boolean);
+    if(Array.isArray(data?.sessions))return data.sessions.filter(Boolean);
+    if(Array.isArray(data?.schedule))return data.schedule.filter(Boolean);
+    return [];
+  };
+  const weekDayLabels={sunday:'الأحد',monday:'الاثنين',tuesday:'الثلاثاء',wednesday:'الأربعاء',thursday:'الخميس',friday:'الجمعة',saturday:'السبت'};
+  const weekDayOrder=['saturday','sunday','monday','tuesday','wednesday','thursday','friday'];
+
+  // ===== Audit log =====
+  let auditCache=[];
+  let auditBusy=false;
+  const auditActionMeta=action=>{
+    const map={
+      register_new_student:['create','إنشاء طالب'],update_student_admin:['update','تعديل طالب'],
+      register_new_teacher:['create','إنشاء معلم'],create_study_group_admin:['create','إنشاء مجموعة'],
+      platform_save_attendance:['attendance','حفظ حضور'],platform_issue_points:['academic','إضافة/خصم نقاط'],
+      platform_reward_create_admin:['academic','إنشاء مكافأة'],platform_reward_update_status:['academic','تحديث طلب مكافأة'],
+      platform_set_group_meeting:['update','تعديل رابط القاعة'],platform_update_profile:['update','تعديل الحساب'],
+      teacher_assistant_create:['create','إنشاء مساعد معلم'],teacher_assistant_update:['update','تعديل مساعد معلم'],
+      teacher_assistant_delete:['delete','إلغاء مساعد معلم'],create_system_user_admin:['create','إنشاء مستخدم']
+    };
+    if(map[action])return map[action];
+    if(action==='admin_entity_set_active')return ['status','تفعيل/إيقاف حساب أو عنصر'];
+    if(action==='admin_entity_delete')return ['delete','حذف منطقي'];
+    return null;
+  };
+  const resolveAuditManager=async()=>{
+    try{
+      const ctx=await hydratePlatformContext();
+      if(ctx?.account_type==='admin'&&ctx?.internal_email)return ctx.internal_email;
+      const d=await callRovenRpc('platform_list_directory',{});
+      const rows=Array.isArray(d)?d:[];
+      const manager=rows.find(x=>x.internal_email&&x.account_type==='admin'&&['super_admin','school_manager'].includes(String(x.role||'')))
+        ||rows.find(x=>x.internal_email&&x.account_type==='admin');
+      return manager?.internal_email||ctx?.internal_email||null;
+    }catch{return currentPlatformAccount?.internal_email||null}
+  };
+  const recordAudit=async(type,action,entityType,entityId,label,details={})=>{
+    if(auditBusy)return;
+    auditBusy=true;
+    try{
+      const ctx=await hydratePlatformContext();
+      if(!ctx?.account_id)return;
+      const target=await resolveAuditManager();
+      if(!target)return;
+      const event={
+        audit_id:'AUD-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase(),
+        type,action,entity_type:entityType||null,entity_id:entityId||null,label:label||null,
+        actor_id:ctx.account_id,actor_name:ctx.display_name||ctx.full_name||'مستخدم ROVEN',
+        actor_type:ctx.account_type||null,role:ctx.role||null,
+        details,created_at:new Date().toISOString()
+      };
+      await callRovenRpc('platform_mail_send',{p_recipient:target,p_subject:'[AUDIT_LOG] '+event.audit_id,p_body:JSON.stringify(event)});
+      if(ctx.internal_email&&ctx.internal_email!==target){
+        try{await callRovenRpc('platform_mail_send',{p_recipient:ctx.internal_email,p_subject:'[AUDIT_SELF] '+event.audit_id,p_body:JSON.stringify(event)})}catch{}
+      }
+    }finally{auditBusy=false}
+  };
+  auditRpcAction=async(action,payload,result)=>{
+    if(auditBusy||['platform_mail_send','platform_mail_list','platform_mail_mark_read','platform_my_profile'].includes(action))return;
+    const meta=auditActionMeta(action);if(!meta)return;
+    const id=result?.student_id||result?.teacher_id||result?.group_id||result?.account_id||payload?.p_id||payload?.p_student_id||payload?.p_group_id||null;
+    const entity=action.includes('student')?'student':action.includes('teacher')?'teacher':action.includes('group')?'group':action.includes('attendance')?'attendance':action.includes('points')?'points':'system';
+    await recordAudit(meta[0],meta[1],entity,id,null,{action,payload:{...payload,p_password:payload?.p_password?'***':undefined}});
+  };
+  const renderAuditLog=()=>{
+    const tbody=document.getElementById('auditRows');if(!tbody)return;
+    const q=String(document.getElementById('auditSearch')?.value||'').trim().toLowerCase();
+    const type=document.getElementById('auditType')?.value||'';
+    const rows=auditCache.filter(x=>(!type||x.type===type)&&(!q||[x.actor_name,x.action,x.entity_type,x.label,JSON.stringify(x.details||{})].join(' ').toLowerCase().includes(q)));
+    tbody.innerHTML=rows.length?rows.map(x=>`<tr><td>${escapeHtml(new Date(x.created_at).toLocaleString('ar-EG'))}</td><td><b>${escapeHtml(x.actor_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(x.role||x.actor_type||'')}</span></td><td><span class="status active">${escapeHtml(x.action||x.type||'عملية')}</span></td><td>${escapeHtml([x.entity_type,x.label].filter(Boolean).join(' • ')||'—')}</td><td class="audit-detail">${escapeHtml(JSON.stringify(x.details||{}))}</td></tr>`).join(''):'<tr><td colspan="5" class="students-empty">لا توجد عمليات مطابقة.</td></tr>';
+  };
+  const loadAuditLog=async()=>{
+    const tbody=document.getElementById('auditRows');if(!tbody)return;
+    tbody.innerHTML='<tr><td colspan="5" class="students-empty">جارٍ تحميل سجل العمليات...</td></tr>';
+    try{
+      const ctx=await hydratePlatformContext();
+      if(ctx?.account_type!=='admin'){tbody.innerHTML='<tr><td colspan="5" class="students-empty">سجل العمليات متاح لمدير النظام فقط.</td></tr>';return}
+      const inbox=await structuredMail('inbox');
+      auditCache=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+      renderAuditLog();
+    }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل سجل العمليات')+'</td></tr>'}
+  };
+  document.getElementById('refreshAuditLog')?.addEventListener('click',loadAuditLog);
+  document.getElementById('auditSearch')?.addEventListener('input',renderAuditLog);
+  document.getElementById('auditType')?.addEventListener('change',renderAuditLog);
+
+  // ===== Homework =====
+  let homeworkAssignmentsCache=[],homeworkSubmissionsCache=[],activeHomeworkSubmit=null;
+  const readHomeworkFile=file=>new Promise((resolve,reject)=>{
+    if(!file){resolve({name:null,mime:null,base64:null});return}
+    if(file.size>1024*1024){reject(new Error('حجم الملف يجب ألا يتجاوز 1 MB.'));return}
+    const r=new FileReader();r.onload=()=>resolve({name:file.name,mime:file.type||'application/octet-stream',base64:String(r.result||'').split(',')[1]||''});r.onerror=()=>reject(new Error('تعذر قراءة الملف'));r.readAsDataURL(file);
+  });
+  const homeworkStatusLabel=x=>({assigned:'مطلوب',submitted:'تم التسليم',graded:'تم التصحيح',late:'متأخر'}[x]||x||'مطلوب');
+
+  const loadHomework=async()=>{
+    const ctx=await hydratePlatformContext();
+    const teacherArea=document.getElementById('homeworkTeacherArea'),studentArea=document.getElementById('homeworkStudentArea'),parentArea=document.getElementById('homeworkParentArea');
+    const type=String(ctx?.account_type||'');
+    const canCreate=['teacher','admin','staff'].includes(type);
+    teacherArea.style.display=canCreate?'':'none';
+    studentArea.style.display=['student','private_student'].includes(type)?'':'none';
+    parentArea.style.display=['parent','private_parent'].includes(type)?'':'none';
+
+    const inbox=await structuredMail('inbox'),sent=await structuredMail('sent');
+
+    if(canCreate){
+      let groups=[];
+      try{groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'})}catch{}
+      document.getElementById('homeworkGroup').innerHTML='<option value="">اختر المجموعة</option>'+((groups||[]).map(g=>`<option value="${escapeHtml(g.group_id)}">${escapeHtml(g.group_name||'مجموعة')} — ${escapeHtml(g.subject_name||'')}</option>`).join(''));
+      homeworkAssignmentsCache=latestStructuredBy(sent,'HOMEWORK_DEF','homework_id').sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+      homeworkSubmissionsCache=latestStructuredBy(inbox,'HOMEWORK_SUBMISSION','submission_id').sort((a,b)=>new Date(b.submitted_at||0)-new Date(a.submitted_at||0));
+      const graded=latestStructuredBy(sent,'HOMEWORK_GRADED','submission_id');
+      const gradedMap=new Map(graded.map(x=>[String(x.submission_id),x]));
+      const owned=document.getElementById('homeworkOwnedList');
+      owned.innerHTML=homeworkAssignmentsCache.length?homeworkAssignmentsCache.map(a=>{
+        const subs=homeworkSubmissionsCache.filter(x=>String(x.homework_id)===String(a.homework_id));
+        const gradedCount=subs.filter(x=>gradedMap.has(String(x.submission_id))).length;
+        return `<div class="homework-card"><div class="homework-card-head"><div><b>${escapeHtml(a.title)}</b><div class="homework-meta">${escapeHtml(a.group_name||'')} • آخر تسليم ${a.due_at?escapeHtml(new Date(a.due_at).toLocaleString('ar-EG')):'مفتوح'} • الدرجة ${Number(a.max_score||0)}</div></div><span class="status active">${subs.length} تسليم</span></div><div class="homework-meta">تم تصحيح ${gradedCount} من ${subs.length}</div></div>`;
+      }).join(''):'<div class="students-empty">لا توجد واجبات منشورة.</div>';
+
+      const tbody=document.getElementById('homeworkSubmissionsRows');
+      tbody.innerHTML=homeworkSubmissionsCache.length?homeworkSubmissionsCache.map(sub=>{
+        const grade=gradedMap.get(String(sub.submission_id));
+        return `<tr><td>${escapeHtml(sub.homework_title||'واجب')}</td><td><b>${escapeHtml(sub.student_name||'طالب')}</b></td><td>${escapeHtml((sub.body||'').slice(0,100)||'—')}${sub.attachment_name?'<br>'+attachmentLink(sub.attachment_name,sub.attachment_mime,sub.attachment_base64):''}</td><td>${escapeHtml(new Date(sub.submitted_at).toLocaleString('ar-EG'))}</td><td>${grade?'<b>'+Number(grade.score||0)+' / '+Number(grade.max_score||0)+'</b>':'بانتظار التصحيح'}</td><td>${grade?'<span class="status active">تم التصحيح</span>':`<button class="primary-action grade-homework-btn" type="button" data-submission-id="${escapeHtml(sub.submission_id)}">تصحيح</button>`}</td></tr>`;
+      }).join(''):'<tr><td colspan="6" class="students-empty">لا توجد تسليمات.</td></tr>';
+    }
+
+    if(['student','private_student'].includes(type)){
+      await forwardStudentArtifactsToParent(inbox).catch(()=>{});
+      const assignments=latestStructuredBy(inbox,'HOMEWORK_ASSIGN','homework_id').sort((a,b)=>new Date(a.due_at||'2999-12-31')-new Date(b.due_at||'2999-12-31'));
+      const submissions=latestStructuredBy(sent,'HOMEWORK_SUBMISSION','submission_id');
+      const grades=latestStructuredBy(inbox,'HOMEWORK_GRADED','submission_id');
+      const subByHw=new Map();submissions.forEach(x=>subByHw.set(String(x.homework_id),x));
+      const gradeBySub=new Map(grades.map(x=>[String(x.submission_id),x]));
+      document.getElementById('studentHomeworkList').innerHTML=assignments.length?assignments.map(a=>{
+        const sub=subByHw.get(String(a.homework_id)),grade=sub?gradeBySub.get(String(sub.submission_id)):null;
+        const overdue=a.due_at&&new Date(a.due_at)<new Date()&&!sub;
+        return `<div class="homework-card"><div class="homework-card-head"><div><b>${escapeHtml(a.title)}</b><div class="homework-meta">${escapeHtml(a.group_name||'')} • آخر موعد: ${a.due_at?escapeHtml(new Date(a.due_at).toLocaleString('ar-EG')):'مفتوح'}</div></div><span class="status ${overdue?'watch':'active'}">${grade?'تم التصحيح':sub?'تم التسليم':overdue?'متأخر':'مطلوب'}</span></div><p>${escapeHtml(a.instructions||'')}</p>${a.resource_url?`<div><a href="${escapeHtml(a.resource_url)}" target="_blank" rel="noopener">فتح المرجع</a></div>`:''}<div class="homework-actions">${grade?`<b>الدرجة: ${Number(grade.score||0)} / ${Number(grade.max_score||a.max_score||0)}</b><span>${escapeHtml(grade.feedback||'')}</span>`:sub?'<span>تم إرسال إجابتك.</span>':`<button class="primary-action submit-homework-btn" type="button" data-homework-id="${escapeHtml(a.homework_id)}">تسليم الواجب</button>`}</div></div>`;
+      }).join(''):'<div class="students-empty">لا توجد واجبات حالية.</div>';
+    }
+
+    if(['parent','private_parent'].includes(type)){
+      const grades=latestStructuredBy(inbox,'HOMEWORK_PARENT','submission_id').sort((a,b)=>new Date(b.graded_at||0)-new Date(a.graded_at||0));
+      document.getElementById('parentHomeworkList').innerHTML=grades.length?grades.map(g=>`<div class="homework-card"><div class="homework-card-head"><div><b>${escapeHtml(g.student_name||'الطالب')} — ${escapeHtml(g.homework_title||'واجب')}</b><div class="homework-meta">${escapeHtml(g.group_name||'')} • ${g.graded_at?escapeHtml(new Date(g.graded_at).toLocaleString('ar-EG')):''}</div></div><b>${Number(g.score||0)} / ${Number(g.max_score||0)}</b></div><div class="homework-meta">${escapeHtml(g.feedback||'بدون تعليق')}</div></div>`).join(''):'<div class="students-empty">لا توجد نتائج واجبات بعد.</div>';
+    }
+  };
+
+  document.getElementById('refreshHomework')?.addEventListener('click',loadHomework);
+  document.getElementById('createHomeworkBtn')?.addEventListener('click',async()=>{
+    const msg=document.getElementById('homeworkCreateMsg');msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext();
+    const title=document.getElementById('homeworkTitle').value.trim(),groupId=document.getElementById('homeworkGroup').value;
+    if(!title||!groupId){msg.textContent='اكتب عنوان الواجب واختر المجموعة.';msg.className='student-form-msg error show';return}
+    const select=document.getElementById('homeworkGroup'),groupName=select.selectedOptions[0]?.textContent||'المجموعة';
+    const hw={
+      homework_id:'HW-'+Date.now().toString(36).toUpperCase(),title,group_id:groupId,group_name:groupName,
+      instructions:document.getElementById('homeworkInstructions').value.trim()||null,
+      due_at:document.getElementById('homeworkDueAt').value?new Date(document.getElementById('homeworkDueAt').value).toISOString():null,
+      max_score:Number(document.getElementById('homeworkMaxScore').value)||0,
+      resource_url:document.getElementById('homeworkResourceUrl').value.trim()||null,
+      owner_account_id:ctx.account_id,owner_name:ctx.display_name,owner_email:ctx.internal_email,created_at:new Date().toISOString()
+    };
+    try{
+      const [roster,directory]=await Promise.all([
+        dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})}),
+        accountDirectorySafe()
+      ]);
+      const students=Array.isArray(roster)?roster:[];
+      let sentCount=0;
+      for(const st of students){
+        const acct=directory.find(a=>a.account_type==='student'&&(
+          (a.student_id&&String(a.student_id)===String(st.student_id))||
+          (a.username&&String(a.username)===String(st.student_no))||
+          String(a.display_name||'')===String(st.student_name||'')
+        ));
+        if(!acct?.internal_email)continue;
+        await sendStructuredMail(acct.internal_email,'HOMEWORK_ASSIGN',hw.homework_id,{...hw,student_id:st.student_id,student_no:st.student_no,student_name:st.student_name});
+        sentCount++;
+      }
+      if(ctx.internal_email)await sendStructuredMail(ctx.internal_email,'HOMEWORK_DEF',hw.homework_id,{...hw,assigned_count:sentCount});
+      await recordAudit('academic','نشر واجب','homework',hw.homework_id,hw.title,{group_id:groupId,students:sentCount});
+      msg.textContent='تم نشر الواجب وإرساله إلى '+sentCount+' طالب.';msg.className='student-form-msg success show';
+      document.getElementById('homeworkTitle').value='';document.getElementById('homeworkInstructions').value='';document.getElementById('homeworkResourceUrl').value='';
+      await loadHomework();
+    }catch(err){msg.textContent=err.message||'تعذر نشر الواجب';msg.className='student-form-msg error show'}
+  });
+
+  const homeworkModal=document.getElementById('homeworkSubmitModal');
+  const closeHomeworkSubmit=()=>{homeworkModal.classList.remove('show');homeworkModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeHomeworkSubmit')?.addEventListener('click',closeHomeworkSubmit);
+  document.getElementById('cancelHomeworkSubmit')?.addEventListener('click',closeHomeworkSubmit);
+  homeworkModal?.addEventListener('click',e=>{if(e.target===homeworkModal)closeHomeworkSubmit()});
+  document.getElementById('studentHomeworkList')?.addEventListener('click',e=>{
+    const btn=e.target.closest('.submit-homework-btn');if(!btn)return;
+    activeHomeworkSubmit=btn.dataset.homeworkId;document.getElementById('homeworkSubmitId').value=activeHomeworkSubmit;
+    document.getElementById('homeworkSubmitBody').value='';document.getElementById('homeworkSubmitFile').value='';
+    homeworkModal.classList.add('show');homeworkModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+  });
+  document.getElementById('saveHomeworkSubmission')?.addEventListener('click',async()=>{
+    const msg=document.getElementById('homeworkSubmitMsg');msg.className='student-form-msg';
+    const ctx=await hydratePlatformContext(),inbox=await structuredMail('inbox');
+    const assignment=latestStructuredBy(inbox,'HOMEWORK_ASSIGN','homework_id').find(x=>String(x.homework_id)===String(activeHomeworkSubmit));
+    if(!assignment){msg.textContent='تعذر العثور على الواجب.';msg.className='student-form-msg error show';return}
+    try{
+      const file=await readHomeworkFile(document.getElementById('homeworkSubmitFile').files?.[0]);
+      const sub={
+        submission_id:'HWS-'+Date.now().toString(36).toUpperCase(),homework_id:assignment.homework_id,homework_title:assignment.title,
+        group_id:assignment.group_id,group_name:assignment.group_name,student_id:ctx.student_id||null,student_name:ctx.display_name||assignment.student_name||'طالب',
+        student_email:ctx.internal_email,body:document.getElementById('homeworkSubmitBody').value.trim()||null,
+        attachment_name:file.name,attachment_mime:file.mime,attachment_base64:file.base64,
+        owner_email:assignment.owner_email,max_score:assignment.max_score,submitted_at:new Date().toISOString()
+      };
+      await sendStructuredMail(assignment.owner_email,'HOMEWORK_SUBMISSION',sub.submission_id,sub);
+      await sendStructuredMail(ctx.internal_email,'HOMEWORK_SUBMISSION',sub.submission_id,sub);
+      await recordAudit('academic','تسليم واجب','homework_submission',sub.submission_id,assignment.title,{homework_id:assignment.homework_id});
+      msg.textContent='تم تسليم الواجب بنجاح.';msg.className='student-form-msg success show';
+      setTimeout(async()=>{closeHomeworkSubmit();await loadHomework()},500);
+    }catch(err){msg.textContent=err.message||'تعذر تسليم الواجب';msg.className='student-form-msg error show'}
+  });
+
+  document.getElementById('homeworkSubmissionsRows')?.addEventListener('click',async e=>{
+    const btn=e.target.closest('.grade-homework-btn');if(!btn)return;
+    const sub=homeworkSubmissionsCache.find(x=>String(x.submission_id)===String(btn.dataset.submissionId));if(!sub)return;
+    const scoreRaw=prompt('أدخل درجة الطالب من '+Number(sub.max_score||0),String(sub.max_score||0));if(scoreRaw===null)return;
+    const score=Math.max(0,Math.min(Number(sub.max_score||0),Number(scoreRaw)||0));
+    const feedback=prompt('تعليق المعلم على الواجب (اختياري)','')||'';
+    const ctx=await hydratePlatformContext();
+    const grade={...sub,score,max_score:Number(sub.max_score||0),feedback,grader_name:ctx.display_name,graded_at:new Date().toISOString()};
+    try{
+      await sendStructuredMail(sub.student_email,'HOMEWORK_GRADED',sub.submission_id,grade);
+      if(ctx.internal_email)await sendStructuredMail(ctx.internal_email,'HOMEWORK_GRADED',sub.submission_id,grade);
+      await recordAudit('academic','تصحيح واجب','homework_submission',sub.submission_id,sub.student_name,{score,max_score:grade.max_score});
+      await loadHomework();
+    }catch(err){alert(err.message||'تعذر حفظ الدرجة')}
+  });
+
+  // ===== Advanced schedule =====
+  const zonedDateFromLocal=(dateStr,timeStr,zone='Africa/Cairo')=>{
+    const [y,m,d]=dateStr.split('-').map(Number),[hh,mm]=String(timeStr||'00:00').split(':').map(Number);
+    const desired=Date.UTC(y,m-1,d,hh||0,mm||0,0);
+    const fmt=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+    const offsetAt=ts=>{const parts=Object.fromEntries(fmt.formatToParts(new Date(ts)).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));return Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute)-ts};
+    let ts=desired-offsetAt(desired);ts=desired-offsetAt(ts);return new Date(ts);
+  };
+  const dayDateForKey=(base,key)=>{
+    const jsDay={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6}[key]??0;
+    const d=new Date(base);const diff=(jsDay-d.getDay()+7)%7;d.setDate(d.getDate()+diff);return d;
+  };
+  const loadAdvancedSchedule=async()=>{
+    const board=document.getElementById('weeklyScheduleBoard');if(!board)return;
+    board.innerHTML='<div class="students-empty">جارٍ تحميل الجدول...</div>';
+    try{
+      const groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+      const zoneSel=document.getElementById('scheduleTimezone').value;
+      const targetZone=zoneSel==='local'?Intl.DateTimeFormat().resolvedOptions().timeZone:zoneSel;
+      const now=new Date(),lessons=[];
+      (Array.isArray(groups)?groups:[]).forEach(g=>parseScheduleSessions(g.schedule_json).forEach(sess=>{
+        const key=String(sess.day||'').toLowerCase();if(!weekDayLabels[key]||!sess.time)return;
+        const date=dayDateForKey(now,key),dateStr=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
+        const instant=zonedDateFromLocal(dateStr,String(sess.time),'Africa/Cairo');
+        const displayTime=new Intl.DateTimeFormat('ar-EG',{timeZone:targetZone,hour:'2-digit',minute:'2-digit'}).format(instant);
+        lessons.push({day:key,instant,time:displayTime,duration:Number(sess.duration||60),group:g});
+      }));
+      const todayKey=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
+      document.getElementById('scheduleTodayCount').textContent=String(lessons.filter(x=>x.day===todayKey).length);
+      document.getElementById('scheduleTodayLabel').textContent='بتوقيت '+targetZone;
+      document.getElementById('scheduleWeekCount').textContent=String(lessons.length);
+      const future=lessons.filter(x=>x.instant>=now).sort((a,b)=>a.instant-b.instant)[0];
+      document.getElementById('scheduleNextValue').textContent=future?future.time:'—';
+      document.getElementById('scheduleNextSub').textContent=future?((future.group.subject_name||future.group.group_name||'حصة')+' • '+weekDayLabels[future.day]):'لا توجد حصة قادمة هذا الأسبوع';
+      board.className='week-board';
+      board.innerHTML=weekDayOrder.map(day=>{
+        const rows=lessons.filter(x=>x.day===day).sort((a,b)=>a.instant-b.instant);
+        return `<div class="week-day"><h4>${weekDayLabels[day]}</h4>${rows.length?rows.map(x=>`<div class="week-lesson"><b>${escapeHtml(x.group.subject_name||x.group.group_name||'حصة')}</b><div>${escapeHtml(x.time)} • ${x.duration} د</div><div>${escapeHtml([x.group.group_name,x.group.teacher_name].filter(Boolean).join(' • '))}</div>${x.group.meeting_url?`<div style="margin-top:5px"><a href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener">دخول القاعة</a></div>`:''}</div>`).join(''):'<div class="students-empty" style="padding:10px">لا توجد حصص</div>'}</div>`;
+      }).join('');
+    }catch(err){board.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الجدول')+'</div>'}
+  };
+  document.getElementById('refreshSchedule')?.addEventListener('click',loadAdvancedSchedule);
+  document.getElementById('scheduleTimezone')?.addEventListener('change',loadAdvancedSchedule);
+
+  // ===== Student 360 =====
+  const student360Modal=document.getElementById('student360Modal');
+  const closeStudent360=()=>{student360Modal.classList.remove('show');student360Modal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  document.getElementById('closeStudent360')?.addEventListener('click',closeStudent360);
+  student360Modal?.addEventListener('click',e=>{if(e.target===student360Modal)closeStudent360()});
+  const openStudent360=async(studentId,studentName='الطالب')=>{
+    student360Modal.classList.add('show');student360Modal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+    document.getElementById('student360Title').textContent='ملف 360° — '+studentName;
+    const box=document.getElementById('student360Content');box.innerHTML='<div class="students-empty">جارٍ تجميع بيانات الطالب...</div>';
+    try{
+      const [students,inbox,groups]=await Promise.all([
+        adminListWithFallback('admin_students_all','list_students_admin').catch(()=>[]),
+        structuredMail('inbox'),
+        dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}).catch(()=>[])
+      ]);
+      const st=(students||[]).find(x=>String(x.student_id)===String(studentId))||{student_id:studentId,full_name:studentName};
+      const links=latestStructuredBy(inbox,'PARENT_LINK_MASTER','student_no');
+      const link=links.find(x=>String(x.student_id||'')===String(studentId)||String(x.student_no||'')===String(st.student_no||''));
+      schoolFinanceLinksCache=links;schoolPaymentsCache=schoolPaymentRecords(inbox);schoolPaymentVoidsCache=schoolPaymentVoidSet(inbox);
+      const fin=link?financeForLink(link):{due:0,paid:0,balance:0,payments:[]};
+
+      const memberGroups=[];
+      for(const g of (groups||[]).slice(0,60)){
+        try{
+          const roster=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:g.group_id,p_on_date:new Date().toISOString().slice(0,10)})});
+          if((roster||[]).some(x=>String(x.student_id)===String(studentId)))memberGroups.push(g);
+        }catch{}
+      }
+      const attendance=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').filter(x=>x.type==='attendance'&&String(x.details?.payload?.p_records||'').includes(String(studentId))).slice(0,15);
+      const audit=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').filter(x=>String(x.entity_id||'')===String(studentId)||String(JSON.stringify(x.details||{})).includes(String(studentId))).slice(0,20);
+      box.innerHTML=`
+        <div class="student360-grid">
+          <div class="student360-card"><b>👤 الطالب</b><span>${escapeHtml(st.full_name||studentName)}<br>${escapeHtml(st.student_no||st.account_code||'')}</span></div>
+          <div class="student360-card"><b>🎓 الصف</b><span>${escapeHtml(st.grade_name||link?.grade||'—')}</span></div>
+          <div class="student360-card"><b>💳 الحالة المالية</b><span>المستحق ${fin.due.toFixed(2)}<br>المدفوع ${fin.paid.toFixed(2)}<br>المتبقي ${fin.balance.toFixed(2)}</span></div>
+          <div class="student360-card"><b>👨‍👩‍👧 ولي الأمر</b><span>${escapeHtml(link?.parent_name||'—')}<br>${escapeHtml(link?.parent_phone||'')}</span></div>
+        </div>
+        <div class="student360-section"><h4>المجموعات والقاعات</h4>${memberGroups.length?memberGroups.map(g=>`<span class="schedule-chip">${escapeHtml(g.group_name||'مجموعة')} • ${escapeHtml(g.subject_name||'')}</span>`).join(''):'<div class="students-empty">لا توجد مجموعات مرتبطة ظاهرة حاليًا.</div>'}</div>
+        <div class="student360-section"><h4>السداد</h4>${fin.payments?.length?fin.payments.slice(0,10).map(p=>`<div class="homework-meta">${escapeHtml(p.date||'')} — ${Number(p.amount||0).toFixed(2)} — ${escapeHtml(p.receipt_no||'')}</div>`).join(''):'<div class="students-empty">لا توجد دفعات إضافية.</div>'}</div>
+        <div class="student360-section"><h4>آخر المتابعات المسجلة</h4>${audit.length?audit.map(x=>`<div class="homework-meta"><b>${escapeHtml(x.action||x.type)}</b> — ${escapeHtml(new Date(x.created_at).toLocaleString('ar-EG'))}</div>`).join(''):'<div class="students-empty">لا توجد أحداث متابعة جديدة في سجل العمليات.</div>'}</div>`;
+    }catch(err){box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل ملف الطالب')+'</div>'}
+  };
+
+  // ===== Parent progress report =====
+  document.getElementById('printParentProgressReport')?.addEventListener('click',async()=>{
+    const ctx=await hydratePlatformContext();if(!['parent','private_parent'].includes(String(ctx?.account_type||'')))return;
+    const inbox=await structuredMail('inbox');
+    const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
+    const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
+    const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
+    const homework=latestStructuredBy(inbox,'HOMEWORK_PARENT','submission_id');
+    const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
+    const payments=latestStructuredBy(inbox,'PARENT_PAYMENT','payment_id');
+    const voids=new Set(latestStructuredBy(inbox,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
+    const cards=links.map(x=>{
+      const att=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name));
+      const absent=att.filter(a=>a.status==='absent').length,late=att.filter(a=>a.status==='late').length,present=att.filter(a=>a.status==='present').length;
+      const exams=results.filter(r=>String(r.student_name||'')===String(x.student_name||''));
+      const hws=homework.filter(r=>String(r.student_name||'')===String(x.student_name||''));
+      const pts=points.filter(r=>String(r.student_id||r.student_name||'')===String(x.student_id||x.student_name||'')).sort((a,b)=>new Date(b.date||b._mail?.sent_at||0)-new Date(a.date||a._mail?.sent_at||0))[0];
+      const due=Math.max(0,Number(x.fee||0)-Number(x.discount||0));
+      const extra=payments.filter(p=>!voids.has(String(p.payment_id))&&((x.student_id&&String(p.student_id||'')===String(x.student_id))||(x.student_no&&String(p.student_no||'')===String(x.student_no)))).reduce((sum,p)=>sum+Number(p.amount||0),0);
+      const paid=Number(x.paid||0)+extra,balance=Math.max(0,due-paid);
+      const avg=exams.length?exams.reduce((sum,r)=>sum+(Number(r.max_score)>0?Number(r.score||0)/Number(r.max_score)*100:0),0)/exams.length:null;
+      return `<div class="report-child"><h2>${escapeHtml(x.student_name||'الطالب')}</h2><p>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — '))}</p><table><tr><th>الحضور</th><td>حاضر ${present} • غائب ${absent} • متأخر ${late}</td></tr><tr><th>متوسط الاختبارات</th><td>${avg===null?'—':avg.toFixed(1)+'%'}</td></tr><tr><th>الواجبات المصححة</th><td>${hws.length}</td></tr><tr><th>النقاط</th><td>${pts?Number(pts.balance||0):'—'}</td></tr><tr><th>المدفوع / المتبقي</th><td>${paid.toFixed(2)} / ${balance.toFixed(2)}</td></tr></table></div>`;
+    }).join('');
+    const logo=new URL('assets/rivan-logo.jpg',location.href).href;
+    const w=window.open('','_blank','width=1000,height=760');if(!w)return;
+    w.document.write('<html dir="rtl"><head><title>تقرير متابعة ROVEN</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"><style>@page{size:A4;margin:14mm}body{font-family:Cairo,Arial;color:#172331}.head{text-align:center;border-bottom:2px solid #0f766e;padding-bottom:12px}.head img{width:85px}.head h1{margin:5px}.report-child{margin-top:18px;border:1px solid #dfe7eb;border-radius:12px;padding:14px;page-break-inside:avoid}.report-child h2{margin:0;color:#0f766e}.report-child p{margin:2px 0 10px;color:#64748b}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #e6edf2;text-align:right;font-size:11px}th{width:180px}</style></head><body><div class="head"><img src="'+logo+'"><h1>تقرير متابعة الطالب</h1><p>ROVEN Online School — '+new Date().toLocaleDateString('ar-EG')+'</p></div>'+cards+'<script>window.addEventListener("load",()=>window.print())<\/script></body></html>');w.document.close();
+  });
+
+
 
   // ===== ROVEN-managed teacher private rooms =====
   let managedRoomDefsCache=[];
@@ -4613,6 +4985,12 @@
       if(localStorage.getItem(key))continue;
       try{await sendStructuredMail(link.parent_internal_email,'EXAM_RESULT_PARENT',r.result_id,{...r,student_name:r.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
     }
+    const homeworkGrades=latestStructuredBy(inbox,'HOMEWORK_GRADED','submission_id');
+    for(const g of homeworkGrades){
+      const key='roven_forward_homework_'+String(ctx.account_id||ctx.username||'')+'_'+String(g.submission_id);
+      if(localStorage.getItem(key))continue;
+      try{await sendStructuredMail(link.parent_internal_email,'HOMEWORK_PARENT',g.submission_id,{...g,student_name:g.student_name||link.student_name});localStorage.setItem(key,'1')}catch{}
+    }
   };
 
   const loadCertificates=async()=>{
@@ -5205,7 +5583,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[DIRECT_CHAT_V2]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[DIRECT_CHAT_V2]') && !s.startsWith('[HOMEWORK_ASSIGN]') && !s.startsWith('[HOMEWORK_DEF]') && !s.startsWith('[HOMEWORK_SUBMISSION]') && !s.startsWith('[HOMEWORK_GRADED]') && !s.startsWith('[HOMEWORK_PARENT]') && !s.startsWith('[AUDIT_LOG]') && !s.startsWith('[AUDIT_SELF]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -5463,6 +5841,19 @@
           });
         }catch{}
       }
+
+      // Homework notifications.
+      try{
+        const inboxHw=await structuredMail('inbox');
+        latestStructuredBy(inboxHw,'HOMEWORK_ASSIGN','homework_id').slice(-10).forEach(h=>{
+          const seen=getStoredMap('homework_seen'),key=String(h.homework_id||'');
+          if(key&&!seen[key])items.push({uid:'homework:'+key,section:'homework',count:1,icon:'📋',title:'واجب جديد: '+(h.title||'واجب'),text:(h.group_name||'')+(h.due_at?' — آخر تسليم '+new Date(h.due_at).toLocaleString('ar-EG'):''),time:h.created_at});
+        });
+        latestStructuredBy(inboxHw,'HOMEWORK_GRADED','submission_id').slice(-10).forEach(g=>{
+          const seen=getStoredMap('homework_grade_seen'),key=String(g.submission_id||'');
+          if(key&&!seen[key])items.push({uid:'homework-grade:'+key,section:'homework',count:1,icon:'✅',title:'تم تصحيح الواجب',text:(g.homework_title||'واجب')+' — '+Number(g.score||0)+' / '+Number(g.max_score||0),time:g.graded_at});
+        });
+      }catch{}
 
       // Internal mail unread.
       try{
