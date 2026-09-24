@@ -464,9 +464,35 @@ async function custom(action,a,p){
       const gs=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
       if(!gs.includes(gid))throw new Error('group_access_denied');
     }
-    const contract=(await sql`select capacity from public.teacher_room_management
+    let contract=(await sql`select capacity from public.teacher_room_management
       where group_id=${gid}::uuid and teacher_account_id=${teacherId} and is_active=true limit 1`)[0];
-    if(!contract)throw new Error('private_group_required');
+
+    if(!contract){
+      const owned=(await sql`select g.id
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        join public.platform_accounts pa on pa.id=${teacherId}
+        where g.id=${gid}::uuid
+          and g.school_id=${a.school_id}
+          and pa.teacher_id is not null
+          and c.teacher_id=pa.teacher_id
+        limit 1`)[0];
+
+      if(!owned)throw new Error('private_group_required');
+
+      contract=(await sql`insert into public.teacher_room_management(
+          group_id,school_id,teacher_account_id,management_mode,service_fee,fee_basis,
+          capacity,agreed_price,pricing_basis,is_active,updated_at
+        ) values(
+          ${gid}::uuid,${a.school_id},${teacherId},'teacher',0,'monthly',
+          null,0,'monthly',true,now()
+        )
+        on conflict(group_id) do update set
+          teacher_account_id=excluded.teacher_account_id,
+          is_active=true,
+          updated_at=now()
+        returning capacity`)[0];
+    }
 
     const fullName=String(p.p_full_name||'').trim();
     if(!fullName)throw new Error('student_name_required');
