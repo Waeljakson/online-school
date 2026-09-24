@@ -1430,7 +1430,7 @@
         </div>
       </div>
 
-      <div class="form-section">
+      <div class="form-section" id="teacherAccountSection">
         <div class="form-section-title">🔐 حساب المعلم على المنصة</div>
         <div class="form-grid">
           <div class="form-field"><label>اسم المستخدم</label><input id="ntUsername" placeholder="اختياري - يولد النظام كود المعلم تلقائيًا"></div>
@@ -2315,11 +2315,11 @@
   });
 
   document.getElementById('teachersRows').addEventListener('click',async e=>{
-    const nameEdit=e.target.closest('.teacher-name-edit-btn');
-    if(nameEdit){
-      const teacher=teachersAdminCache.find(x=>String(x.teacher_id)===String(nameEdit.dataset.teacherId));
+    const profileEdit=e.target.closest('.teacher-profile-edit-btn');
+    if(profileEdit){
+      const teacher=teachersAdminCache.find(x=>String(x.teacher_id)===String(profileEdit.dataset.teacherId));
       if(!teacher){alert('تعذر تحديد بيانات المعلم.');return}
-      openTeacherNameModal(teacher);return;
+      openTeacherModal(teacher);return;
     }
     const edit=e.target.closest('.teacher-edit-btn');
     if(edit){
@@ -2627,9 +2627,66 @@
   const teacherFormMsg=document.getElementById('teacherFormMsg');
   const teacherRegistrationResult=document.getElementById('teacherRegistrationResult');
   const saveTeacherBtn=document.getElementById('saveTeacherBtn');
-  const openTeacherModal=()=>{teacherModal.classList.add('show');teacherModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';teacherFormMsg.className='student-form-msg';teacherRegistrationResult.className='registration-result';document.getElementById('ntPassword').value=makeRandomPassword();};
-  const closeTeacherModal=()=>{teacherModal.classList.remove('show');teacherModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
-  document.getElementById('openTeacherModal').addEventListener('click',openTeacherModal);
+  let editingTeacherId=null;
+  const setTeacherField=(id,value)=>{const el=document.getElementById(id);if(el)el.value=value??''};
+  const openTeacherModal=(teacher=null)=>{
+    editingTeacherId=teacher?.teacher_id||null;
+    newTeacherForm.reset();
+    teacherFormMsg.textContent='';teacherFormMsg.className='student-form-msg';
+    teacherRegistrationResult.innerHTML='';teacherRegistrationResult.className='registration-result';
+
+    const accountSection=document.getElementById('teacherAccountSection');
+    const pass=document.getElementById('ntPassword');
+    const title=document.getElementById('teacherModalTitle');
+    const subtitle=title?.nextElementSibling;
+
+    if(editingTeacherId){
+      title.textContent='تعديل بيانات المعلم';
+      if(subtitle)subtitle.textContent='عدّل البيانات الشخصية والأكاديمية والوظيفية والمالية، بدون تغيير بيانات الدخول.';
+      accountSection.style.display='none';
+      pass.required=false;
+      setTeacherField('ntFullName',teacher.full_name);
+      setTeacherField('ntPhone',teacher.phone);
+      setTeacherField('ntEmail',teacher.email);
+      setTeacherField('ntNationalId',teacher.national_id);
+      setTeacherField('ntGender',teacher.gender);
+      setTeacherField('ntBirthDate',String(teacher.birth_date||'').slice(0,10));
+      setTeacherField('ntAddress',teacher.address);
+      setTeacherField('ntQualification',teacher.qualification);
+      setTeacherField('ntSpecialization',teacher.specialization);
+      setTeacherField('ntHireDate',String(teacher.hire_date||'').slice(0,10));
+      setTeacherField('ntSubjects',teacher.subjects_edit||teacher.subjects||teacher.subjects_text||'');
+      const salaryType=teacher.salary_type||'monthly';
+      setTeacherField('ntSalaryType',salaryType);
+      const salaryAmount=(salaryType==='monthly'||salaryType==='custom')
+        ?Number(teacher.base_salary||0)
+        :Number(teacher.rate_value||0);
+      setTeacherField('ntSalaryAmount',salaryAmount);
+      setTeacherField('ntBankName',teacher.bank_name);
+      setTeacherField('ntBankAccount',teacher.bank_account);
+      setTeacherField('ntNotes',teacher.notes);
+      document.getElementById('ntSalaryAmountLabel').textContent=salaryLabels[salaryType]||'قيمة المرتب';
+      saveTeacherBtn.textContent='حفظ التعديلات';
+    }else{
+      title.textContent='تسجيل معلم جديد';
+      if(subtitle)subtitle.textContent='سيتم إنشاء رقم وظيفي تلقائي وحفظ بيانات التوظيف والمرتب.';
+      accountSection.style.display='';
+      pass.required=true;
+      document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);
+      document.getElementById('ntPassword').value=makeRandomPassword();
+      document.getElementById('ntSalaryAmountLabel').textContent='المرتب الشهري';
+      saveTeacherBtn.textContent='حفظ المعلم';
+    }
+
+    teacherModal.classList.add('show');teacherModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
+  };
+  const closeTeacherModal=()=>{
+    editingTeacherId=null;
+    teacherModal.classList.remove('show');teacherModal.setAttribute('aria-hidden','true');document.body.style.overflow='';
+    document.getElementById('teacherAccountSection').style.display='';
+    document.getElementById('ntPassword').required=true;
+  };
+  document.getElementById('openTeacherModal').addEventListener('click',()=>openTeacherModal());
   document.getElementById('closeTeacherModal').addEventListener('click',closeTeacherModal);
   document.getElementById('cancelTeacherModal').addEventListener('click',closeTeacherModal);
   document.getElementById('generateTeacherPassword').addEventListener('click',()=>{document.getElementById('ntPassword').value=makeRandomPassword()});
@@ -2669,12 +2726,12 @@
         <td><b>${escapeHtml(t.account_code||t.employee_no||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.employee_no||'')}</span></td>
         <td><strong>${escapeHtml(t.full_name)}</strong><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.internal_email||t.email||'')}</span></td>
         <td>${escapeHtml(t.username||'لم يُنشأ')}</td>
-        <td>${escapeHtml(t.specialization||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.subjects||'')}</span></td>
+        <td>${escapeHtml(t.specialization||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(t.subjects_edit||t.subjects||t.subjects_text||'')}</span></td>
         <td>${escapeHtml(t.phone||'—')}</td>
         <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
         <td><span class="status ${t.status==='active'&&t.account_active!==false?'active':'watch'}">${t.status==='active'&&t.account_active!==false?'نشط':'غير نشط'}</span></td>
         <td><div class="admin-row-actions">
-          <button class="secondary-action teacher-name-edit-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل الاسم</button>
+          <button class="secondary-action teacher-profile-edit-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل البيانات</button>
           <button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">بيانات الدخول</button>
           <button class="secondary-action teacher-state-btn ${t.status==='active'&&t.account_active!==false?'inactive-action':'activate-action'}" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-active="${t.status==='active'&&t.account_active!==false?'1':'0'}">${t.status==='active'&&t.account_active!==false?'إيقاف':'تفعيل'}</button>
           <button class="secondary-action danger-action delete-teacher-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-name="${escapeHtml(t.full_name||'المعلم')}">حذف</button>
@@ -2700,38 +2757,63 @@
       p_address:document.getElementById('ntAddress').value.trim()||null,
       p_qualification:document.getElementById('ntQualification').value.trim()||null,
       p_specialization:document.getElementById('ntSpecialization').value.trim()||null,
-      p_hire_date:document.getElementById('ntHireDate').value||new Date().toISOString().slice(0,10),
+      p_hire_date:document.getElementById('ntHireDate').value||null,
       p_salary_type:salaryType,
       p_base_salary:(salaryType==='monthly'||salaryType==='custom')?salaryAmount:0,
       p_rate_value:(salaryType==='monthly'||salaryType==='custom')?0:salaryAmount,
       p_bank_name:document.getElementById('ntBankName').value.trim()||null,
       p_bank_account:document.getElementById('ntBankAccount').value.trim()||null,
-      p_subject_names:subjects.length?subjects:null,
-      p_notes:document.getElementById('ntNotes').value.trim()||null,
-      p_username:document.getElementById('ntUsername').value.trim()||null,
-      p_password:document.getElementById('ntPassword').value,
-      p_generate_password:false
+      p_subject_names:subjects.length?subjects:[],
+      p_notes:document.getElementById('ntNotes').value.trim()||null
     };
     if(!payload.p_full_name){teacherFormMsg.textContent='اسم المعلم مطلوب.';teacherFormMsg.className='student-form-msg error show';return}
-    saveTeacherBtn.disabled=true;saveTeacherBtn.textContent='جارٍ الحفظ...';
+
+    saveTeacherBtn.disabled=true;saveTeacherBtn.textContent=editingTeacherId?'جارٍ حفظ التعديلات...':'جارٍ الحفظ...';
     try{
-      const result=await dataApiFetch('/rpc/register_new_teacher',{method:'POST',body:JSON.stringify(payload)});
-      const r=Array.isArray(result)?result[0]:result;
-      teacherRegistrationResult.innerHTML=`<h4>✓ تم تسجيل المعلم وإنشاء حسابه</h4><div class="result-grid">
-        <div class="result-item"><span>كود المعلم</span><b>${escapeHtml(r?.account_code||r?.employee_no||'—')}</b></div>
-        <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||payload.p_username||'—')}</b></div>
-        <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
-        <div class="result-item"><span>بريد ROVEN</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
-      </div>`;
-      teacherRegistrationResult.className='registration-result show';
-      teacherFormMsg.textContent='تم حفظ بيانات المعلم وإنشاء كود واسم مستخدم وكلمة مرور وبريد ROVEN داخلي.';
-      teacherFormMsg.className='student-form-msg success show';
-      await loadTeachers();
-      newTeacherForm.reset();document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);document.getElementById('ntSalaryAmountLabel').textContent='المرتب الشهري';
+      if(editingTeacherId){
+        const result=await dataApiFetch('/rpc/admin_teacher_update_details',{method:'POST',body:JSON.stringify({
+          ...payload,p_teacher_id:editingTeacherId
+        })});
+        teacherFormMsg.textContent='تم تحديث بيانات المعلم بنجاح.';
+        teacherFormMsg.className='student-form-msg success show';
+        await recordAudit('update','تعديل بيانات المعلم','teacher',editingTeacherId,result?.full_name||payload.p_full_name,{
+          specialization:payload.p_specialization,salary_type:payload.p_salary_type
+        }).catch(()=>{});
+        await Promise.allSettled([loadTeachers(),loadGroups(),loadAccountDirectory()]);
+        setTimeout(closeTeacherModal,650);
+      }else{
+        const createPayload={
+          ...payload,
+          p_username:document.getElementById('ntUsername').value.trim()||null,
+          p_password:document.getElementById('ntPassword').value,
+          p_generate_password:false
+        };
+        const result=await dataApiFetch('/rpc/register_new_teacher',{method:'POST',body:JSON.stringify(createPayload)});
+        const r=Array.isArray(result)?result[0]:result;
+        teacherRegistrationResult.innerHTML=`<h4>✓ تم تسجيل المعلم وإنشاء حسابه</h4><div class="result-grid">
+          <div class="result-item"><span>كود المعلم</span><b>${escapeHtml(r?.account_code||r?.employee_no||'—')}</b></div>
+          <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||createPayload.p_username||'—')}</b></div>
+          <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||createPayload.p_password||'—')}</b></div>
+          <div class="result-item"><span>بريد ROVEN</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
+        </div>`;
+        teacherRegistrationResult.className='registration-result show';
+        teacherFormMsg.textContent='تم حفظ بيانات المعلم وإنشاء كود واسم مستخدم وكلمة مرور وبريد ROVEN داخلي.';
+        teacherFormMsg.className='student-form-msg success show';
+        await loadTeachers();
+        newTeacherForm.reset();
+        document.getElementById('ntHireDate').value=new Date().toISOString().slice(0,10);
+        document.getElementById('ntSalaryAmountLabel').textContent='المرتب الشهري';
+      }
     }catch(err){
-      teacherFormMsg.textContent=(String(err.message).includes('duplicate')||String(err.message).includes('unique'))?'يوجد معلم مسجل بنفس رقم الهوية أو بيانات مكررة.':(err.message||'حدث خطأ أثناء تسجيل المعلم.');
+      const raw=String(err.message||'');
+      teacherFormMsg.textContent=(raw.includes('duplicate')||raw.includes('unique'))
+        ?'توجد بيانات مكررة؛ راجع رقم الهوية أو البريد.'
+        :raw.includes('teacher_not_found')?'تعذر العثور على المعلم.':(err.message||'حدث خطأ أثناء حفظ بيانات المعلم.');
       teacherFormMsg.className='student-form-msg error show';
-    }finally{saveTeacherBtn.disabled=false;saveTeacherBtn.textContent='حفظ المعلم'}
+    }finally{
+      saveTeacherBtn.disabled=false;
+      saveTeacherBtn.textContent=editingTeacherId?'حفظ التعديلات':'حفظ المعلم';
+    }
   });
 
   const studentModal=document.getElementById('studentModal');
