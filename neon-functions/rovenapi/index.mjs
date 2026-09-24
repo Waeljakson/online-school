@@ -66,6 +66,27 @@ async function ensureSchema(){
     await sql`alter table public.teacher_private_attendance drop constraint if exists teacher_private_attendance_status_check`;
     await sql`alter table public.teacher_private_attendance add constraint teacher_private_attendance_status_check
       check(status in ('present','absent','late','excused','left_early'))`;
+    await sql`create table if not exists public.teacher_room_fee_payments(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      teacher_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      group_id uuid not null references public.study_groups(id) on delete cascade,
+      billing_period text not null,
+      amount numeric(12,2) not null check(amount>0),
+      paid_on date not null default current_date,
+      method text not null default 'cash',
+      note text,
+      receipt_no text not null,
+      recorded_by_account_id uuid references public.platform_accounts(id) on delete set null,
+      created_at timestamptz not null default now(),
+      voided_at timestamptz,
+      voided_by_account_id uuid references public.platform_accounts(id) on delete set null,
+      void_reason text,
+      unique(school_id,receipt_no)
+    )`;
+    await sql`create index if not exists teacher_room_fee_payments_room_period_idx
+      on public.teacher_room_fee_payments(group_id,billing_period,paid_on desc)`;
+
     await sql`create table if not exists public.teacher_private_payments(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -1165,6 +1186,136 @@ async function custom(action,a,p){
       where trm.school_id=${a.school_id} and trm.teacher_account_id=${teacherAccountId} and trm.is_active=true
       order by g.name`;
     return groupIds?rows.filter(x=>groupIds.includes(String(x.group_id))):rows;
+  }
+
+  if(action==='admin_teacher_room_finance'){
+    const allowed=a.account_type==='admin'||(a.account_type==='staff'&&['finance_admin','school_manager','secretary'].includes(String(a.role||'')));
+    must(a,allowed);
+    const period=/^\d{4}-\d{2}$/.test(String(p.p_period||''))?String(p.p_period):new Date().toISOString().slice(0,7);
+    const periodStart=period+'-01';
+
+    const rows=await sql`select
+      trm.group_id,trm.teacher_account_id,trm.capacity,trm.agreed_price,trm.pricing_basis,
+      trm.management_mode,trm.service_fee,trm.fee_basis,trm.is_active,
+      g.name group_name,
+      pa.display_name teacher_name,pa.internal_email teacher_internal_email,pa.username teacher_username,
+      coalesce((select count(*) from public.teacher_private_students ps
+        where ps.group_id=trm.group_id and ps.teacher_account_id=trm.teacher_account_id and ps.status='active'),0)::int current_private_students,
+      coalesce((select count(distinct att.attendance_date) from public.teacher_private_attendance att
+        where att.group_id=trm.group_id
+          and att.attendance_date>=${periodStart}::date
+          and att.attendance_date<(${periodStart}::date+interval '1 month')),0)::int session_count,
+      coalesce((select sum(fp.amount) from public.teacher_room_fee_payments fp
+        where fp.group_id=trm.group_id
+          and fp.teacher_account_id=trm.teacher_account_id
+          and fp.billing_period=${period}
+          and fp.voided_at is null),0)::numeric period_paid
+      from public.teacher_room_management trm
+      join public.study_groups g on g.id=trm.group_id
+      join public.platform_accounts pa on pa.id=trm.teacher_account_id
+      where trm.school_id=${a.school_id} and trm.is_active=true
+      order by pa.display_name,g.name`;
+
+    const rooms=rows.map(r=>{
+      const price=Number(r.agreed_price||0);
+      const basis=String(r.pricing_basis||'monthly');
+      const due=basis==='per_student'
+        ? price*Number(r.current_private_students||0)
+        : basis==='per_session'
+          ? price*Number(r.session_count||0)
+          : price;
+      const paid=Number(r.period_paid||0);
+      return {...r,period,due,period_paid:paid,balance:Math.max(0,due-paid)};
+    });
+
+    const payments=await sql`select
+      fp.id payment_id,fp.billing_period,fp.amount,fp.paid_on,fp.method,fp.note,fp.receipt_no,
+      fp.created_at,fp.voided_at,fp.void_reason,
+      fp.group_id,fp.teacher_account_id,
+      g.name group_name,pa.display_name teacher_name,pa.internal_email teacher_internal_email,
+      recorder.display_name recorded_by_name
+      from public.teacher_room_fee_payments fp
+      join public.study_groups g on g.id=fp.group_id
+      join public.platform_accounts pa on pa.id=fp.teacher_account_id
+      left join public.platform_accounts recorder on recorder.id=fp.recorded_by_account_id
+      where fp.school_id=${a.school_id}
+      order by fp.created_at desc
+      limit 200`;
+
+    return {period,rooms,payments};
+  }
+
+  if(action==='admin_teacher_room_payment_add'){
+    const allowed=a.account_type==='admin'||(a.account_type==='staff'&&['finance_admin','school_manager','secretary'].includes(String(a.role||'')));
+    must(a,allowed);
+    const gid=String(p.p_group_id||'');
+    const amount=Number(p.p_amount||0);
+    const period=/^\d{4}-\d{2}$/.test(String(p.p_period||''))?String(p.p_period):new Date().toISOString().slice(0,7);
+    if(!gid)throw new Error('group_id_required');
+    if(!(amount>0))throw new Error('invalid_amount');
+
+    const room=(await sql`select trm.group_id,trm.teacher_account_id,trm.agreed_price,trm.pricing_basis,
+      g.name group_name,pa.display_name teacher_name,pa.internal_email teacher_internal_email
+      from public.teacher_room_management trm
+      join public.study_groups g on g.id=trm.group_id
+      join public.platform_accounts pa on pa.id=trm.teacher_account_id
+      where trm.group_id=${gid}::uuid and trm.school_id=${a.school_id} and trm.is_active=true
+      limit 1`)[0];
+    if(!room)throw new Error('teacher_room_not_found');
+
+    const receiptNo='ROV-TR-'+Date.now().toString(36).toUpperCase();
+    const payment=(await sql`insert into public.teacher_room_fee_payments(
+      school_id,teacher_account_id,group_id,billing_period,amount,paid_on,method,note,receipt_no,recorded_by_account_id
+    ) values(
+      ${a.school_id},${room.teacher_account_id},${room.group_id},${period},${amount},
+      ${p.p_date||new Date().toISOString().slice(0,10)}::date,${p.p_method||'cash'},
+      ${p.p_note||null},${receiptNo},${a.account_id}
+    ) returning *`)[0];
+
+    const periodStart=period+'-01';
+    const counts=(await sql`select
+      coalesce((select count(*) from public.teacher_private_students ps
+        where ps.group_id=${room.group_id} and ps.teacher_account_id=${room.teacher_account_id} and ps.status='active'),0)::int student_count,
+      coalesce((select count(distinct att.attendance_date) from public.teacher_private_attendance att
+        where att.group_id=${room.group_id}
+          and att.attendance_date>=${periodStart}::date
+          and att.attendance_date<(${periodStart}::date+interval '1 month')),0)::int session_count,
+      coalesce((select sum(fp.amount) from public.teacher_room_fee_payments fp
+        where fp.group_id=${room.group_id} and fp.teacher_account_id=${room.teacher_account_id}
+          and fp.billing_period=${period} and fp.voided_at is null),0)::numeric total_paid`)[0];
+
+    const price=Number(room.agreed_price||0);
+    const basis=String(room.pricing_basis||'monthly');
+    const due=basis==='per_student'?price*Number(counts.student_count||0)
+      :basis==='per_session'?price*Number(counts.session_count||0)
+      :price;
+    const totalPaid=Number(counts.total_paid||0);
+
+    return {
+      ...payment,
+      payment_id:payment.id,
+      teacher_name:room.teacher_name,
+      teacher_internal_email:room.teacher_internal_email,
+      group_name:room.group_name,
+      agreed_price:Number(room.agreed_price||0),
+      pricing_basis:room.pricing_basis,
+      due,total_paid:totalPaid,balance:Math.max(0,due-totalPaid)
+    };
+  }
+
+  if(action==='admin_teacher_room_payment_void'){
+    const allowed=a.account_type==='admin'||(a.account_type==='staff'&&['finance_admin','school_manager','secretary'].includes(String(a.role||'')));
+    must(a,allowed);
+    const pid=String(p.p_payment_id||'');
+    if(!pid)throw new Error('payment_id_required');
+    const rr=await sql`update public.teacher_room_fee_payments
+      set voided_at=coalesce(voided_at,now()),
+          voided_by_account_id=coalesce(voided_by_account_id,${a.account_id}),
+          void_reason=coalesce(void_reason,${p.p_reason||'إلغاء بواسطة الإدارة'})
+      where id=${pid}::uuid and school_id=${a.school_id}
+      returning id payment_id,receipt_no,group_id,teacher_account_id,amount,billing_period,voided_at`;
+    if(!rr.length)throw new Error('room_payment_not_found');
+    return {...rr[0],voided:true};
   }
 
   if(action==='teacher_private_students_list'){
@@ -3107,6 +3258,7 @@ export default{
       const customActions=new Set([
         'teacher_private_students_list','teacher_private_student_upsert','teacher_private_student_delete','teacher_private_student_issue_card',
         'teacher_room_contract_set','teacher_room_contracts_list',
+        'admin_teacher_room_finance','admin_teacher_room_payment_add','admin_teacher_room_payment_void',
         'teacher_private_attendance_save','teacher_private_payment_add',
         'teacher_assistants_list','teacher_assistant_create','teacher_assistant_update','teacher_assistant_delete',
         'assistant_context','parent_dashboard','student_dashboard',
