@@ -81,6 +81,11 @@ async function ensureSchema(){
       is_active boolean not null default true,
       updated_at timestamptz not null default now()
     )`;
+    await sql`alter table public.teacher_room_management add column if not exists capacity integer`;
+    await sql`alter table public.teacher_room_management add column if not exists agreed_price numeric(12,2) not null default 0`;
+    await sql`alter table public.teacher_room_management add column if not exists pricing_basis text not null default 'monthly'`;
+    await sql`alter table public.teacher_room_management drop constraint if exists teacher_room_management_capacity_check`;
+    await sql`alter table public.teacher_room_management add constraint teacher_room_management_capacity_check check(capacity is null or capacity>0)`;
     await sql`alter table public.teacher_assistant_links add column if not exists contact_email text`;
     await sql`alter table public.teacher_assistant_links add column if not exists contact_phone text`;
     await sql`create table if not exists public.platform_direct_messages_v2(
@@ -377,18 +382,67 @@ async function custom(action,a,p){
     ) returning id message_id,sender_account_id,recipient_account_id,body,attachment_name,attachment_mime,created_at,read_at`)[0];
   }
 
+  if(action==='teacher_room_contract_set'){
+    must(a,a.account_type==='admin'||['super_admin','school_manager'].includes(String(a.role||'')));
+    const gid=String(p.p_group_id||''),teacherId=String(p.p_teacher_id||'');
+    if(!gid||!teacherId)throw new Error('group_and_teacher_required');
+    const teacherAccount=(await sql`select id from public.platform_accounts
+      where school_id=${a.school_id} and teacher_id=${teacherId}::uuid and is_active=true limit 1`)[0];
+    if(!teacherAccount)throw new Error('teacher_account_not_found');
+    const capacity=p.p_capacity?Math.max(1,Number(p.p_capacity)):null;
+    const row=(await sql`insert into public.teacher_room_management(
+      group_id,school_id,teacher_account_id,management_mode,service_fee,fee_basis,
+      capacity,agreed_price,pricing_basis,is_active,updated_at
+    ) values(
+      ${gid}::uuid,${a.school_id},${teacherAccount.id},
+      ${p.p_management_mode||'teacher'},${Number(p.p_management_fee||0)},
+      ${p.p_management_fee_basis||'monthly'},${capacity},
+      ${Number(p.p_agreed_price||0)},${p.p_pricing_basis||'monthly'},true,now()
+    ) on conflict(group_id) do update set
+      teacher_account_id=excluded.teacher_account_id,
+      management_mode=excluded.management_mode,
+      service_fee=excluded.service_fee,
+      fee_basis=excluded.fee_basis,
+      capacity=excluded.capacity,
+      agreed_price=excluded.agreed_price,
+      pricing_basis=excluded.pricing_basis,
+      is_active=true,updated_at=now()
+    returning *`)[0];
+    return row;
+  }
+
+  if(action==='teacher_room_contracts_list'){
+    const link=await assistantLink(a);
+    const teacherAccountId=a.account_type==='teacher'?a.account_id:link?.teacher_account_id;
+    must(a,teacherAccountId);
+    let groupIds=null;
+    if(link)groupIds=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
+    const rows=await sql`select trm.group_id,g.name group_name,c.subject_name,g.schedule_json,g.meeting_url,g.meeting_provider,
+      trm.capacity,trm.agreed_price,trm.pricing_basis,trm.management_mode,trm.service_fee,trm.fee_basis,trm.is_active,
+      coalesce((select count(*) from public.teacher_private_students ps
+        where ps.group_id=trm.group_id and ps.teacher_account_id=trm.teacher_account_id and ps.status='active'),0)::int current_private_students
+      from public.teacher_room_management trm
+      join public.study_groups g on g.id=trm.group_id
+      left join public.courses c on c.id=g.course_id
+      where trm.school_id=${a.school_id} and trm.teacher_account_id=${teacherAccountId} and trm.is_active=true
+      order by g.name`;
+    return groupIds?rows.filter(x=>groupIds.includes(String(x.group_id))):rows;
+  }
+
   if(action==='teacher_private_students_list'){
     const link=await assistantLink(a);
     const teacherId=a.account_type==='teacher'?a.account_id:link?.teacher_account_id;
     must(a,teacherId && (a.account_type==='teacher'||Boolean(link?.permissions?.students)));
     let groupIds=null;
     if(link)groupIds=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
-    const rows=await sql`select ps.*,g.name group_name,
+    const rows=await sql`select ps.*,g.name group_name,trm.capacity room_capacity,
+      coalesce((select count(*) from public.teacher_private_students ps2 where ps2.group_id=ps.group_id and ps2.teacher_account_id=ps.teacher_account_id and ps2.status='active'),0)::int room_students_count,
       coalesce((select sum(pp.amount) from public.teacher_private_payments pp
         where pp.private_student_id=ps.id
           and date_trunc('month',pp.paid_on)=date_trunc('month',current_date)),0) month_paid
       from public.teacher_private_students ps
       left join public.study_groups g on g.id=ps.group_id
+      left join public.teacher_room_management trm on trm.group_id=ps.group_id and trm.teacher_account_id=ps.teacher_account_id
       where ps.teacher_account_id=${teacherId} and ps.status='active'
       order by ps.full_name`;
     return groupIds?rows.filter(x=>groupIds.includes(String(x.group_id))):rows;
@@ -404,13 +458,17 @@ async function custom(action,a,p){
       const gs=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
       if(!gs.includes(gid))throw new Error('group_access_denied');
     }
-    const owned=await sql`select 1 from public.teacher_room_management
-      where group_id=${gid}::uuid and teacher_account_id=${teacherId} and is_active=true limit 1`;
-    if(!owned.length)throw new Error('private_group_required');
+    const contract=(await sql`select capacity from public.teacher_room_management
+      where group_id=${gid}::uuid and teacher_account_id=${teacherId} and is_active=true limit 1`)[0];
+    if(!contract)throw new Error('private_group_required');
 
     const fullName=String(p.p_full_name||'').trim();
     if(!fullName)throw new Error('student_name_required');
     const existingId=String(p.p_private_student_id||'');
+    const currentCount=Number((await sql`select count(*)::int n from public.teacher_private_students
+      where group_id=${gid}::uuid and teacher_account_id=${teacherId} and status='active'
+        and (${existingId||null}::text is null or id::text<>${existingId||null})`)[0]?.n||0);
+    if(contract.capacity&&currentCount>=Number(contract.capacity))throw new Error('room_capacity_reached');
 
     if(existingId){
       const rr=await sql`update public.teacher_private_students
@@ -1143,6 +1201,7 @@ export default{
 
       const customActions=new Set([
         'teacher_private_students_list','teacher_private_student_upsert','teacher_private_student_delete',
+        'teacher_room_contract_set','teacher_room_contracts_list',
         'teacher_private_attendance_save','teacher_private_payment_add',
         'teacher_assistants_list','teacher_assistant_create','teacher_assistant_update','teacher_assistant_delete',
         'assistant_context','parent_dashboard','student_dashboard',
