@@ -346,7 +346,10 @@
       <section class="module" id="students">
         <div class="section-toolbar">
           <div><h2>الطلاب وأولياء الأمور</h2><p>إدارة التسجيل والملفات الأكاديمية والمالية للطلاب.</p></div>
-          <button class="primary-action" type="button" id="openStudentModal">＋ تسجيل طالب جديد</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="secondary-action danger-action" type="button" id="purgeStudentTestData">🧹 تصفير بيانات الطلاب التجريبية</button>
+            <button class="primary-action" type="button" id="openStudentModal">＋ تسجيل طالب جديد</button>
+          </div>
         </div>
         <article class="panel">
           <div class="panel-head"><div><h3>الطلاب المسجلون</h3><p>أحدث الطلاب المسجلين في النظام</p></div><button class="link-btn" id="refreshStudents" type="button">تحديث</button></div>
@@ -2720,6 +2723,44 @@
   };
   document.getElementById('refreshStudents').addEventListener('click',loadRegisteredStudents);
 
+  document.getElementById('purgeStudentTestData')?.addEventListener('click',async()=>{
+    const btn=document.getElementById('purgeStudentTestData');
+    const ctx=await hydratePlatformContext();
+    if(!['admin','staff'].includes(String(ctx?.account_type||''))){
+      alert('هذا الإجراء متاح لإدارة النظام فقط.');
+      return;
+    }
+    if(!confirm('سيتم حذف جميع الطلاب وأولياء الأمور وحسابات دخولهم وسجلاتهم التابعة، مع الإبقاء على المعلمين والقاعات والإدارة. هل تريد المتابعة؟'))return;
+    const phrase=prompt('للتأكيد النهائي اكتب: حذف الطلاب','');
+    if(String(phrase||'').trim()!=='حذف الطلاب'){
+      alert('تم إلغاء العملية لأن عبارة التأكيد غير صحيحة.');
+      return;
+    }
+    btn.disabled=true;
+    const oldText=btn.textContent;
+    btn.textContent='جارٍ تصفير بيانات الطلاب...';
+    try{
+      const result=await dataApiFetch('/rpc/admin_purge_students_parents',{
+        method:'POST',
+        body:JSON.stringify({p_confirm:'PURGE_STUDENTS_PARENTS'})
+      });
+      const before=result?.before||{},after=result?.after||{};
+      alert(
+        'تم تصفير بيانات الطلاب وأولياء الأمور بنجاح.\n\n'+
+        'قبل الحذف: '+Number(before.students||0)+' طالب، '+Number(before.parents||0)+' ولي أمر، '+Number(before.private_students||0)+' طالب خاص.\n'+
+        'بعد الحذف: '+Number(after.students||0)+' طالب، '+Number(after.private_students||0)+' طالب خاص، '+Number(after.student_parent_accounts||0)+' حساب طالب/ولي أمر.'
+      );
+      await loadRegisteredStudents().catch(()=>{});
+      await loadAdminDashboard().catch(()=>{});
+      if(typeof loadSchoolFinance==='function')await loadSchoolFinance().catch(()=>{});
+    }catch(err){
+      alert(entityActionError(err));
+    }finally{
+      btn.disabled=false;
+      btn.textContent=oldText;
+    }
+  });
+
   newStudentForm.addEventListener('submit',async e=>{
     e.preventDefault();
     studentFormMsg.className='student-form-msg'; registrationResult.className='registration-result';
@@ -4888,6 +4929,7 @@
     if(map[action])return map[action];
     if(action==='admin_entity_set_active')return ['status','تفعيل/إيقاف حساب أو عنصر'];
     if(action==='admin_entity_delete')return ['delete','حذف منطقي'];
+    if(action==='admin_purge_students_parents')return ['delete','تصفير بيانات الطلاب وأولياء الأمور'];
     return null;
   };
   const resolveAuditManager=async()=>{
