@@ -1101,7 +1101,9 @@
     <div class="student-form">
       <div id="examReviewSummary" class="finance-student-balance"></div>
       <div id="examReviewQuestions" style="display:grid;gap:10px;margin-top:12px"></div>
-      <div class="student-form-actions">
+      <div class="student-form-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary-action" type="button" id="printExamReview">🖨️ طباعة الإجابات</button>
+        <button class="secondary-action" type="button" id="saveExamReviewPdf">📄 حفظ PDF</button>
         <button class="secondary-action" type="button" id="closeExamReviewBottom">إغلاق</button>
       </div>
     </div>
@@ -6167,6 +6169,70 @@
   });
 
   const examReviewModal=document.getElementById('examReviewModal');
+  let activeExamReviewData=null;
+
+  const printExamReviewReport=(preferPdf=false)=>{
+    if(!activeExamReviewData)return;
+    const {exam,submission,gradedResult}=activeExamReviewData;
+    const questions=Array.isArray(exam?.questions)?exam.questions:[];
+    let correct=0,wrong=0,unanswered=0,objectiveScore=0,objectiveMax=0;
+
+    const rows=questions.map((q,index)=>{
+      const answer=submission?.answers?.[q.id];
+      const pts=Number(q.points||0);
+      let status='سؤال مقالي',correctAnswer='—',studentAnswer=examAnswerText(q,answer);
+
+      if(q.type!=='essay'){
+        objectiveMax+=pts;
+        correctAnswer=examAnswerText(q,q.correct);
+        if(answer===null||answer===undefined||answer===''){
+          status='لم يجب';unanswered++;
+        }else{
+          const ok=q.type==='mcq'
+            ?Number(answer)===Number(q.correct)
+            :String(answer)===String(q.correct);
+          if(ok){status='صحيحة';correct++;objectiveScore+=pts}
+          else{status='خاطئة';wrong++}
+        }
+      }
+
+      return '<div class="question">'+
+        '<div class="qhead"><b>'+escapeHtml(String(index+1)+'. '+String(q.text||'سؤال'))+'</b><span>'+escapeHtml(status)+' — '+pts.toFixed(2)+' درجة</span></div>'+
+        '<div class="answer"><b>إجابة الطالب:</b> '+escapeHtml(studentAnswer)+'</div>'+
+        (q.type!=='essay'?'<div class="answer correct"><b>الإجابة الصحيحة:</b> '+escapeHtml(correctAnswer)+'</div>':'')+
+      '</div>';
+    }).join('');
+
+    const maxScore=gradedResult
+      ?Number(gradedResult.max_score||0)
+      :questions.reduce((sum,q)=>sum+Number(q.points||0),0);
+    const finalScore=gradedResult?Number(gradedResult.score||0):null;
+    const title='إجابات_'+String(submission?.student_name||'الطالب')+'_'+String(exam?.title||submission?.exam_title||'اختبار');
+    const logo=new URL('assets/rivan-logo.jpg',location.href).href;
+    const w=window.open('','_blank','width=980,height=760');
+    if(!w)return;
+
+    w.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>'+escapeHtml(title)+'</title>'+
+      '<link rel="preconnect" href="https://fonts.googleapis.com">'+
+      '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">'+
+      '<style>'+
+      '@page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Cairo,Arial,sans-serif;color:#172331;margin:0;background:#fff;font-size:12px;line-height:1.7}'+
+      '.sheet{max-width:190mm;margin:auto}.head{display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f766e;padding-bottom:12px;margin-bottom:14px}.brand{display:flex;align-items:center;gap:10px}.brand img{width:62px;height:62px;object-fit:contain}.brand h1{font-size:19px;margin:0}.brand p{margin:2px 0 0;color:#667780}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;background:#f5f8f8;border:1px solid #dbe4e5;border-radius:10px;padding:10px;margin-bottom:12px}.meta div{display:flex;justify-content:space-between;gap:10px}.summary{background:#eef8f6;border:1px solid #b9ddd5;border-radius:10px;padding:10px;margin-bottom:14px;font-weight:700}.question{border:1px solid #d8e0e4;border-radius:10px;padding:11px;margin-bottom:10px;break-inside:avoid;page-break-inside:avoid}.qhead{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed #d7dfe2;padding-bottom:7px;margin-bottom:7px}.qhead span{white-space:nowrap;font-size:10px}.answer{padding:4px 0;white-space:pre-wrap}.correct{color:#087f5b}.foot{text-align:center;color:#7b858b;font-size:9px;margin-top:18px}.pdf-note{display:none}@media print{.sheet{max-width:none}.pdf-note{display:none}}'+
+      '</style></head><body><div class="sheet">'+
+      '<div class="head"><div class="brand"><img src="'+logo+'"><div><h1>تقرير إجابات الاختبار</h1><p>ROVEN Online School</p></div></div><div><b>'+escapeHtml(exam?.title||submission?.exam_title||'اختبار')+'</b></div></div>'+
+      '<div class="meta">'+
+        '<div><span>اسم الطالب</span><b>'+escapeHtml(submission?.student_name||'—')+'</b></div>'+
+        '<div><span>الاختبار</span><b>'+escapeHtml(exam?.title||submission?.exam_title||'—')+'</b></div>'+
+        '<div><span>تاريخ التسليم</span><b>'+escapeHtml(new Date(submission?.submitted_at||Date.now()).toLocaleString('ar-EG'))+'</b></div>'+
+        '<div><span>النتيجة النهائية</span><b>'+(gradedResult?finalScore.toFixed(2)+' / '+maxScore.toFixed(2):'غير معتمدة')+'</b></div>'+
+      '</div>'+
+      '<div class="summary">الصحيح: '+correct+' • الخطأ: '+wrong+' • بدون إجابة: '+unanswered+' • درجة الأسئلة الموضوعية: '+objectiveScore.toFixed(2)+' / '+objectiveMax.toFixed(2)+'</div>'+
+      rows+
+      '<div class="foot">تم إنشاء هذا التقرير إلكترونيًا من نظام ROVEN</div>'+
+      '</div><script>window.addEventListener("load",()=>{setTimeout(()=>window.print(),250)})<\/script></body></html>');
+    w.document.close();
+  };
+
   const closeExamReview=()=>{
     examReviewModal.classList.remove('show');
     examReviewModal.setAttribute('aria-hidden','true');
@@ -6174,6 +6240,8 @@
   };
   document.getElementById('closeExamReviewModal')?.addEventListener('click',closeExamReview);
   document.getElementById('closeExamReviewBottom')?.addEventListener('click',closeExamReview);
+  document.getElementById('printExamReview')?.addEventListener('click',()=>printExamReviewReport(false));
+  document.getElementById('saveExamReviewPdf')?.addEventListener('click',()=>printExamReviewReport(true));
   examReviewModal?.addEventListener('click',e=>{if(e.target===examReviewModal)closeExamReview()});
 
   const examAnswerText=(q,value)=>{
@@ -6190,6 +6258,7 @@
   };
 
   const renderExamReview=(exam,submission,gradedResult=null)=>{
+    activeExamReviewData={exam,submission,gradedResult};
     const questions=Array.isArray(exam?.questions)?exam.questions:[];
     let objectiveCorrect=0,objectiveWrong=0,unanswered=0,objectiveScore=0,objectiveMax=0;
 
