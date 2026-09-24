@@ -268,12 +268,11 @@
           <label for="password">كلمة المرور</label>
           <div class="input-wrap"><span>🔒</span><input id="password" type="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" /><button class="toggle-pass" id="togglePass" type="button">إظهار</button></div>
         </div>
-        <div class="form-row"><label class="remember"><input type="checkbox" /> تذكرني على هذا الجهاز</label><a class="forgot" href="#" id="forgotLink">نسيت كلمة المرور؟</a></div>
+        <div class="form-row"><label class="remember"><input type="checkbox" id="rememberMe" /> تذكرني على هذا الجهاز</label><a class="forgot" href="#" id="forgotLink">نسيت كلمة المرور؟</a></div>
         <div class="login-error" id="loginError"></div>
         <button class="login-submit" id="loginSubmit" type="submit">دخول الطالب</button>
         <div class="login-note"><span>🔐</span><span>تم تحديث نظام الأمان. لحساب الإدارة الرئيسي استخدم «نسيت كلمة المرور؟» مرة واحدة لتعيين كلمة المرور على التكامل الجديد، ثم سجّل الدخول بشكل طبيعي.</span></div>
       </form>
-      <div class="login-demo"><button type="button" id="previewDashboard">معاينة لوحة الإدارة الحالية ←</button></div>
       <div class="login-footer">© 2026 ROVEN Online School • جميع الحقوق محفوظة</div>
     </div>
   </section>
@@ -1685,6 +1684,53 @@
   let rovenSessionToken='';
   let platformSessionToken='';
   let currentPlatformAccount=null;
+
+  const PLATFORM_SESSION_KEY='roven_platform_session_v1';
+  const PLATFORM_ACCOUNT_KEY='roven_platform_account_v1';
+  const LAST_SECTION_KEY='roven_last_section_v1';
+
+  const clearStoredPlatformSession=()=>{
+    for(const store of [sessionStorage,localStorage]){
+      try{
+        store.removeItem(PLATFORM_SESSION_KEY);
+        store.removeItem(PLATFORM_ACCOUNT_KEY);
+      }catch{}
+    }
+  };
+
+  const persistPlatformSession=(data,remember=false)=>{
+    if(!data?.session_token)return;
+    clearStoredPlatformSession();
+    const store=remember?localStorage:sessionStorage;
+    try{
+      store.setItem(PLATFORM_SESSION_KEY,String(data.session_token));
+      store.setItem(PLATFORM_ACCOUNT_KEY,JSON.stringify(data));
+    }catch{}
+  };
+
+  const readStoredPlatformSession=()=>{
+    for(const store of [sessionStorage,localStorage]){
+      try{
+        const token=store.getItem(PLATFORM_SESSION_KEY);
+        if(!token)continue;
+        let account=null;
+        try{account=JSON.parse(store.getItem(PLATFORM_ACCOUNT_KEY)||'null')}catch{}
+        return {token,account,store};
+      }catch{}
+    }
+    return null;
+  };
+
+  const validateStoredPlatformSession=async token=>{
+    const res=await fetch(ROVEN_API,{
+      method:'POST',mode:'cors',cache:'no-store',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify({action:'platform_my_profile',sessionToken:String(token||''),payload:{}})
+    });
+    let data=null;try{data=await res.json()}catch{}
+    if(!res.ok||!data?.account_id)throw new Error(String(data?.error||'invalid_or_expired_session'));
+    return data;
+  };
   const makeRandomPassword=()=>{
     const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
     const bytes=new Uint8Array(12);crypto.getRandomValues(bytes);
@@ -1725,10 +1771,11 @@
         });
       }catch{}
 
-      // ROVEN universal account sessions are held only in memory on this client.
       platformSessionToken='';
       rovenSessionToken='';
       currentPlatformAccount=null;
+      clearStoredPlatformSession();
+      try{sessionStorage.removeItem(LAST_SECTION_KEY);localStorage.removeItem(LAST_SECTION_KEY)}catch{}
 
       try{sessionStorage.removeItem('roven_jwt')}catch{}
       try{
@@ -1799,6 +1846,7 @@
     if(!res.ok) throw new Error(String(data?.error||data?.message||'بيانات الدخول غير صحيحة.'));
     platformSessionToken=data?.session_token||'';
     currentPlatformAccount=data||null;
+    persistPlatformSession(data,Boolean(document.getElementById('rememberMe')?.checked));
     return data;
   };
 
@@ -1996,16 +2044,7 @@
       }catch(err){loginError.textContent='تعذر إرسال رابط الاستعادة الآن. حاول مرة أخرى.';loginError.classList.add('show')}
     });
   }
-  document.getElementById('previewDashboard').addEventListener('click',()=>{
-    document.getElementById('loginScreen').style.display='none';document.getElementById('mainApp').classList.remove('is-hidden');
-    ['dashboardStudentsValue','dashboardTeachersValue','dashboardRevenueValue','dashboardDueValue'].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent='—'});
-    const notes={dashboardStudentsSub:'سجّل الدخول لعرض البيانات الفعلية',dashboardTeachersSub:'سجّل الدخول لعرض البيانات الفعلية',dashboardRevenueSub:'سجّل الدخول لعرض التحصيل الفعلي',dashboardDueSub:'سجّل الدخول لعرض المستحقات الفعلية',dashboardLessonsCount:'سجّل الدخول لعرض جدول اليوم'};
-    Object.entries(notes).forEach(([id,value])=>{const el=document.getElementById(id);if(el)el.textContent=value});
-    const chart=document.getElementById('dashboardRevenueChart');if(chart)chart.innerHTML='<div class="students-empty" style="width:100%;align-self:center">المعاينة لا تعرض بيانات وهمية. سجّل الدخول لعرض بيانات المدرسة.</div>';
-    const lessons=document.getElementById('dashboardLessonsList');if(lessons)lessons.innerHTML='<div class="students-empty">سجّل الدخول لعرض الحصص الفعلية.</div>';
-    const rows=document.getElementById('studentRows');if(rows)rows.innerHTML='<tr><td colspan="5" class="students-empty">سجّل الدخول لعرض الطلاب الفعليين.</td></tr>';
-    window.scrollTo(0,0)
-  });
+
 
   // Remove any service worker/cache from previous broken Vite deployment.
   if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});
@@ -8414,10 +8453,41 @@
   });
 
   const sidebar=document.getElementById('sidebar'),overlay=document.getElementById('overlay'),title=document.getElementById('pageTitle');
-  const switchTo=(id,label)=>{document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='dashboard')loadAdminDashboard();if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='homework')loadHomework();if(id==='schedule')loadAdvancedSchedule();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='finance')loadSchoolFinance();if(id==='expenses')loadSchoolLedger();if(id==='reports')loadManagementReport();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='audit')loadAuditLog();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
+  const switchTo=(id,label)=>{try{sessionStorage.setItem(LAST_SECTION_KEY,id);if(localStorage.getItem(PLATFORM_SESSION_KEY))localStorage.setItem(LAST_SECTION_KEY,id)}catch{}document.querySelectorAll('.module').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.querySelectorAll('[data-section]').forEach(x=>x.classList.toggle('active',x.dataset.section===id));title.textContent=label;sidebar.classList.remove('open');overlay.classList.remove('show');if(id==='dashboard')loadAdminDashboard();if(id==='students')loadRegisteredStudents();if(id==='education'){loadTeachers();loadGroups();loadTeacherRoomRequestsAdmin();loadManagedTeacherRooms();loadTeacherAssistantRequestsAdmin();}if(id==='teacherhub')loadTeacherHub();if(id==='attendance')loadAttendanceGroups();if(id==='rewards')loadRewards();if(id==='assessments')loadAssessments();if(id==='homework')loadHomework();if(id==='schedule')loadAdvancedSchedule();if(id==='certificates')loadCertificates();if(id==='materials')loadMaterials();if(id==='whatsapp')loadWhatsappCenter();if(id==='parenthub')loadParentHub();if(id==='finance')loadSchoolFinance();if(id==='expenses')loadSchoolLedger();if(id==='reports')loadManagementReport();if(id==='assistanthub')loadAssistantHub();if(id==='settings'){loadSystemUsers();loadAccountDirectory();}if(id==='audit')loadAuditLog();if(id==='mygroups')loadPlatformGroups();if(id==='directchat')loadDirectChatContacts();if(id==='mail')loadMailbox('inbox');if(id==='profile')loadProfile();window.scrollTo({top:0,behavior:'smooth'});};
   document.querySelectorAll('[data-section]').forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.section,b.dataset.title)));
   document.getElementById('menu').addEventListener('click',()=>{sidebar.classList.add('open');overlay.classList.add('show')});
   overlay.addEventListener('click',()=>{sidebar.classList.remove('open');overlay.classList.remove('show')});
+
+  const restorePlatformSession=async()=>{
+    if(new URLSearchParams(location.search).get('token'))return;
+    const saved=readStoredPlatformSession();
+    if(!saved?.token)return;
+    try{
+      platformSessionToken=saved.token;
+      const profile=await validateStoredPlatformSession(saved.token);
+      currentPlatformAccount={...(saved.account||{}),...profile,session_token:saved.token};
+      try{
+        saved.store.setItem(PLATFORM_ACCOUNT_KEY,JSON.stringify(currentPlatformAccount));
+      }catch{}
+      enterPlatformPortal(currentPlatformAccount);
+
+      let last='';
+      try{
+        last=sessionStorage.getItem(LAST_SECTION_KEY)||localStorage.getItem(LAST_SECTION_KEY)||'';
+      }catch{}
+      if(last){
+        const nav=document.querySelector('#nav [data-section="'+CSS.escape(last)+'"]');
+        if(nav&&nav.style.display!=='none'){
+          setTimeout(()=>switchTo(last,nav.dataset.title||'ROVEN'),120);
+        }
+      }
+    }catch{
+      platformSessionToken='';
+      currentPlatformAccount=null;
+      clearStoredPlatformSession();
+    }
+  };
+  restorePlatformSession();
 })();
 </script>
 </body>
