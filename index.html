@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1703" />
+  <meta name="roven-build" content="20260924-1713" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1554,7 +1554,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1703';
+  window.__ROVEN_BUILD__='20260924-1713';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3740,6 +3740,12 @@
   document.getElementById('closeTeacherRoomReview').addEventListener('click',closeTeacherRoomReview);
   document.getElementById('cancelTeacherRoomReview').addEventListener('click',closeTeacherRoomReview);
   teacherRoomReviewModal.addEventListener('click',e=>{if(e.target===teacherRoomReviewModal)closeTeacherRoomReview()});
+
+  const teacherSafeJson=value=>{
+    if(value===null||value===undefined||value==='')return null;
+    if(typeof value==='object')return value;
+    try{return JSON.parse(String(value))}catch{return null}
+  };
 
   const loadTeacherRoomRequestsAdmin=async()=>{
     const panel=document.getElementById('teacherRoomAdminPanel');
@@ -6176,7 +6182,7 @@
     notificationCount.classList.toggle('show',total>0);
     notificationSummary.textContent=total?total+' إشعار غير مقروء':'لا توجد إشعارات جديدة';
 
-    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0,homework:0,schedule:0,parenthub:0};
+    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0,homework:0,schedule:0,parenthub:0,education:0,teacherhub:0};
     notificationItems.forEach(x=>{if(sectionCounts[x.section]!==undefined)sectionCounts[x.section]+=Number(x.count||1)});
     Object.entries(sectionCounts).forEach(([k,v])=>setNavNotificationBadge(k,v));
 
