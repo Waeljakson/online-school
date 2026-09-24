@@ -240,6 +240,34 @@ async function ensureSchema(){
       graded_by_account_id uuid references public.platform_accounts(id) on delete set null,
       unique(exam_id,account_id)
     )`;
+    await sql`create table if not exists public.platform_exam_result_records(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      result_ref text,
+      submission_ref text not null,
+      exam_ref text,
+      exam_title text not null,
+      teacher_account_id uuid references public.platform_accounts(id) on delete set null,
+      student_account_id uuid references public.platform_accounts(id) on delete set null,
+      student_id uuid references public.students(id) on delete set null,
+      private_student_id uuid references public.teacher_private_students(id) on delete set null,
+      parent_account_id uuid references public.platform_accounts(id) on delete set null,
+      student_name text,
+      score numeric(10,2) not null default 0,
+      max_score numeric(10,2) not null default 0,
+      mcq_score numeric(10,2) not null default 0,
+      essay_score numeric(10,2) not null default 0,
+      graded_at timestamptz not null default now(),
+      payload jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique(school_id,submission_ref)
+    )`;
+    await sql`create index if not exists exam_result_parent_idx
+      on public.platform_exam_result_records(parent_account_id,graded_at desc)`;
+    await sql`create index if not exists exam_result_student_account_idx
+      on public.platform_exam_result_records(student_account_id,graded_at desc)`;
+
     await sql`create table if not exists public.learning_products(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -1877,7 +1905,7 @@ async function custom(action,a,p){
       where c.revoked_at is null
         and ((c.student_id=any(${schoolStudentIds}::uuid[])) or (c.private_student_id=any(${privateIds}::uuid[])))
       order by c.issued_at desc`;
-    const results=await sql`select at.id attempt_id,e.title,at.score,at.max_score,at.submitted_at,
+    const nativeResults=await sql`select at.id::text attempt_id,e.title,at.score,at.max_score,at.submitted_at,
       s.full_name student_name,ps.full_name private_student_name
       from public.platform_exam_attempts at
       join public.platform_exams e on e.id=at.exam_id
@@ -1886,6 +1914,27 @@ async function custom(action,a,p){
       where at.status='graded'
         and ((at.student_id=any(${schoolStudentIds}::uuid[])) or (at.private_student_id=any(${privateIds}::uuid[])))
       order by at.submitted_at desc`;
+
+    const persistedResults=await sql`select
+      r.submission_ref attempt_id,r.exam_title title,r.score,r.max_score,r.graded_at submitted_at,
+      coalesce(s.full_name,r.student_name) student_name,
+      coalesce(ps.full_name,r.student_name) private_student_name
+      from public.platform_exam_result_records r
+      left join public.students s on s.id=r.student_id
+      left join public.teacher_private_students ps on ps.id=r.private_student_id
+      where r.school_id=${a.school_id}
+        and (
+          r.parent_account_id=${a.account_id}
+          or (r.student_id is not null and r.student_id=any(${schoolStudentIds}::uuid[]))
+          or (r.private_student_id is not null and r.private_student_id=any(${privateIds}::uuid[]))
+        )
+      order by r.graded_at desc`;
+
+    const resultMap=new Map();
+    for(const row of [...nativeResults,...persistedResults]){
+      resultMap.set(String(row.attempt_id),row);
+    }
+    const results=[...resultMap.values()].sort((x,y)=>new Date(y.submitted_at||0)-new Date(x.submitted_at||0));
     return {
       school_students:schoolStudents,
       private_students:privateStudents,
@@ -2022,11 +2071,19 @@ async function custom(action,a,p){
     const certs=await sql`select * from public.platform_certificates
       where revoked_at is null and (student_id=${sid||null} or private_student_id=${psid})
       order by issued_at desc`;
-    const results=await sql`select at.id attempt_id,e.title,at.score,at.max_score,at.submitted_at
+    const nativeResults=await sql`select at.id::text attempt_id,e.title,at.score,at.max_score,at.submitted_at
       from public.platform_exam_attempts at
       join public.platform_exams e on e.id=at.exam_id
       where at.status='graded' and (at.student_id=${sid||null} or at.private_student_id=${psid})
       order by at.submitted_at desc`;
+    const persistedResults=await sql`select submission_ref attempt_id,exam_title title,score,max_score,graded_at submitted_at
+      from public.platform_exam_result_records
+      where school_id=${a.school_id}
+        and (student_account_id=${a.account_id} or student_id=${sid||null} or private_student_id=${psid})
+      order by graded_at desc`;
+    const resultMap=new Map();
+    for(const row of [...nativeResults,...persistedResults])resultMap.set(String(row.attempt_id),row);
+    const results=[...resultMap.values()].sort((x,y)=>new Date(y.submitted_at||0)-new Date(x.submitted_at||0));
     return {student_id:sid,private_student_id:psid,certificates:certs,exam_results:results};
   }
 
@@ -2219,6 +2276,100 @@ async function custom(action,a,p){
     return (await sql`update public.platform_exam_attempts
       set score=${Number(p.p_score||0)},status='graded',graded_by_account_id=${a.account_id}
       where id=${at.id} returning *`)[0];
+  }
+
+  if(action==='exam_result_publish'){
+    must(a,a.account_type==='teacher'||a.account_type==='admin'||String(a.role||'')==='academic_admin');
+    const submissionRef=String(p.p_submission_id||'').trim();
+    if(!submissionRef)throw new Error('submission_id_required');
+
+    const studentAccountId=String(p.p_student_account_id||'').trim()||null;
+    let studentAccount=null,studentId=null,privateStudentId=null,parentAccountId=null,parentInternalEmail=null;
+
+    if(studentAccountId){
+      studentAccount=(await sql`select id,student_id
+        from public.platform_accounts
+        where id=${studentAccountId}::uuid and school_id=${a.school_id} and is_active=true
+        limit 1`)[0]||null;
+    }
+
+    if(studentAccount){
+      const ps=(await sql`select id,guardian_account_id
+        from public.teacher_private_students
+        where platform_account_id=${studentAccount.id} and school_id=${a.school_id} and status='active'
+        order by updated_at desc nulls last
+        limit 1`)[0]||null;
+      if(ps){
+        privateStudentId=ps.id;
+        parentAccountId=ps.guardian_account_id||null;
+      }else if(studentAccount.student_id){
+        studentId=studentAccount.student_id;
+      }
+    }
+
+    if(!parentAccountId && studentId){
+      parentAccountId=(await sql`select parent_account_id
+        from public.platform_parent_student_links
+        where school_id=${a.school_id} and student_id=${studentId}
+        order by created_at desc
+        limit 1`)[0]?.parent_account_id||null;
+    }
+
+    if(!parentAccountId && studentId){
+      parentAccountId=(await sql`select pa.id
+        from public.student_parents sp
+        join public.platform_accounts pa
+          on pa.parent_id=sp.parent_id
+         and pa.school_id=${a.school_id}
+         and pa.account_type='parent'
+         and pa.is_active=true
+        where sp.student_id=${studentId}
+        order by pa.updated_at desc nulls last,pa.created_at desc
+        limit 1`)[0]?.id||null;
+    }
+
+    if(parentAccountId){
+      parentInternalEmail=(await sql`select internal_email
+        from public.platform_accounts where id=${parentAccountId} and is_active=true limit 1`)[0]?.internal_email||null;
+    }
+
+    const score=Number(p.p_score||0),maxScore=Number(p.p_max_score||0);
+    const payload={
+      result_id:p.p_result_id||null,
+      submission_id:submissionRef,
+      exam_id:p.p_exam_id||null,
+      exam_title:p.p_exam_title||'اختبار',
+      student_name:p.p_student_name||studentAccount?.display_name||null,
+      score,max_score:maxScore,
+      mcq_score:Number(p.p_mcq_score||0),
+      essay_score:Number(p.p_essay_score||0),
+      graded_at:p.p_graded_at||new Date().toISOString()
+    };
+
+    const rr=(await sql`insert into public.platform_exam_result_records(
+      school_id,result_ref,submission_ref,exam_ref,exam_title,teacher_account_id,
+      student_account_id,student_id,private_student_id,parent_account_id,student_name,
+      score,max_score,mcq_score,essay_score,graded_at,payload
+    ) values(
+      ${a.school_id},${payload.result_id},${submissionRef},${payload.exam_id},${payload.exam_title},${a.account_id},
+      ${studentAccount?.id||null},${studentId},${privateStudentId},${parentAccountId},${payload.student_name},
+      ${score},${maxScore},${payload.mcq_score},${payload.essay_score},${payload.graded_at}::timestamptz,${JSON.stringify(payload)}::jsonb
+    )
+    on conflict(school_id,submission_ref) do update set
+      result_ref=excluded.result_ref,
+      exam_ref=excluded.exam_ref,
+      exam_title=excluded.exam_title,
+      teacher_account_id=excluded.teacher_account_id,
+      student_account_id=coalesce(excluded.student_account_id,public.platform_exam_result_records.student_account_id),
+      student_id=coalesce(excluded.student_id,public.platform_exam_result_records.student_id),
+      private_student_id=coalesce(excluded.private_student_id,public.platform_exam_result_records.private_student_id),
+      parent_account_id=coalesce(excluded.parent_account_id,public.platform_exam_result_records.parent_account_id),
+      student_name=coalesce(excluded.student_name,public.platform_exam_result_records.student_name),
+      score=excluded.score,max_score=excluded.max_score,mcq_score=excluded.mcq_score,essay_score=excluded.essay_score,
+      graded_at=excluded.graded_at,payload=excluded.payload,updated_at=now()
+    returning *`)[0];
+
+    return {...rr,parent_internal_email:parentInternalEmail};
   }
 
   if(action==='products_list'){
@@ -3376,7 +3527,7 @@ export default{
         'assistant_context','parent_dashboard','student_dashboard',
         'certificate_create','certificate_list_owned','certificate_delete',
         'exam_create','exam_save_questions','exam_publish','exam_delete','exam_list_owned',
-        'exam_my_available','exam_get','exam_submit','exam_attempts_owned','exam_grade_essay',
+        'exam_my_available','exam_get','exam_submit','exam_attempts_owned','exam_grade_essay','exam_result_publish',
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
