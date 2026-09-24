@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-2045" />
+  <meta name="roven-build" content="20260924-2130" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1599,7 +1599,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-2045';
+  window.__ROVEN_BUILD__='20260924-2130';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -4021,7 +4021,7 @@
         const key=String(x.private_student_id||x.id||'');
         if(key)fallbackPrivateMap.set(key,{...x,id:x.id||key,private_student_id:x.private_student_id||key,_fallback:true});
       });
-    const fallbackPrivateStudents=[...fallbackPrivateMap.values()].filter(x=>x.status!=='deleted');
+    const fallbackPrivateStudents=[...fallbackPrivateMap.values()].filter(x=>!['deleted','migrated'].includes(String(x.status||'')));
     const dbPrivateIds=new Set(dbPrivateStudents.map(x=>String(x.id||x.private_student_id||'')));
     teacherPrivateStudentsCache=[...dbPrivateStudents,...fallbackPrivateStudents.filter(x=>!dbPrivateIds.has(String(x.id||x.private_student_id||'')))];
     const privatePaymentMap=new Map();
@@ -4176,6 +4176,79 @@
     parent_name:st?.parent_name||null
   });
 
+  const migrateFallbackPrivateStudent=async st=>{
+    const ctx=await hydratePlatformContext();
+    if(!ctx?.internal_email)throw new Error('تعذر تحديد حساب المعلم.');
+    const oldId=String(st?.id||st?.private_student_id||'');
+    if(!oldId)throw new Error('تعذر تحديد سجل الطالب المؤقت.');
+
+    const created=await dataApiFetch('/rpc/teacher_private_student_upsert',{method:'POST',body:JSON.stringify({
+      p_private_student_id:null,
+      p_group_id:st.group_id,
+      p_full_name:st.full_name,
+      p_phone:st.phone||null,
+      p_parent_name:st.parent_name||null,
+      p_parent_phone:st.parent_phone||null,
+      p_monthly_fee:Number(st.monthly_fee||0),
+      p_books_fee:Number(st.books_fee||0),
+      p_books_free:Boolean(st.books_free),
+      p_joined_on:st.joined_on||new Date().toISOString().slice(0,10),
+      p_notes:st.notes||'تم ترحيل الطالب من السجل المؤقت بعد تفعيل خدمة الحسابات.'
+    })});
+    const newId=String(created?.id||created?.private_student_id||'');
+    if(!newId)throw new Error('تم إنشاء الحساب لكن لم يتم إرجاع رقم سجل الطالب.');
+
+    // Mark the old fallback row as migrated so it disappears after refresh.
+    await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',oldId,{
+      ...st,id:oldId,private_student_id:oldId,status:'migrated',
+      migrated_to:newId,migrated_at:new Date().toISOString(),updated_at:new Date().toISOString()
+    });
+
+    // Move historical paid amounts into the real DB record without duplicating the finance ledger.
+    const oldPayments=teacherPrivatePaymentsCache.filter(p=>String(p.private_student_id||'')===oldId);
+    if(oldPayments.length){
+      for(const p of oldPayments){
+        const amount=Number(p.amount||0);
+        if(!(amount>0))continue;
+        try{
+          await dataApiFetch('/rpc/teacher_private_payment_add',{method:'POST',body:JSON.stringify({
+            p_private_student_id:newId,
+            p_amount:amount,
+            p_date:p.date||String(p.created_at||'').slice(0,10)||new Date().toISOString().slice(0,10),
+            p_method:p.method||'cash',
+            p_note:(p.note||'')+' — ترحيل من السجل المؤقت',
+            p_payment_kind:p.payment_kind||'tuition'
+          })});
+        }catch{}
+      }
+    }else{
+      const totals=[
+        {amount:Number(st.month_paid||0),kind:'tuition',note:'ترحيل إجمالي الاشتراك من السجل المؤقت'},
+        {amount:Number(st.books_paid||0),kind:'books',note:'ترحيل إجمالي الكتب من السجل المؤقت'}
+      ];
+      for(const p of totals){
+        if(!(p.amount>0))continue;
+        try{
+          await dataApiFetch('/rpc/teacher_private_payment_add',{method:'POST',body:JSON.stringify({
+            p_private_student_id:newId,p_amount:p.amount,
+            p_date:st.joined_on||new Date().toISOString().slice(0,10),
+            p_method:'cash',p_note:p.note,p_payment_kind:p.kind
+          })});
+        }catch{}
+      }
+    }
+
+    await sendStructuredMail(ctx.internal_email,'PRIVATE_CREDENTIAL_CARD',newId,{
+      private_student_id:newId,group_id:st.group_id,student_name:st.full_name,
+      student_username:created?.student_username||null,student_password:created?.student_password||null,
+      parent_name:st.parent_name||null,parent_username:created?.parent_username||null,
+      parent_password:created?.parent_password||null,issued_at:new Date().toISOString(),
+      migrated_from:oldId
+    }).catch(()=>{});
+
+    return created;
+  };
+
   const issuePrivateStudentCard=async st=>{
     if(!st)return;
     const msg=document.getElementById('privateStudentMsg');
@@ -4207,6 +4280,23 @@
       }
     }catch(err){
       const raw=String(err?.message||err||'');
+      if(st?._fallback && /private_student_not_found|student_login_account_missing/i.test(raw)){
+        try{
+          msg.textContent='جارٍ تحويل السجل المؤقت إلى حساب طالب حقيقي...';
+          msg.className='student-form-msg show';
+          const result=await migrateFallbackPrivateStudent(st);
+          const finance=privateStudentFinanceSnapshot(st);
+          renderPrivateCredentialCard(result,st.full_name,st.group_id,finance);
+          msg.textContent='تم تحويل الطالب إلى سجل حقيقي وإنشاء حساب الطالب وولي الأمر. البطاقة جاهزة للحفظ كصورة.';
+          msg.className='student-form-msg success show';
+          setTimeout(()=>loadTeacherHub().catch(()=>{}),700);
+          return;
+        }catch(migrateErr){
+          msg.textContent=migrateErr?.message||'تعذر تحويل سجل الطالب المؤقت.';
+          msg.className='student-form-msg error show';
+          return;
+        }
+      }
       if(/unsupported_action|unknown_custom_action|unsupported action|not supported/i.test(raw)){
         try{
           const mails=[...(await structuredMail('sent').catch(()=>[])),...(await structuredMail('inbox').catch(()=>[]))];
