@@ -828,6 +828,96 @@ async function privateRoomAccess(a,groupId,requireChat=false){
   return null;
 }
 
+async function guardianByPhone(schoolId,rawPhone,preferredAccountId=null){
+  const digits=String(rawPhone||'').replace(/\D/g,'').replace(/^00/,'');
+  if(!digits)return null;
+
+  const rows=await sql`select distinct pa.id,pa.username,pa.account_code,pa.internal_email,pa.display_name,pa.parent_id,pa.created_at
+    from public.platform_accounts pa
+    left join public.parents pr on pr.id=pa.parent_id
+    where pa.school_id=${schoolId}
+      and pa.account_type='parent'
+      and pa.is_active=true
+      and (
+        regexp_replace(regexp_replace(coalesce(to_jsonb(pr)->>'phone',''),'\\D','','g'),'^00','')=${digits}
+        or exists(
+          select 1 from public.teacher_private_students ps
+          where ps.guardian_account_id=pa.id
+            and ps.school_id=${schoolId}
+            and regexp_replace(regexp_replace(coalesce(ps.parent_phone,''),'\\D','','g'),'^00','')=${digits}
+        )
+      )
+    order by pa.created_at asc nulls last`;
+
+  if(!rows.length)return null;
+  const preferred=preferredAccountId?rows.find(x=>String(x.id)===String(preferredAccountId)):null;
+  return preferred||rows[0];
+}
+
+async function unifyGuardianPhoneLinks(schoolId,rawPhone,preferredAccountId=null){
+  const digits=String(rawPhone||'').replace(/\D/g,'').replace(/^00/,'');
+  if(!digits)return null;
+
+  let guardian=await guardianByPhone(schoolId,rawPhone,preferredAccountId);
+  if(!guardian)return null;
+
+  const matchingAccounts=await sql`select distinct pa.id,pa.parent_id
+    from public.platform_accounts pa
+    left join public.parents pr on pr.id=pa.parent_id
+    where pa.school_id=${schoolId}
+      and pa.account_type='parent'
+      and pa.is_active=true
+      and (
+        regexp_replace(regexp_replace(coalesce(to_jsonb(pr)->>'phone',''),'\\D','','g'),'^00','')=${digits}
+        or exists(
+          select 1 from public.teacher_private_students ps
+          where ps.guardian_account_id=pa.id
+            and ps.school_id=${schoolId}
+            and regexp_replace(regexp_replace(coalesce(ps.parent_phone,''),'\\D','','g'),'^00','')=${digits}
+        )
+      )`;
+
+  const accountIds=matchingAccounts.map(x=>x.id);
+  const parentIds=matchingAccounts.map(x=>x.parent_id).filter(Boolean);
+
+  await sql`update public.teacher_private_students
+    set guardian_account_id=${guardian.id},updated_at=now()
+    where school_id=${schoolId}
+      and status='active'
+      and regexp_replace(regexp_replace(coalesce(parent_phone,''),'\\D','','g'),'^00','')=${digits}
+      and guardian_account_id is distinct from ${guardian.id}`;
+
+  if(accountIds.length){
+    const directLinks=await sql`select distinct student_id,coalesce(relationship,'guardian') relationship
+      from public.platform_parent_student_links
+      where school_id=${schoolId}
+        and parent_account_id=any(${accountIds}::uuid[])`;
+    for(const link of directLinks){
+      await sql`insert into public.platform_parent_student_links(
+        school_id,parent_account_id,student_id,relationship
+      ) values(${schoolId},${guardian.id},${link.student_id},${link.relationship})
+      on conflict(parent_account_id,student_id)
+      do update set relationship=excluded.relationship`;
+    }
+  }
+
+  if(parentIds.length){
+    const familyStudents=await sql`select distinct sp.student_id
+      from public.student_parents sp
+      join public.students s on s.id=sp.student_id
+      where sp.parent_id=any(${parentIds}::uuid[])
+        and s.school_id=${schoolId}`;
+    for(const row of familyStudents){
+      await sql`insert into public.platform_parent_student_links(
+        school_id,parent_account_id,student_id,relationship
+      ) values(${schoolId},${guardian.id},${row.student_id},'guardian')
+      on conflict(parent_account_id,student_id) do nothing`;
+    }
+  }
+
+  return guardian;
+}
+
 async function custom(action,a,p){
   await ensureSchema();
 
@@ -1151,16 +1241,25 @@ async function custom(action,a,p){
     if(contract.capacity&&currentCount>=Number(contract.capacity))throw new Error('room_capacity_reached');
 
     if(existingId){
+      let guardian=null;
+      if(String(p.p_parent_phone||'').trim()){
+        guardian=await unifyGuardianPhoneLinks(a.school_id,p.p_parent_phone,null);
+      }
       const rr=await sql`update public.teacher_private_students
         set full_name=${fullName},phone=${p.p_phone||null},parent_name=${p.p_parent_name||null},
-            parent_phone=${p.p_parent_phone||null},monthly_fee=${Number(p.p_monthly_fee||0)},
+            parent_phone=${p.p_parent_phone||null},
+            guardian_account_id=coalesce(${guardian?.id||null}::uuid,guardian_account_id),
+            monthly_fee=${Number(p.p_monthly_fee||0)},
             books_fee=${Number(p.p_books_fee||0)},books_free=${Boolean(p.p_books_free)},
             joined_on=${p.p_joined_on||new Date().toISOString().slice(0,10)}::date,
             notes=${p.p_notes||null},group_id=${gid}::uuid,updated_at=now()
         where id=${existingId}::uuid and teacher_account_id=${teacherId}
         returning *`;
       if(!rr.length)throw new Error('private_student_not_found');
-      return rr[0];
+      if(String(p.p_parent_phone||'').trim()){
+        guardian=await unifyGuardianPhoneLinks(a.school_id,p.p_parent_phone,guardian?.id||rr[0].guardian_account_id);
+      }
+      return {...rr[0],guardian_account_id:guardian?.id||rr[0].guardian_account_id};
     }
 
     const code='TPS-'+Date.now().toString(36).toUpperCase();
@@ -1173,8 +1272,13 @@ async function custom(action,a,p){
         ${fullName},crypt(${pw},gen_salt('bf',10)),true
       ) returning id,username,account_code,internal_email`)[0];
 
-    let guardian=null,guardianPassword=null;
-    if(String(p.p_parent_name||'').trim()){
+    let guardian=null,guardianPassword=null,parentReused=false;
+    const parentPhone=String(p.p_parent_phone||'').trim();
+    if(parentPhone){
+      guardian=await unifyGuardianPhoneLinks(a.school_id,parentPhone,null);
+      parentReused=Boolean(guardian);
+    }
+    if(!guardian&&String(p.p_parent_name||'').trim()){
       const gcode='ROV-PV-'+Date.now().toString(36).toUpperCase();
       guardianPassword=(await sql`select public.platform_make_password() password`)[0].password;
       guardian=(await sql`insert into public.platform_accounts(
@@ -1197,14 +1301,20 @@ async function custom(action,a,p){
         ${p.p_joined_on||new Date().toISOString().slice(0,10)}::date,${p.p_notes||null}
       ) returning *`)[0];
 
+    if(guardian&&parentPhone){
+      guardian=await unifyGuardianPhoneLinks(a.school_id,parentPhone,guardian.id)||guardian;
+    }
+
     return {
       ...row,
+      guardian_account_id:guardian?.id||row.guardian_account_id,
       student_username:acct.username,
       student_password:pw,
       student_internal_email:acct.internal_email,
       parent_username:guardian?.username||null,
       parent_password:guardianPassword,
-      parent_internal_email:guardian?.internal_email||null
+      parent_internal_email:guardian?.internal_email||null,
+      parent_reused:parentReused
     };
   }
 
@@ -1256,7 +1366,22 @@ async function custom(action,a,p){
       returning platform_account_id,guardian_account_id`;
     if(!rr.length)throw new Error('private_student_not_found');
     if(rr[0].platform_account_id)await sql`update public.platform_accounts set is_active=false,updated_at=now() where id=${rr[0].platform_account_id}`;
-    if(rr[0].guardian_account_id)await sql`update public.platform_accounts set is_active=false,updated_at=now() where id=${rr[0].guardian_account_id}`;
+    if(rr[0].guardian_account_id){
+      const guardianStillUsed=Number((await sql`select (
+          (select count(*) from public.teacher_private_students
+            where guardian_account_id=${rr[0].guardian_account_id} and status='active')
+          +
+          (select count(*) from public.platform_parent_student_links
+            where parent_account_id=${rr[0].guardian_account_id})
+          +
+          (select count(*) from public.student_parents sp
+            join public.platform_accounts pa on pa.parent_id=sp.parent_id
+            where pa.id=${rr[0].guardian_account_id})
+        )::int n`)[0]?.n||0);
+      if(!guardianStillUsed){
+        await sql`update public.platform_accounts set is_active=false,updated_at=now() where id=${rr[0].guardian_account_id}`;
+      }
+    }
     return {deleted:true};
   }
 
@@ -1416,6 +1541,23 @@ async function custom(action,a,p){
 
     if(resolvedParentId){
       schoolStudentIds=(await sql`select student_id from public.student_parents where parent_id=${resolvedParentId}`).map(x=>x.student_id);
+    }
+
+    let guardianPhone='';
+    const privatePhone=(await sql`select parent_phone
+      from public.teacher_private_students
+      where guardian_account_id=${a.account_id}
+        and status='active'
+        and coalesce(parent_phone,'')<>''
+      order by updated_at desc nulls last
+      limit 1`)[0]?.parent_phone||'';
+    guardianPhone=String(privatePhone||'');
+    if(!guardianPhone&&resolvedParentId){
+      guardianPhone=String((await sql`select coalesce(to_jsonb(pr)->>'phone','') phone
+        from public.parents pr where pr.id=${resolvedParentId} limit 1`)[0]?.phone||'');
+    }
+    if(guardianPhone){
+      await unifyGuardianPhoneLinks(a.school_id,guardianPhone,a.account_id);
     }
 
     const directSchoolIds=(await sql`select student_id
