@@ -303,7 +303,7 @@
       <button data-section="whatsapp" data-title="مركز واتساب"><span class="ico">☎</span>مركز واتساب</button>
       <button data-section="parenthub" data-title="متابعة الأبناء" style="display:none"><span class="ico">👨‍👩‍👧</span>متابعة الأبناء</button>
       <button data-section="finance" data-title="الاشتراكات والتحصيل"><span class="ico">💳</span>الاشتراكات والتحصيل</button>
-      <button data-section="expenses" data-title="المصروفات والإيرادات"><span class="ico">💰</span>المصروفات والإيرادات</button>
+      <button data-section="expenses" data-title="الحركة المالية والتحصيل"><span class="ico">💰</span>الحركة المالية والتحصيل</button>
       <button data-section="reports" data-title="التقارير"><span class="ico">▥</span>التقارير</button>
       <button data-section="teacherhub" data-title="لوحة المعلم" style="display:none"><span class="ico">👨‍🏫</span>لوحة المعلم</button>
       <button data-section="assistanthub" data-title="لوحة مساعد المعلم" style="display:none"><span class="ico">🧑‍💼</span>لوحة مساعد المعلم</button>
@@ -699,14 +699,43 @@
       </section>
       <section class="module" id="expenses">
         <div class="section-toolbar">
-          <div><h2>المصروفات والإيرادات</h2><p>دفتر الحركة المالية الفعلية للمصروفات والإيرادات الأخرى.</p></div>
+          <div><h2>سجل الحركة المالية والتحصيل</h2><p>مصروفات وإيرادات المدرسة، مع تحصيل رسوم القاعات من المعلمين وإصدار إيصالات رسمية.</p></div>
           <button class="link-btn" id="refreshSchoolLedger" type="button">تحديث</button>
         </div>
         <div class="stats">
-          <div class="stat"><div class="stat-head"><span>إيرادات أخرى</span><span class="stat-icon">↗</span></div><div class="value" id="ledgerIncomeValue">—</div><div class="sub">غير تحصيل اشتراكات الطلاب</div></div>
+          <div class="stat"><div class="stat-head"><span>إجمالي الإيرادات</span><span class="stat-icon">↗</span></div><div class="value" id="ledgerIncomeValue">—</div><div class="sub">إيرادات أخرى + رسوم القاعات</div></div>
+          <div class="stat"><div class="stat-head"><span>تحصيل رسوم القاعات</span><span class="stat-icon">🏫</span></div><div class="value" id="roomFeesCollectedValue">—</div><div class="sub">الدفعات غير الملغاة</div></div>
           <div class="stat"><div class="stat-head"><span>إجمالي المصروفات</span><span class="stat-icon">↘</span></div><div class="value" id="ledgerExpenseValue">—</div><div class="sub">من الحركات المسجلة</div></div>
-          <div class="stat"><div class="stat-head"><span>صافي الحركة</span><span class="stat-icon">₤</span></div><div class="value" id="ledgerNetValue">—</div><div class="sub">الإيرادات الأخرى − المصروفات</div></div>
+          <div class="stat"><div class="stat-head"><span>صافي الحركة</span><span class="stat-icon">₤</span></div><div class="value" id="ledgerNetValue">—</div><div class="sub">الإيرادات − المصروفات</div></div>
         </div>
+
+        <div class="grid" style="margin-top:15px">
+          <article class="panel">
+            <div class="panel-head"><div><h3>تحصيل رسوم قاعة من معلم</h3><p>يتم ربط الدفعة باتفاق القاعة وشهر الاستحقاق وإصدار رقم إيصال.</p></div><span>🏫</span></div>
+            <form id="teacherRoomCollectionForm">
+              <div class="form-grid">
+                <div class="form-field"><label>شهر الاستحقاق</label><input id="teacherRoomBillingPeriod" type="month" required></div>
+                <div class="form-field"><label>المعلم / القاعة</label><select id="teacherRoomCollectionRoom" required><option value="">اختر القاعة</option></select></div>
+                <div class="form-field"><label>تاريخ التحصيل</label><input id="teacherRoomCollectionDate" type="date" required></div>
+                <div class="form-field"><label>المبلغ المحصل</label><input id="teacherRoomCollectionAmount" type="number" min="0.01" step="0.01" required></div>
+                <div class="form-field"><label>طريقة التحصيل</label><select id="teacherRoomCollectionMethod"><option value="cash">نقدي</option><option value="bank_transfer">تحويل بنكي</option><option value="card">بطاقة</option><option value="wallet">محفظة</option><option value="online">أونلاين</option><option value="other">أخرى</option></select></div>
+                <div class="form-field"><label>ملاحظة</label><input id="teacherRoomCollectionNote" placeholder="مثال: رسوم القاعة عن شهر سبتمبر"></div>
+              </div>
+              <div class="finance-student-balance" id="teacherRoomCollectionSummary">اختر القاعة لعرض المستحق والمحصل والمتبقي.</div>
+              <div class="student-form-msg" id="teacherRoomCollectionMsg"></div>
+              <div class="room-actions" style="margin-top:10px">
+                <button class="primary-action" type="submit">تحصيل وإصدار إيصال</button>
+                <button class="secondary-action" id="printLatestTeacherRoomReceipt" type="button" style="display:none">طباعة آخر إيصال</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head"><div><h3>مستحقات القاعات للشهر</h3><p>السعر المتفق عليه، المحصل والمتبقي لكل قاعة.</p></div><span>📊</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:720px"><thead><tr><th>المعلم</th><th>القاعة</th><th>طريقة الحساب</th><th>المستحق</th><th>المحصل</th><th>المتبقي</th><th>إجراء</th></tr></thead><tbody id="teacherRoomBalancesRows"><tr><td colspan="7" class="students-empty">جارٍ تحميل القاعات...</td></tr></tbody></table></div>
+          </article>
+        </div>
+
         <div class="grid" style="margin-top:15px">
           <article class="panel">
             <div class="panel-head"><div><h3>تسجيل حركة مالية</h3><p>كل حركة تُحفظ باسم من قام بتسجيلها.</p></div><span>🧾</span></div>
@@ -726,8 +755,8 @@
             </form>
           </article>
           <article class="panel">
-            <div class="panel-head"><div><h3>آخر الحركات</h3><p>سجل فعلي قابل للمراجعة والإلغاء.</p></div><span>📒</span></div>
-            <div class="table-wrap"><table class="table" style="min-width:760px"><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>البيان</th><th>الطريقة</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody id="schoolLedgerRows"><tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr></tbody></table></div>
+            <div class="panel-head"><div><h3>آخر الحركات والتحصيلات</h3><p>يشمل الحركات العامة وإيصالات رسوم القاعات.</p></div><span>📒</span></div>
+            <div class="table-wrap"><table class="table" style="min-width:820px"><thead><tr><th>التاريخ</th><th>النوع</th><th>التصنيف</th><th>البيان</th><th>الطريقة</th><th>المبلغ</th><th>إجراء</th></tr></thead><tbody id="schoolLedgerRows"><tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr></tbody></table></div>
           </article>
         </div>
       </section>
@@ -7886,39 +7915,184 @@
   // ===== School expense/income ledger =====
   let schoolLedgerEntriesCache=[];
   let schoolLedgerVoidsCache=new Set();
+  let teacherRoomFinanceCache={period:'',rooms:[],payments:[]};
+  let latestTeacherRoomReceipt=null;
   const schoolLedgerEntryRecords=rows=>latestStructuredBy(rows,'SCHOOL_LEDGER_ENTRY','entry_id');
   const schoolLedgerVoidSet=rows=>new Set(latestStructuredBy(rows,'SCHOOL_LEDGER_VOID','entry_id').map(x=>String(x.entry_id)));
   const ledgerMethodLabel={cash:'نقدي',bank_transfer:'تحويل بنكي',card:'بطاقة',wallet:'محفظة',online:'أونلاين',other:'أخرى'};
+  const roomFeeBasisLabel={monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'};
+
+  const activeTeacherRoomPayments=()=>Array.isArray(teacherRoomFinanceCache?.payments)
+    ?teacherRoomFinanceCache.payments.filter(x=>!x.voided_at):[];
+
+  const selectedTeacherRoom=()=>teacherRoomFinanceCache.rooms.find(x=>
+    String(x.group_id)===String(document.getElementById('teacherRoomCollectionRoom')?.value||'')
+  );
+
+  const updateTeacherRoomCollectionSummary=()=>{
+    const room=selectedTeacherRoom();
+    const box=document.getElementById('teacherRoomCollectionSummary');
+    if(!room){box.textContent='اختر القاعة لعرض المستحق والمحصل والمتبقي.';return}
+    box.innerHTML='المعلم: <b>'+escapeHtml(room.teacher_name||'—')+'</b> • القاعة: <b>'+escapeHtml(room.group_name||'—')+
+      '</b><br>المستحق: <b>'+dashboardMoney(room.due)+'</b> • المحصل: <b class="paid">'+dashboardMoney(room.period_paid)+
+      '</b> • المتبقي: <b class="due">'+dashboardMoney(room.balance)+'</b> • الحساب: '+escapeHtml(roomFeeBasisLabel[room.pricing_basis]||room.pricing_basis||'شهري');
+    const amount=document.getElementById('teacherRoomCollectionAmount');
+    if(amount&&!amount.value&&Number(room.balance)>0)amount.value=Number(room.balance).toFixed(2);
+  };
+
+  const renderTeacherRoomBalances=()=>{
+    const select=document.getElementById('teacherRoomCollectionRoom');
+    const tbody=document.getElementById('teacherRoomBalancesRows');
+    const rooms=Array.isArray(teacherRoomFinanceCache?.rooms)?teacherRoomFinanceCache.rooms:[];
+    const current=select?.value||'';
+    if(select){
+      select.innerHTML='<option value="">اختر القاعة</option>'+rooms.map(r=>
+        '<option value="'+escapeHtml(r.group_id)+'">'+escapeHtml(r.teacher_name||'معلم')+' — '+escapeHtml(r.group_name||'قاعة')+'</option>'
+      ).join('');
+      if(current&&rooms.some(r=>String(r.group_id)===String(current)))select.value=current;
+    }
+    if(tbody){
+      tbody.innerHTML=rooms.length?rooms.map(r=>`<tr>
+        <td><b>${escapeHtml(r.teacher_name||'—')}</b></td>
+        <td>${escapeHtml(r.group_name||'—')}</td>
+        <td>${escapeHtml(roomFeeBasisLabel[r.pricing_basis]||r.pricing_basis||'—')}</td>
+        <td>${dashboardMoney(r.due)}</td>
+        <td><b class="paid">${dashboardMoney(r.period_paid)}</b></td>
+        <td><b class="${Number(r.balance)>0?'due':'paid'}">${dashboardMoney(r.balance)}</b></td>
+        <td><button class="secondary-action collect-room-fee-btn" type="button" data-group-id="${escapeHtml(r.group_id)}">تحصيل</button></td>
+      </tr>`).join(''):'<tr><td colspan="7" class="students-empty">لا توجد قاعات خاصة نشطة.</td></tr>';
+    }
+    updateTeacherRoomCollectionSummary();
+  };
+
+  const printTeacherRoomReceipt=receipt=>{
+    if(!receipt)return;
+    const logo=new URL('assets/rivan-logo.jpg',location.href).href;
+    const method=ledgerMethodLabel[receipt.method]||receipt.method||'—';
+    const period=receipt.billing_period||teacherRoomFinanceCache.period||'—';
+    const w=window.open('','_blank','width=820,height=720');if(!w)return;
+    w.document.write('<html dir="rtl"><head><title>إيصال '+escapeHtml(receipt.receipt_no||'')+'</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"><style>@page{size:A5;margin:10mm}*{box-sizing:border-box}body{font-family:Cairo,Arial;color:#172331;margin:0;padding:18px}.receipt{border:2px solid #0f766e;border-radius:16px;padding:22px}.head{text-align:center;border-bottom:1px solid #cfdadd;padding-bottom:14px}.head img{width:80px;height:80px;object-fit:contain}.head h1{font-size:21px;margin:4px}.head p{margin:0;color:#667780;font-size:11px}.no{margin:16px 0;padding:10px;background:#f3f8f8;border-radius:10px;text-align:center;font-weight:800}.row{display:flex;justify-content:space-between;gap:14px;border-bottom:1px dashed #d6dfe3;padding:9px 0;font-size:12px}.row b{font-weight:800}.amount{font-size:26px;color:#0f766e;text-align:center;font-weight:800;padding:18px}.foot{text-align:center;color:#718087;font-size:10px;margin-top:18px}</style></head><body><div class="receipt"><div class="head"><img src="'+logo+'"><h1>إيصال تحصيل رسوم قاعة</h1><p>ROVEN Online School</p></div><div class="no">رقم الإيصال: '+escapeHtml(receipt.receipt_no||'—')+'</div><div class="row"><span>المعلم</span><b>'+escapeHtml(receipt.teacher_name||'—')+'</b></div><div class="row"><span>القاعة</span><b>'+escapeHtml(receipt.group_name||'—')+'</b></div><div class="row"><span>شهر الاستحقاق</span><b>'+escapeHtml(period)+'</b></div><div class="row"><span>تاريخ التحصيل</span><b>'+escapeHtml(String(receipt.paid_on||receipt.date||'—'))+'</b></div><div class="row"><span>طريقة التحصيل</span><b>'+escapeHtml(method)+'</b></div>'+(receipt.note?'<div class="row"><span>البيان</span><b>'+escapeHtml(receipt.note)+'</b></div>':'')+'<div class="amount">'+escapeHtml(dashboardMoney(receipt.amount))+'</div>'+(receipt.balance!==undefined?'<div class="row"><span>المتبقي بعد السداد</span><b>'+escapeHtml(dashboardMoney(receipt.balance))+'</b></div>':'')+'<div class="foot">إيصال صادر إلكترونيًا من نظام ROVEN — '+escapeHtml(new Date(receipt.created_at||Date.now()).toLocaleString('ar-EG'))+'</div></div><script>window.addEventListener("load",()=>window.print())<\/script></body></html>');
+    w.document.close();
+  };
 
   const renderSchoolLedger=()=>{
     const rows=document.getElementById('schoolLedgerRows');if(!rows)return;
     const active=schoolLedgerEntriesCache.filter(x=>!schoolLedgerVoidsCache.has(String(x.entry_id)));
-    const income=active.filter(x=>x.type==='income').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const roomPayments=activeTeacherRoomPayments();
+    const generalIncome=active.filter(x=>x.type==='income').reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const roomIncome=roomPayments.reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const income=generalIncome+roomIncome;
     const expense=active.filter(x=>x.type==='expense').reduce((sum,x)=>sum+Number(x.amount||0),0);
     document.getElementById('ledgerIncomeValue').textContent=dashboardMoney(income);
+    document.getElementById('roomFeesCollectedValue').textContent=dashboardMoney(roomIncome);
     document.getElementById('ledgerExpenseValue').textContent=dashboardMoney(expense);
     document.getElementById('ledgerNetValue').textContent=dashboardMoney(income-expense);
-    rows.innerHTML=active.length?active.sort((a,b)=>new Date(b.date||b.recorded_at||0)-new Date(a.date||a.recorded_at||0)).slice(0,80).map(x=>`<tr>
-      <td>${escapeHtml(x.date||'—')}</td>
+
+    const movements=[
+      ...active.map(x=>({...x,_kind:'ledger',_date:x.date||x.recorded_at||''})),
+      ...roomPayments.map(x=>({
+        ...x,_kind:'room_fee',_date:x.paid_on||x.created_at||'',
+        type:'income',category:'رسوم القاعات',
+        note:(x.teacher_name||'معلم')+' — '+(x.group_name||'قاعة')+' — '+(x.billing_period||''),
+        date:x.paid_on
+      }))
+    ].sort((a,b)=>new Date(b._date||0)-new Date(a._date||0)).slice(0,100);
+
+    rows.innerHTML=movements.length?movements.map(x=>`<tr>
+      <td>${escapeHtml(x.date||x.paid_on||'—')}</td>
       <td><span class="status ${x.type==='income'?'active':'watch'}">${x.type==='income'?'إيراد':'مصروف'}</span></td>
       <td>${escapeHtml(x.category||'أخرى')}</td>
       <td>${escapeHtml(x.note||'—')}</td>
       <td>${escapeHtml(ledgerMethodLabel[x.method]||x.method||'—')}</td>
       <td><b class="${x.type==='income'?'paid':'due'}">${dashboardMoney(x.amount)}</b></td>
-      <td><button class="secondary-action void-ledger-entry" type="button" data-entry-id="${escapeHtml(x.entry_id)}" style="color:#b42318">إلغاء</button></td>
+      <td>${x._kind==='room_fee'
+        ?'<div style="display:flex;gap:5px;flex-wrap:wrap"><button class="secondary-action print-room-fee-receipt" type="button" data-payment-id="'+escapeHtml(x.payment_id)+'">إيصال</button><button class="secondary-action void-room-fee-payment" type="button" data-payment-id="'+escapeHtml(x.payment_id)+'" style="color:#b42318">إلغاء</button></div>'
+        :'<button class="secondary-action void-ledger-entry" type="button" data-entry-id="'+escapeHtml(x.entry_id)+'" style="color:#b42318">إلغاء</button>'}</td>
     </tr>`).join(''):'<tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr>';
   };
 
   const loadSchoolLedger=async()=>{
     const rows=document.getElementById('schoolLedgerRows');if(rows)rows.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل الحركات الفعلية...</td></tr>';
+    const periodInput=document.getElementById('teacherRoomBillingPeriod');
+    const period=periodInput?.value||new Date().toISOString().slice(0,7);
+    if(periodInput&&!periodInput.value)periodInput.value=period;
     const inbox=await structuredMail('inbox');
     schoolLedgerEntriesCache=schoolLedgerEntryRecords(inbox);
     schoolLedgerVoidsCache=schoolLedgerVoidSet(inbox);
+    try{
+      teacherRoomFinanceCache=await dataApiFetch('/rpc/admin_teacher_room_finance',{method:'POST',body:JSON.stringify({p_period:period})})||{period,rooms:[],payments:[]};
+    }catch{
+      teacherRoomFinanceCache={period,rooms:[],payments:[]};
+    }
+    renderTeacherRoomBalances();
     renderSchoolLedger();
     const date=document.getElementById('ledgerDate');if(date&&!date.value)date.value=new Date().toISOString().slice(0,10);
+    const roomDate=document.getElementById('teacherRoomCollectionDate');if(roomDate&&!roomDate.value)roomDate.value=new Date().toISOString().slice(0,10);
   };
 
   document.getElementById('refreshSchoolLedger')?.addEventListener('click',loadSchoolLedger);
+  document.getElementById('teacherRoomBillingPeriod')?.addEventListener('change',()=>{
+    document.getElementById('teacherRoomCollectionAmount').value='';
+    loadSchoolLedger();
+  });
+  document.getElementById('teacherRoomCollectionRoom')?.addEventListener('change',()=>{
+    document.getElementById('teacherRoomCollectionAmount').value='';
+    updateTeacherRoomCollectionSummary();
+  });
+  document.getElementById('teacherRoomBalancesRows')?.addEventListener('click',e=>{
+    const btn=e.target.closest('.collect-room-fee-btn');if(!btn)return;
+    const select=document.getElementById('teacherRoomCollectionRoom');
+    select.value=btn.dataset.groupId;
+    document.getElementById('teacherRoomCollectionAmount').value='';
+    updateTeacherRoomCollectionSummary();
+    document.getElementById('teacherRoomCollectionForm').scrollIntoView({behavior:'smooth',block:'center'});
+  });
+
+  document.getElementById('teacherRoomCollectionForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const msg=document.getElementById('teacherRoomCollectionMsg');msg.className='student-form-msg';
+    const room=selectedTeacherRoom();
+    if(!room){msg.textContent='اختر المعلم والقاعة.';msg.className='student-form-msg error show';return}
+    const amount=Number(document.getElementById('teacherRoomCollectionAmount').value)||0;
+    if(!(amount>0)){msg.textContent='أدخل مبلغًا صحيحًا.';msg.className='student-form-msg error show';return}
+    if(Number(room.balance)>0&&amount>Number(room.balance)+0.001){
+      if(!confirm('المبلغ أكبر من المتبقي حسب اتفاق القاعة. هل تريد تسجيله رغم ذلك؟'))return;
+    }
+    try{
+      const payment=await dataApiFetch('/rpc/admin_teacher_room_payment_add',{method:'POST',body:JSON.stringify({
+        p_group_id:room.group_id,
+        p_period:document.getElementById('teacherRoomBillingPeriod').value,
+        p_amount:amount,
+        p_date:document.getElementById('teacherRoomCollectionDate').value||new Date().toISOString().slice(0,10),
+        p_method:document.getElementById('teacherRoomCollectionMethod').value,
+        p_note:document.getElementById('teacherRoomCollectionNote').value.trim()||null
+      })});
+      latestTeacherRoomReceipt=payment;
+      const printBtn=document.getElementById('printLatestTeacherRoomReceipt');printBtn.style.display='';
+      msg.textContent='تم تحصيل رسوم القاعة. رقم الإيصال: '+payment.receipt_no+' — المتبقي: '+dashboardMoney(payment.balance);
+      msg.className='student-form-msg success show';
+
+      if(payment.teacher_internal_email){
+        try{
+          await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
+            p_recipient:payment.teacher_internal_email,
+            p_subject:'إيصال تحصيل رسوم القاعة — '+payment.receipt_no,
+            p_body:'تم استلام مبلغ '+dashboardMoney(payment.amount)+' عن قاعة «'+(payment.group_name||'')+'» لشهر '+payment.billing_period+'. رقم الإيصال: '+payment.receipt_no+'. المتبقي حسب الاتفاق: '+dashboardMoney(payment.balance)+'.'
+          })});
+        }catch{}
+      }
+      await recordAudit('finance','تحصيل رسوم قاعة','teacher_room_payment',payment.payment_id,payment.teacher_name,{amount:payment.amount,receipt_no:payment.receipt_no,group_name:payment.group_name,billing_period:payment.billing_period});
+      document.getElementById('teacherRoomCollectionAmount').value='';
+      document.getElementById('teacherRoomCollectionNote').value='';
+      await loadSchoolLedger();
+    }catch(err){
+      msg.textContent=String(err.message||'').includes('teacher_room_not_found')?'تعذر العثور على اتفاق القاعة.':(err.message||'تعذر تسجيل التحصيل');
+      msg.className='student-form-msg error show';
+    }
+  });
+
+  document.getElementById('printLatestTeacherRoomReceipt')?.addEventListener('click',()=>printTeacherRoomReceipt(latestTeacherRoomReceipt));
+
   document.getElementById('schoolLedgerForm')?.addEventListener('submit',async e=>{
     e.preventDefault();
     const msg=document.getElementById('ledgerMsg');msg.className='student-form-msg';
@@ -7944,7 +8118,26 @@
       await loadSchoolLedger();
     }catch(err){msg.textContent=err.message||'تعذر حفظ الحركة';msg.className='student-form-msg error show'}
   });
+
   document.getElementById('schoolLedgerRows')?.addEventListener('click',async e=>{
+    const printBtn=e.target.closest('.print-room-fee-receipt');
+    if(printBtn){
+      const payment=teacherRoomFinanceCache.payments.find(x=>String(x.payment_id)===String(printBtn.dataset.paymentId));
+      if(payment)printTeacherRoomReceipt(payment);
+      return;
+    }
+    const roomVoid=e.target.closest('.void-room-fee-payment');
+    if(roomVoid){
+      const payment=teacherRoomFinanceCache.payments.find(x=>String(x.payment_id)===String(roomVoid.dataset.paymentId));
+      if(!payment||!confirm('إلغاء إيصال رسوم القاعة '+(payment.receipt_no||'')+'؟ سيظل ظاهرًا في سجل المراجعة كإيصال ملغى.'))return;
+      try{
+        await dataApiFetch('/rpc/admin_teacher_room_payment_void',{method:'POST',body:JSON.stringify({p_payment_id:payment.payment_id,p_reason:'إلغاء من سجل الحركة المالية'})});
+        await recordAudit('finance','إلغاء إيصال رسوم قاعة','teacher_room_payment',payment.payment_id,payment.teacher_name,{amount:payment.amount,receipt_no:payment.receipt_no});
+        await loadSchoolLedger();
+      }catch(err){alert(err.message||'تعذر إلغاء الإيصال')}
+      return;
+    }
+
     const btn=e.target.closest('.void-ledger-entry');if(!btn)return;
     const entry=schoolLedgerEntriesCache.find(x=>String(x.entry_id)===String(btn.dataset.entryId));if(!entry)return;
     if(!confirm('إلغاء هذه الحركة المالية؟ ستظل محفوظة في سجل المراجعة كحركة ملغاة.'))return;
