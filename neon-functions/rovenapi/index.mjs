@@ -2346,7 +2346,7 @@ async function custom(action,a,p){
       graded_at:p.p_graded_at||new Date().toISOString()
     };
 
-    const rr=(await sql`insert into public.platform_exam_result_records(
+    const rr=(await sql`insert into public.platform_exam_result_records as target(
       school_id,result_ref,submission_ref,exam_ref,exam_title,teacher_account_id,
       student_account_id,student_id,private_student_id,parent_account_id,student_name,
       score,max_score,mcq_score,essay_score,graded_at,payload
@@ -2360,11 +2360,11 @@ async function custom(action,a,p){
       exam_ref=excluded.exam_ref,
       exam_title=excluded.exam_title,
       teacher_account_id=excluded.teacher_account_id,
-      student_account_id=coalesce(excluded.student_account_id,public.platform_exam_result_records.student_account_id),
-      student_id=coalesce(excluded.student_id,public.platform_exam_result_records.student_id),
-      private_student_id=coalesce(excluded.private_student_id,public.platform_exam_result_records.private_student_id),
-      parent_account_id=coalesce(excluded.parent_account_id,public.platform_exam_result_records.parent_account_id),
-      student_name=coalesce(excluded.student_name,public.platform_exam_result_records.student_name),
+      student_account_id=coalesce(excluded.student_account_id,target.student_account_id),
+      student_id=coalesce(excluded.student_id,target.student_id),
+      private_student_id=coalesce(excluded.private_student_id,target.private_student_id),
+      parent_account_id=coalesce(excluded.parent_account_id,target.parent_account_id),
+      student_name=coalesce(excluded.student_name,target.student_name),
       score=excluded.score,max_score=excluded.max_score,mcq_score=excluded.mcq_score,essay_score=excluded.essay_score,
       graded_at=excluded.graded_at,payload=excluded.payload,updated_at=now()
     returning *`)[0];
