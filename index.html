@@ -3070,7 +3070,7 @@
 
   const loadRewards=async()=>{
     const ctx=await hydratePlatformContext();
-    const isStudent=String(ctx?.account_type||'')==='student';
+    const isStudent=['student','private_student'].includes(String(ctx?.account_type||''));
     const role=String(ctx?.role||'');
     const canIssue=['admin','teacher'].includes(String(ctx?.account_type||'')) || (ctx?.account_type==='staff'&&['academic_admin','secretary'].includes(role));
     document.getElementById('issuePointsPanel').style.display=canIssue?'':'none';
@@ -6302,6 +6302,7 @@
         discount:0,
         paid:Number(s.month_paid||0),
         balance_db:Math.max(0,Number(s.monthly_fee||0)-Number(s.month_paid||0)),
+        points_db:Number(s.points||0),
         last_attendance_status:s.last_attendance_status||null,
         last_attendance_date:s.last_attendance_date||null,
         last_attendance_minutes_late:Number(s.last_attendance_minutes_late||0),
@@ -7685,7 +7686,7 @@
       }
 
       // Student receives notification when points change.
-      if(type==='student'){
+      if(['student','private_student'].includes(type)){
         try{
           const summary=await dataApiFetch('/rpc/platform_student_points_summary',{method:'POST',body:'{}'});
           const recent=Array.isArray(summary?.recent)?summary.recent:[];
