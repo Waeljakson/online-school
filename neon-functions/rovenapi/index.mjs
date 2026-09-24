@@ -2460,6 +2460,32 @@ async function custom(action,a,p){
       order by (t.status='active') desc,t.full_name`;
   }
 
+  if(action==='admin_teacher_name_update'){
+    must(a,adminEntityAllowed());
+    const teacherId=String(p.p_teacher_id||'').trim();
+    const fullName=String(p.p_full_name||'').replace(/\s+/g,' ').trim();
+    if(!teacherId)throw new Error('teacher_id_required');
+    if(fullName.length<2)throw new Error('teacher_name_required');
+
+    const teacher=(await sql`update public.teachers
+      set full_name=${fullName}
+      where id=${teacherId}::uuid and school_id=${a.school_id}
+      returning id teacher_id,full_name`)[0];
+    if(!teacher)throw new Error('teacher_not_found');
+
+    const accounts=await sql`update public.platform_accounts
+      set display_name=${fullName},updated_at=now()
+      where teacher_id=${teacherId}::uuid and school_id=${a.school_id}
+      returning id account_id,display_name`;
+
+    return {
+      teacher_id:teacher.teacher_id,
+      full_name:teacher.full_name,
+      account_id:accounts[0]?.account_id||null,
+      updated_accounts:accounts.length
+    };
+  }
+
   if(action==='admin_groups_all'){
     must(a,adminEntityAllowed());
     return await sql`select g.id group_id,g.name group_name,g.schedule_json,g.meeting_url,g.meeting_provider,g.is_active,
@@ -3269,7 +3295,7 @@ export default{
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
         'platform_group_room_details','platform_set_group_meeting','teacher_update_group_schedule',
-        'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
+        'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all','admin_teacher_name_update',
         'admin_entity_set_active','admin_entity_delete','admin_purge_students_parents'
       ]);
 
