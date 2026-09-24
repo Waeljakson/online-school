@@ -1538,6 +1538,128 @@ async function custom(action,a,p){
     return {updated:true,is_active:active};
   }
 
+  if(action==='admin_purge_students_parents'){
+    must(a,adminEntityAllowed());
+    if(String(p.p_confirm||'')!=='PURGE_STUDENTS_PARENTS')throw new Error('purge_confirmation_required');
+
+    return await sql.begin(async tx=>{
+      const schoolId=String(a.school_id);
+
+      const studentRows=await tx`select id from public.students where school_id=${a.school_id}`;
+      const studentIds=studentRows.map(x=>String(x.id));
+
+      const privateRows=await tx`select id,platform_account_id,guardian_account_id
+        from public.teacher_private_students
+        where school_id=${a.school_id}`;
+      const privateIds=privateRows.map(x=>String(x.id));
+      const privateAccountIds=privateRows.flatMap(x=>[x.platform_account_id,x.guardian_account_id]).filter(Boolean).map(String);
+
+      const parentRows=studentIds.length
+        ?await tx`select distinct p.id
+          from public.parents p
+          left join public.student_parents sp on sp.parent_id=p.id
+          left join public.platform_accounts pa on pa.parent_id=p.id
+          where sp.student_id=any(${studentIds}::uuid[])
+             or (pa.school_id=${a.school_id} and (pa.account_type='parent' or pa.parent_id is not null))`
+        :await tx`select distinct p.id
+          from public.parents p
+          join public.platform_accounts pa on pa.parent_id=p.id
+          where pa.school_id=${a.school_id} and (pa.account_type='parent' or pa.parent_id is not null)`;
+      const parentIds=parentRows.map(x=>String(x.id));
+
+      const accountRows=await tx`select id,app_user_id
+        from public.platform_accounts
+        where school_id=${a.school_id}
+          and (
+            account_type in ('student','parent')
+            or student_id=any(${studentIds}::uuid[])
+            or parent_id=any(${parentIds}::uuid[])
+            or id=any(${privateAccountIds}::uuid[])
+          )`;
+      const accountIds=[...new Set(accountRows.map(x=>String(x.id)))];
+      const appUserIds=[...new Set(accountRows.map(x=>x.app_user_id).filter(Boolean).map(String))];
+
+      const before={
+        students:studentIds.length,
+        parents:parentIds.length,
+        private_students:privateIds.length,
+        accounts:accountIds.length
+      };
+
+      const colRows=await tx`select table_name,column_name
+        from information_schema.columns
+        where table_schema='public'`;
+      const tableCols=new Map();
+      for(const row of colRows){
+        if(!tableCols.has(row.table_name))tableCols.set(row.table_name,new Set());
+        tableCols.get(row.table_name).add(row.column_name);
+      }
+
+      const roots=new Set(['students','parents','teacher_private_students','platform_accounts','app_users']);
+      const arrText=ids=>ids.length?`array[${ids.map(x=>"'" + String(x).replaceAll("'","''") + "'").join(',')}]::text[]`:null;
+      const studentArr=arrText(studentIds),parentArr=arrText(parentIds),privateArr=arrText(privateIds),accountArr=arrText(accountIds);
+
+      for(const [table,cols] of tableCols){
+        if(roots.has(table))continue;
+        const clauses=[];
+        if(studentArr&&cols.has('student_id'))clauses.push(`student_id::text=any(${studentArr})`);
+        if(parentArr&&cols.has('parent_id'))clauses.push(`parent_id::text=any(${parentArr})`);
+        if(privateArr&&cols.has('private_student_id'))clauses.push(`private_student_id::text=any(${privateArr})`);
+        if(accountArr){
+          for(const col of ['account_id','sender_account_id','recipient_account_id','guardian_account_id','platform_account_id','student_account_id','parent_account_id','recorded_by_account_id','archived_by_account_id']){
+            if(cols.has(col))clauses.push(`"${col}"::text=any(${accountArr})`);
+          }
+        }
+        if(clauses.length){
+          await tx.unsafe(`delete from public."${String(table).replaceAll('"','""')}" where ${clauses.join(' or ')}`);
+        }
+      }
+
+      if(tableCols.has('platform_entity_archive')){
+        const entityIds=[...studentIds,...parentIds,...privateIds,...accountIds];
+        if(entityIds.length){
+          const entityArr=arrText(entityIds);
+          await tx.unsafe(`delete from public.platform_entity_archive where entity_id::text=any(${entityArr})`);
+        }
+      }
+
+      const studentPrefixes=[
+        '[PRIVATE_STUDENT]','[PRIVATE_STUDENT_LINK]','[PRIVATE_PARENT_LINK]','[PRIVATE_CREDENTIAL_CARD]',
+        '[PRIVATE_PAYMENT]','[MANAGED_PRIVATE_PAYMENT]','[MANAGED_PRIVATE_PAYMENT_ACTION]',
+        '[MANAGED_PRIVATE_ATTENDANCE]','[MANAGED_PRIVATE_ATTENDANCE_ACTION]',
+        '[PARENT_LINK]','[STUDENT_PARENT_LINK]','[PARENT_LINK_MASTER]',
+        '[SCHOOL_PAYMENT]','[SCHOOL_PAYMENT_VOID]',
+        '[HOMEWORK_ASSIGN]','[HOMEWORK_SUBMISSION]','[HOMEWORK_GRADED]','[HOMEWORK_PARENT]'
+      ];
+      for(const [table,cols] of tableCols){
+        if(!cols.has('subject'))continue;
+        const prefixSql=studentPrefixes.map(x=>`subject like '${x.replaceAll("'","''")}%' `).join(' or ');
+        const schoolClause=cols.has('school_id')?` and school_id::text='${schoolId.replaceAll("'","''")}'`:'';
+        await tx.unsafe(`delete from public."${String(table).replaceAll('"','""')}" where (${prefixSql})${schoolClause}`);
+      }
+
+      if(privateIds.length)await tx`delete from public.teacher_private_students where id=any(${privateIds}::uuid[])`;
+      if(accountIds.length)await tx`delete from public.platform_accounts where id=any(${accountIds}::uuid[])`;
+      if(studentIds.length)await tx`delete from public.students where id=any(${studentIds}::uuid[])`;
+      if(parentIds.length)await tx`delete from public.parents where id=any(${parentIds}::uuid[])`;
+
+      if(appUserIds.length){
+        await tx`delete from public.app_users u
+          where u.id=any(${appUserIds}::uuid[])
+            and not exists(select 1 from public.platform_accounts pa where pa.app_user_id=u.id)`;
+      }
+
+      const after=(await tx`select
+        (select count(*)::int from public.students where school_id=${a.school_id}) students,
+        (select count(*)::int from public.teacher_private_students where school_id=${a.school_id}) private_students,
+        (select count(*)::int from public.platform_accounts
+          where school_id=${a.school_id}
+            and (account_type in ('student','parent') or student_id is not null or parent_id is not null)) student_parent_accounts`)[0];
+
+      return {purged:true,before,after};
+    });
+  }
+
   if(action==='admin_entity_delete'){
     must(a,adminEntityAllowed());
     const type=String(p.p_type||''),id=String(p.p_id||'');
@@ -1835,7 +1957,7 @@ export default{
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
         'platform_group_room_details','platform_set_group_meeting','teacher_update_group_schedule',
         'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
-        'admin_entity_set_active','admin_entity_delete'
+        'admin_entity_set_active','admin_entity_delete','admin_purge_students_parents'
       ]);
 
       if(customActions.has(action)){
