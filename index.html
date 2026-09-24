@@ -3043,7 +3043,7 @@
     if(!groupId){studentSelect.innerHTML='<option value="">اختر المجموعة أولًا</option>';return}
     try{
       const data=await dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})});
-      studentSelect.innerHTML='<option value="">اختر الطالب</option>'+((data||[]).map(s=>`<option value="${escapeHtml(s.student_id)}">${escapeHtml(s.student_name)} — ${escapeHtml(s.student_no||'')}</option>`).join(''));
+      studentSelect.innerHTML='<option value="">اختر الطالب</option>'+((data||[]).map(s=>`<option value="${escapeHtml(s.student_id)}" data-student-no="${escapeHtml(s.student_no||'')}" data-student-name="${escapeHtml(s.student_name||'')}">${escapeHtml(s.student_name)} — ${escapeHtml(s.student_no||'')}</option>`).join(''));
     }catch(err){studentSelect.innerHTML='<option value="">تعذر تحميل الطلاب</option>'}
   };
   document.getElementById('pointsGroup').addEventListener('change',loadPointStudents);
@@ -3115,9 +3115,12 @@
   document.getElementById('refreshRewards').addEventListener('click',loadRewards);
   document.getElementById('issuePointsBtn').addEventListener('click',async()=>{
     const msg=document.getElementById('pointsMsg');
+    const selectedPointStudent=document.getElementById('pointsStudent').selectedOptions[0];
     const payload={
       p_group_id:document.getElementById('pointsGroup').value||null,
       p_student_id:document.getElementById('pointsStudent').value,
+      p_student_no:selectedPointStudent?.dataset?.studentNo||null,
+      p_student_name:selectedPointStudent?.dataset?.studentName||null,
       p_points:Number(document.getElementById('pointsAmount').value)||0,
       p_reason:document.getElementById('pointsReason').value.trim(),
       p_category:document.getElementById('pointsCategory').value
