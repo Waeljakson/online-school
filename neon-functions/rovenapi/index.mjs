@@ -435,45 +435,77 @@ async function reconcileSinglePrivateRoomByAccount(accountId){
 async function privateRoomAccess(a,groupId,requireChat=false){
   const gid=String(groupId||'');
   if(!gid)return null;
-  const room=(await sql`select trm.group_id,trm.school_id,trm.teacher_account_id
+
+  const room=(await sql`select
+      trm.group_id,trm.school_id,trm.teacher_account_id,
+      g.name group_name,trm.updated_at
     from public.teacher_room_management trm
+    join public.study_groups g on g.id=trm.group_id
     where trm.group_id=${gid}::uuid
       and trm.is_active=true
     limit 1`)[0]||null;
   if(!room)return null;
 
-  // The room owner is authoritative even when legacy school_id values drifted.
-  if(String(room.teacher_account_id)===String(a.account_id))return room;
+  // Treat duplicate active contracts with the same teacher + normalized room name
+  // as one logical private room.
+  const cluster=await sql`select
+      trm.group_id,trm.school_id,trm.teacher_account_id,trm.updated_at,
+      g.name group_name,
+      coalesce((select count(*) from public.teacher_private_students ps
+        where ps.teacher_account_id=trm.teacher_account_id
+          and ps.group_id=trm.group_id
+          and ps.status='active'),0)::int student_count
+    from public.teacher_room_management trm
+    join public.study_groups g on g.id=trm.group_id
+    where trm.teacher_account_id=${room.teacher_account_id}
+      and trm.is_active=true
+      and lower(trim(g.name))=lower(trim(${room.group_name}))
+    order by student_count desc,trm.updated_at desc nulls last,trm.group_id`;
 
-  // Private student membership is authoritative and repairs an old duplicate-room link
-  // when this teacher currently owns exactly one active private room.
+  const aliases=(cluster.length?cluster:[room]).map(x=>String(x.group_id));
+  const canonical=(cluster[0]||room);
+  const logicalRoom={
+    ...room,
+    group_id:canonical.group_id,
+    canonical_group_id:canonical.group_id,
+    requested_group_id:gid,
+    alias_group_ids:aliases,
+    school_id:canonical.school_id||room.school_id
+  };
+
+  // The room owner is authoritative even if they opened a legacy duplicate id.
+  if(String(room.teacher_account_id)===String(a.account_id))return logicalRoom;
+
   await reconcileSinglePrivateRoomByAccount(a.account_id);
+
+  // A private student belongs to the logical room if their row points to any
+  // duplicate id in the same teacher/name cluster.
   const privateStudent=(await sql`select 1
     from public.teacher_private_students ps
-    where ps.group_id=${gid}::uuid
+    where ps.group_id=any(${aliases}::uuid[])
       and ps.teacher_account_id=${room.teacher_account_id}
       and ps.platform_account_id=${a.account_id}
       and ps.status='active'
     limit 1`)[0];
-  if(privateStudent)return room;
+  if(privateStudent)return logicalRoom;
 
-  // Ordinary school membership remains school-scoped.
+  // Ordinary school membership remains school-scoped, but accept aliases.
   if(a.student_id && String(room.school_id)===String(a.school_id)){
     const enrolled=(await sql`select 1 from public.enrollments
-      where group_id=${gid}::uuid and student_id=${a.student_id} and status='active'
+      where group_id=any(${aliases}::uuid[]) and student_id=${a.student_id} and status='active'
       limit 1`)[0];
-    if(enrolled)return room;
+    if(enrolled)return logicalRoom;
   }
 
   const link=await assistantLink(a);
   if(link && String(link.teacher_account_id)===String(room.teacher_account_id)){
     if(requireChat && !Boolean(link.permissions?.chat))return null;
     const groups=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
-    if(groups.includes(gid))return room;
+    if(aliases.some(x=>groups.includes(x)))return logicalRoom;
   }
 
   if(String(room.school_id)===String(a.school_id) &&
-     (a.account_type==='admin' || (a.account_type==='staff' && ['super_admin','school_manager','academic_admin'].includes(String(a.role||'')))))return room;
+     (a.account_type==='admin' || (a.account_type==='staff' && ['super_admin','school_manager','academic_admin'].includes(String(a.role||'')))))return logicalRoom;
   return null;
 }
 
@@ -540,7 +572,7 @@ async function custom(action,a,p){
       pa.display_name sender_name,null::text sender_photo
       from public.platform_group_messages_v2 m
       join public.platform_accounts pa on pa.id=m.sender_account_id
-      where m.group_id=${gid}::uuid
+      where m.group_id=any(${access.alias_group_ids||[gid]}::uuid[])
       order by m.created_at asc`;
   }
 
@@ -554,7 +586,7 @@ async function custom(action,a,p){
     return (await sql`insert into public.platform_group_messages_v2(
       school_id,group_id,sender_account_id,body,attachment_name,attachment_mime,attachment_base64
     ) values(
-      ${access.school_id},${gid}::uuid,${a.account_id},${body||null},
+      ${access.school_id},${access.canonical_group_id||gid}::uuid,${a.account_id},${body||null},
       ${p.p_attachment_name||null},${p.p_attachment_mime||null},${attachment}
     )
     returning id message_id,sender_account_id,body,attachment_name,attachment_mime,created_at`)[0];
@@ -577,9 +609,9 @@ async function custom(action,a,p){
       from public.teacher_private_students ps
       left join public.teacher_private_attendance att
         on att.private_student_id=ps.id
-       and att.group_id=ps.group_id
+       and att.group_id=any(${access.alias_group_ids||[gid]}::uuid[])
        and att.attendance_date=${onDate}::date
-      where ps.group_id=${gid}::uuid
+      where ps.group_id=any(${access.alias_group_ids||[gid]}::uuid[])
         and ps.teacher_account_id=${access.teacher_account_id}
         and ps.status='active'
       order by ps.full_name`;
@@ -603,7 +635,7 @@ async function custom(action,a,p){
       const ps=(await sql`select id
         from public.teacher_private_students
         where id=${sid}::uuid
-          and group_id=${gid}::uuid
+          and group_id=any(${access.alias_group_ids||[gid]}::uuid[])
           and teacher_account_id=${access.teacher_account_id}
           and status='active'
         limit 1`)[0];
@@ -615,7 +647,7 @@ async function custom(action,a,p){
         school_id,teacher_account_id,group_id,private_student_id,attendance_date,status,
         minutes_late,note,recorded_by_account_id,recorded_at
       ) values(
-        ${access.school_id},${access.teacher_account_id},${gid}::uuid,${sid}::uuid,${onDate}::date,${status},
+        ${access.school_id},${access.teacher_account_id},${access.canonical_group_id||gid}::uuid,${sid}::uuid,${onDate}::date,${status},
         ${mins},${r.note||null},${a.account_id},now()
       )
       on conflict(group_id,private_student_id,attendance_date)
