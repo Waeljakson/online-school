@@ -838,16 +838,13 @@ async function custom(action,a,p){
         join public.courses c on c.id=g.course_id
         left join public.teachers t on t.id=c.teacher_id
         where c.teacher_id=${a.teacher_id}
-          and g.school_id=${a.school_id}
-          and coalesce(g.is_active,true)=true
-          and not exists(
-            select 1 from public.teacher_room_management trm
-            join public.study_groups pg on pg.id=trm.group_id
-            where trm.teacher_account_id=${a.account_id}
-              and trm.is_active=true
-              and lower(trim(pg.name))=lower(trim(g.name))
-          )`:[];
-      return [...privateGroups,...normalGroups].sort((x,y)=>Number(x.sort_order)-Number(y.sort_order)||String(x.group_name).localeCompare(String(y.group_name),'ar'));
+          and coalesce(g.is_active,true)=true`:[];
+      const merged=new Map();
+      for(const row of [...privateGroups,...normalGroups]){
+        const key=String(row.group_name||row.group_id||'').trim().toLowerCase();
+        if(!merged.has(key))merged.set(key,row);
+      }
+      return [...merged.values()].sort((x,y)=>Number(x.sort_order)-Number(y.sort_order)||String(x.group_name).localeCompare(String(y.group_name),'ar'));
     }
     const rows=await sql`select public.roven_rpc('platform_attendance_groups',${p.p_token||null},'{}'::jsonb) result`;
     return rows[0]?.result??[];
@@ -2460,8 +2457,24 @@ export default{
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
         if(a.account_type==='teacher'){
-          const groups=await custom('platform_attendance_groups_local',a,{});
-          return json(groups,200,o);
+          const localGroups=await custom('platform_attendance_groups_local',a,{});
+          let legacyGroups=[];
+          try{
+            const rr=await sql`select public.roven_rpc(
+              'platform_attendance_groups',
+              ${token},
+              ${JSON.stringify(p||{})}::jsonb
+            ) result`;
+            legacyGroups=Array.isArray(rr[0]?.result)?rr[0].result:[];
+          }catch{}
+
+          const merged=new Map();
+          for(const row of [...(Array.isArray(localGroups)?localGroups:[]),...legacyGroups]){
+            const key=String(row?.group_name||row?.name||row?.group_id||'').trim().toLowerCase();
+            if(!key)continue;
+            if(!merged.has(key))merged.set(key,row);
+          }
+          return json([...merged.values()],200,o);
         }
       }
 
