@@ -313,6 +313,7 @@ async function ensureSchema(){
     await sql`alter table public.teachers add column if not exists bank_account text`;
     await sql`alter table public.teachers add column if not exists subjects_text text`;
     await sql`alter table public.teachers add column if not exists notes text`;
+    await sql`alter table public.platform_accounts add column if not exists profile_photo text`;
     await sql`alter table public.teachers drop constraint if exists teachers_salary_type_check`;
     await sql`alter table public.teachers add constraint teachers_salary_type_check
       check(salary_type in ('monthly','per_lesson','per_hour','percentage','custom'))`;
@@ -340,7 +341,7 @@ async function ensureSchema(){
 async function actorFromToken(token){
   let r=await sql`select
       a.id account_id,a.school_id,a.account_type,a.student_id,a.teacher_id,a.parent_id,a.app_user_id,
-      a.account_code,a.username,a.display_name,a.internal_email,
+      a.account_code,a.username,a.display_name,a.internal_email,a.profile_photo,
       u.role,s.expires_at session_expires_at
     from public.platform_sessions s
     join public.platform_accounts a on a.id=s.account_id and a.is_active=true
@@ -357,6 +358,7 @@ async function actorFromToken(token){
       a.username,
       coalesce(a.display_name,to_jsonb(u)->>'full_name',to_jsonb(u)->>'name',to_jsonb(u)->>'email','ROVEN') display_name,
       coalesce(a.internal_email,to_jsonb(u)->>'email') internal_email,
+      a.profile_photo,
       u.role,
       s."expiresAt" session_expires_at
     from neon_auth.session s
@@ -3051,6 +3053,40 @@ export default{
           session_token:token,
           session_expires_at:actor.session_expires_at||null
         }),200,o);
+      }
+
+      if(action==='platform_update_profile'){
+        const actor=await actorFromToken(token);
+        if(!actor)return json({error:'invalid_or_expired_session'},401,o);
+        await ensureSchema();
+
+        const photo=p.p_profile_photo===undefined?undefined:(p.p_profile_photo||null);
+        if(photo!==undefined){
+          if(photo && (!String(photo).startsWith('data:image/') || String(photo).length>950000)){
+            return json({error:'invalid_profile_photo'},400,o);
+          }
+          await sql`update public.platform_accounts
+            set profile_photo=${photo},updated_at=now()
+            where id=${actor.account_id}`;
+        }
+
+        // Keep the existing password-change behavior for compatibility.
+        let legacyResult={updated:true};
+        if(p.p_new_password){
+          const rows=await sql`select public.roven_rpc('platform_update_profile',${token},${JSON.stringify({
+            p_profile_photo:null,
+            p_old_password:p.p_old_password||null,
+            p_new_password:p.p_new_password||null
+          })}::jsonb) result`;
+          legacyResult=rows[0]?.result??legacyResult;
+        }
+
+        const refreshed=await actorFromToken(token);
+        return json({
+          ...(legacyResult&&typeof legacyResult==='object'?legacyResult:{}),
+          updated:true,
+          profile_photo:refreshed?.profile_photo||photo||null
+        },200,o);
       }
 
       if(action==='register_new_student'){
