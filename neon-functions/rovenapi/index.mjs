@@ -1449,7 +1449,27 @@ async function custom(action,a,p){
         where p.private_student_id=ps.id and coalesce(p.payment_kind,'tuition')='tuition'
           and date_trunc('month',p.paid_on)=date_trunc('month',current_date)),0) month_paid,
       coalesce((select sum(p.amount) from public.teacher_private_payments p
-        where p.private_student_id=ps.id and p.payment_kind='books'),0) books_paid
+        where p.private_student_id=ps.id and p.payment_kind='books'),0) books_paid,
+      (select att.status
+        from public.teacher_private_attendance att
+        where att.private_student_id=ps.id
+        order by att.attendance_date desc,att.recorded_at desc
+        limit 1) last_attendance_status,
+      (select att.attendance_date
+        from public.teacher_private_attendance att
+        where att.private_student_id=ps.id
+        order by att.attendance_date desc,att.recorded_at desc
+        limit 1) last_attendance_date,
+      (select att.minutes_late
+        from public.teacher_private_attendance att
+        where att.private_student_id=ps.id
+        order by att.attendance_date desc,att.recorded_at desc
+        limit 1) last_attendance_minutes_late,
+      (select att.note
+        from public.teacher_private_attendance att
+        where att.private_student_id=ps.id
+        order by att.attendance_date desc,att.recorded_at desc
+        limit 1) last_attendance_note
       from public.teacher_private_students ps
       where ps.id=any(${privateIds}::uuid[])`:[];
     const schoolFinance=schoolStudentIds.length?await sql`select
