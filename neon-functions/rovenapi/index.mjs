@@ -592,6 +592,18 @@ async function materializeLegacyPrivateStudentFromMail(a,token,preferredGroupId=
         and pa.is_active=true
       limit 1`)[0]||null;
   }
+  if(!teacherAccount&&link.group_id){
+    teacherAccount=(await sql`select pa.id,pa.school_id,pa.display_name
+      from public.study_groups g
+      join public.courses c on c.id=g.course_id
+      join public.platform_accounts pa
+        on pa.teacher_id=c.teacher_id
+       and pa.account_type='teacher'
+       and pa.is_active=true
+      where g.id=${String(link.group_id)}::uuid
+      order by pa.updated_at desc nulls last
+      limit 1`)[0]||null;
+  }
   if(!teacherAccount)return null;
 
   const oldGroup=link.group_id?(await sql`select id,name
@@ -672,7 +684,7 @@ async function privateRoomAccess(a,groupId,requireChat=false){
   const gid=String(groupId||'');
   if(!gid)return null;
 
-  const room=(await sql`select
+  let room=(await sql`select
       trm.group_id,trm.school_id,trm.teacher_account_id,
       g.name group_name,trm.updated_at
     from public.teacher_room_management trm
@@ -680,6 +692,58 @@ async function privateRoomAccess(a,groupId,requireChat=false){
     where trm.group_id=${gid}::uuid
       and trm.is_active=true
     limit 1`)[0]||null;
+
+  // Legacy/ordinary group id: resolve it to the teacher's managed private room
+  // with the same normalized name.
+  if(!room){
+    const legacy=(await sql`select
+        g.id,g.name group_name,g.school_id,c.teacher_id
+      from public.study_groups g
+      left join public.courses c on c.id=g.course_id
+      where g.id=${gid}::uuid
+      limit 1`)[0]||null;
+
+    if(legacy){
+      let teacherAccountId=null;
+
+      if(a.account_type==='teacher'){
+        teacherAccountId=a.account_id;
+      }else if(legacy.teacher_id){
+        const pa=(await sql`select id
+          from public.platform_accounts
+          where teacher_id=${legacy.teacher_id}
+            and account_type='teacher'
+            and is_active=true
+          order by updated_at desc nulls last
+          limit 1`)[0]||null;
+        teacherAccountId=pa?.id||null;
+      }
+
+      if(!teacherAccountId&&['student','private_student'].includes(String(a.account_type||''))){
+        const ps=(await sql`select teacher_account_id
+          from public.teacher_private_students
+          where platform_account_id=${a.account_id}
+            and status='active'
+          order by updated_at desc nulls last
+          limit 1`)[0]||null;
+        teacherAccountId=ps?.teacher_account_id||null;
+      }
+
+      if(teacherAccountId){
+        room=(await sql`select
+            trm.group_id,trm.school_id,trm.teacher_account_id,
+            g.name group_name,trm.updated_at
+          from public.teacher_room_management trm
+          join public.study_groups g on g.id=trm.group_id
+          where trm.teacher_account_id=${teacherAccountId}
+            and trm.is_active=true
+            and lower(trim(g.name))=lower(trim(${legacy.group_name}))
+          order by trm.updated_at desc nulls last
+          limit 1`)[0]||null;
+      }
+    }
+  }
+
   if(!room)return null;
 
   // Treat duplicate active contracts with the same teacher + normalized room name
@@ -747,6 +811,48 @@ async function privateRoomAccess(a,groupId,requireChat=false){
 
 async function custom(action,a,p){
   await ensureSchema();
+
+  if(action==='platform_attendance_groups_local'){
+    if(a.account_type==='teacher'){
+      const privateGroups=await sql`select distinct
+          trm.group_id,
+          g.name group_name,
+          coalesce(t.full_name,a.display_name) teacher_name,
+          null::text grade_name,
+          0 sort_order
+        from public.teacher_room_management trm
+        join public.study_groups g on g.id=trm.group_id
+        left join public.courses c on c.id=g.course_id
+        left join public.teachers t on t.id=c.teacher_id
+        where trm.teacher_account_id=${a.account_id}
+          and trm.is_active=true
+          and coalesce(g.is_active,true)=true`;
+
+      const normalGroups=a.teacher_id?await sql`select distinct
+          g.id group_id,
+          g.name group_name,
+          coalesce(t.full_name,a.display_name) teacher_name,
+          gr.name grade_name,
+          1 sort_order
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        left join public.teachers t on t.id=c.teacher_id
+        left join public.grades gr on gr.id=g.grade_id
+        where c.teacher_id=${a.teacher_id}
+          and g.school_id=${a.school_id}
+          and coalesce(g.is_active,true)=true
+          and not exists(
+            select 1 from public.teacher_room_management trm
+            join public.study_groups pg on pg.id=trm.group_id
+            where trm.teacher_account_id=${a.account_id}
+              and trm.is_active=true
+              and lower(trim(pg.name))=lower(trim(g.name))
+          )`:[];
+      return [...privateGroups,...normalGroups].sort((x,y)=>Number(x.sort_order)-Number(y.sort_order)||String(x.group_name).localeCompare(String(y.group_name),'ar'));
+    }
+    const rows=await sql`select public.roven_rpc('platform_attendance_groups',${p.p_token||null},'{}'::jsonb) result`;
+    return rows[0]?.result??[];
+  }
 
   if(action==='platform_direct_chat_contacts'){
     const contacts=await directChatBaseContacts(a);
@@ -1453,6 +1559,14 @@ async function custom(action,a,p){
               ${a.teacher_id||null}::uuid is not null
               and c.teacher_id=${a.teacher_id||null}
               and g.school_id=${a.school_id}
+              and not exists(
+                select 1
+                from public.teacher_room_management trm2
+                join public.study_groups pg on pg.id=trm2.group_id
+                where trm2.teacher_account_id=${a.account_id}
+                  and trm2.is_active=true
+                  and lower(trim(pg.name))=lower(trim(g.name))
+              )
             )
           )
         order by group_name`;
@@ -2341,6 +2455,15 @@ export default{
           }
         }
         return json(result,200,o);
+      }
+
+      if(action==='platform_attendance_groups'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        if(a.account_type==='teacher'){
+          const groups=await custom('platform_attendance_groups_local',a,{});
+          return json(groups,200,o);
+        }
       }
 
       if(action==='platform_list_groups'){
