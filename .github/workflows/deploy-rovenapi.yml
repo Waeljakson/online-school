@@ -37,6 +37,12 @@ jobs:
           npm install -g neon
           neon --version
 
+      - name: Install function dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-package-lock --ignore-scripts
+
       - name: Resolve Neon project from production branch
         shell: bash
         run: |
