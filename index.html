@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1835" />
+  <meta name="roven-build" content="20260924-1855" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1066,7 +1066,7 @@
       <input id="privateStudentId" type="hidden">
       <div class="student-form-msg" id="privateStudentMsg"></div>
       <div class="private-credential-card" id="privateStudentCredentialsCard" style="display:none">
-        <div class="private-credential-head"><div><span>بطاقة دخول الطالب</span><b id="privateCredentialStudentName">—</b></div><button class="secondary-action" id="copyPrivateStudentCredentials" type="button">نسخ البيانات</button></div>
+        <div class="private-credential-head"><div><span>بطاقة دخول الطالب</span><b id="privateCredentialStudentName">—</b></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="secondary-action" id="printPrivatePaymentReceipt" type="button" style="display:none">🧾 طباعة إيصال الدفع</button><button class="secondary-action" id="copyPrivateStudentCredentials" type="button">نسخ البيانات</button></div></div>
         <div class="private-credential-grid">
           <div><span>اسم الطالب</span><b id="privateCredentialName">—</b></div>
           <div><span>اسم المجموعة</span><b id="privateCredentialGroup">—</b></div>
@@ -1574,7 +1574,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1835';
+  window.__ROVEN_BUILD__='20260924-1855';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3107,6 +3107,42 @@
   };
   const roomPricingText=value=>({monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'}[value]||value||'');
 
+  let privateLatestReceipt=null;
+
+  const privatePaymentMethodLabel=value=>({cash:'نقدي',transfer:'تحويل',bank_transfer:'تحويل بنكي',card:'بطاقة',wallet:'محفظة',online:'أونلاين',other:'أخرى'}[value]||value||'—');
+
+  const printPrivateReceipt=receipt=>{
+    if(!receipt)return;
+    const logo=document.querySelector('.login-brand img')?.src||document.querySelector('.login-mobile-logo img')?.src||'';
+    const items=(receipt.items||[]).filter(x=>Number(x.amount)>0);
+    const itemRows=items.map(x=>'<tr><td>'+escapeHtml(x.label||'دفعة')+'</td><td>'+Number(x.amount||0).toFixed(2)+'</td></tr>').join('');
+    const w=window.open('','_blank','width=760,height=900');
+    if(!w){alert('اسمح بالنوافذ المنبثقة لطباعة الإيصال.');return}
+    w.document.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>إيصال دفع '+escapeHtml(receipt.receipt_no||'')+'</title><style>'+
+      '@page{size:A5;margin:10mm}*{box-sizing:border-box}body{font-family:Cairo,Tahoma,Arial,sans-serif;color:#162033;margin:0;background:#fff}.receipt{border:1px solid #dbe5ec;border-radius:16px;padding:22px}.head{text-align:center;border-bottom:2px solid #162033;padding-bottom:14px;margin-bottom:16px}.head img{width:68px;height:68px;object-fit:contain;border-radius:12px}.head h1{font-size:21px;margin:8px 0 2px}.head p{margin:0;color:#64748b;font-size:12px}.code{display:flex;justify-content:space-between;gap:12px;background:#f7fafc;border-radius:10px;padding:10px 12px;margin:12px 0;font-size:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.box{border:1px solid #e3eaf0;border-radius:10px;padding:9px}.box span{display:block;color:#64748b;font-size:10px;margin-bottom:3px}.box b{font-size:13px}table{width:100%;border-collapse:collapse;margin:14px 0}th,td{border:1px solid #dfe7ed;padding:8px;text-align:right;font-size:12px}th{background:#f5f8fa}.totals{margin-top:12px;border-top:2px solid #162033;padding-top:10px}.totals div{display:flex;justify-content:space-between;margin:5px 0;font-size:13px}.grand{font-size:16px!important;font-weight:900}.remaining{color:#b42318}.paid{color:#087443}.foot{text-align:center;color:#64748b;font-size:10px;margin-top:18px;border-top:1px dashed #cbd5e1;padding-top:10px}@media print{button{display:none!important}}</style></head><body><div class="receipt">'+
+      '<div class="head">'+(logo?'<img src="'+escapeHtml(logo)+'">':'')+'<h1>ROVEN Online School</h1><p>إيصال سداد طالب</p></div>'+
+      '<div class="code"><b>رقم الإيصال: <span dir="ltr">'+escapeHtml(receipt.receipt_no||'—')+'</span></b><span>التاريخ: '+escapeHtml(receipt.date||'—')+'</span></div>'+
+      '<div class="grid">'+
+        '<div class="box"><span>اسم الطالب</span><b>'+escapeHtml(receipt.student_name||'—')+'</b></div>'+
+        '<div class="box"><span>ولي الأمر</span><b>'+escapeHtml(receipt.parent_name||'—')+'</b></div>'+
+        '<div class="box"><span>المجموعة</span><b>'+escapeHtml(receipt.group_name||'—')+'</b></div>'+
+        '<div class="box"><span>المادة</span><b>'+escapeHtml(receipt.subject||'—')+'</b></div>'+
+        '<div class="box"><span>طريقة الدفع</span><b>'+escapeHtml(privatePaymentMethodLabel(receipt.method))+'</b></div>'+
+        '<div class="box"><span>المحصل بواسطة</span><b>'+escapeHtml(receipt.recorded_by||'المعلم')+'</b></div>'+
+      '</div>'+
+      '<table><thead><tr><th>البيان</th><th>المبلغ</th></tr></thead><tbody>'+itemRows+'</tbody></table>'+
+      '<div class="totals">'+
+        '<div class="grand"><span>إجمالي المدفوع</span><b>'+Number(receipt.total_paid||0).toFixed(2)+'</b></div>'+
+        '<div><span>إجمالي المستحق</span><b>'+Number(receipt.total_due||0).toFixed(2)+'</b></div>'+
+        '<div class="'+(Number(receipt.remaining||0)>0.001?'remaining':'paid')+'"><span>المتبقي بعد السداد</span><b>'+Number(receipt.remaining||0).toFixed(2)+'</b></div>'+
+        '<div><span>حالة السداد</span><b>'+(Number(receipt.remaining||0)<=0.001?'تم السداد بالكامل':'يوجد متبقي')+'</b></div>'+
+      '</div>'+
+      (receipt.note?'<div class="box" style="margin-top:12px"><span>ملاحظات</span><b>'+escapeHtml(receipt.note)+'</b></div>':'')+
+      '<div class="foot">هذا الإيصال صادر إلكترونيًا من منصة ROVEN Online School.<br>يمكن حفظه PDF من نافذة الطباعة.</div>'+
+      '<script>window.addEventListener("load",()=>setTimeout(()=>window.print(),250))<\/script></div></body></html>');
+    w.document.close();
+  };
+
   const renderPrivateCredentialCard=(result,name,groupId,finance={})=>{
     const card=document.getElementById('privateStudentCredentialsCard');
     const group=teacherRoomContractsCache.find(x=>String(x.group_id)===String(groupId||result?.group_id||''))
@@ -3147,6 +3183,9 @@
     document.getElementById('privateCredentialTotalRemaining').textContent=totalRemaining.toFixed(2);
     document.getElementById('privateCredentialPaymentStatus').textContent=totalRemaining<=0.001?'تم السداد بالكامل':'متبقي '+totalRemaining.toFixed(2);
     const copyBtn=document.getElementById('copyPrivateStudentCredentials');
+    const receiptBtn=document.getElementById('printPrivatePaymentReceipt');
+    privateLatestReceipt=finance.receipt||null;
+    receiptBtn.style.display=privateLatestReceipt?'':'none';
     copyBtn.disabled=!hasCredentials;
     copyBtn.title=hasCredentials?'نسخ بيانات الدخول':'لم يتم إنشاء حساب دخول فعلي بعد';
     const status=document.getElementById('privateCredentialStatus');
@@ -3159,6 +3198,8 @@
     }else parent.style.display='none';
     card.style.display='';
   };
+
+  document.getElementById('printPrivatePaymentReceipt')?.addEventListener('click',()=>printPrivateReceipt(privateLatestReceipt));
 
   document.getElementById('copyPrivateStudentCredentials')?.addEventListener('click',async()=>{
     if(!privateCredentialCurrent)return;
@@ -3218,35 +3259,58 @@
 
   const recordPrivateRegistrationPayments=async(student,groupId,name,finance)=>{
     const ctx=await hydratePlatformContext();
-    if(!ctx?.internal_email)return;
+    if(!ctx?.internal_email)return null;
     const sid=student?.id||student?.private_student_id||finance.private_student_id;
     const date=finance.date||new Date().toISOString().slice(0,10);
+    const group=teacherRoomContractsCache.find(x=>String(x.group_id)===String(groupId))
+      ||teacherHubGroupsCache.find(x=>String(x.group_id)===String(groupId))||{};
     const items=[
-      {kind:'tuition',amount:Number(finance.tuition_paid_now||0),category:'تحصيل اشتراك',note:'دفعة تسجيل/اشتراك — '+name},
-      {kind:'books',amount:Number(finance.books_paid_now||0),category:'تحصيل كتب',note:'تحصيل كتب — '+name}
+      {kind:'tuition',label:'اشتراك الطالب',amount:Number(finance.tuition_paid_now||0),category:'تحصيل اشتراك',note:'دفعة تسجيل/اشتراك — '+name},
+      {kind:'books',label:'الكتب / المذكرات',amount:Number(finance.books_paid_now||0),category:'تحصيل كتب',note:'تحصيل كتب — '+name}
     ].filter(x=>x.amount>0);
+    if(!items.length)return null;
+    const receiptNo='ROV-PR-'+Date.now().toString(36).toUpperCase();
+    const receipt={
+      receipt_no:receiptNo,student_name:name,parent_name:finance.parent_name||null,
+      private_student_id:sid||null,group_id:groupId,group_name:group.group_name||group.name||'—',
+      subject:group.subject_name||group.subject||'—',date,method:finance.method||'cash',
+      items:items.map(x=>({kind:x.kind,label:x.label,amount:x.amount})),
+      total_paid:items.reduce((n,x)=>n+x.amount,0),
+      total_due:Number(finance.tuition||0)+(finance.books_free?0:Number(finance.books_fee||0)),
+      remaining:Math.max(0,(Number(finance.tuition||0)-Number(finance.tuition_paid||0))+
+        ((finance.books_free?0:Number(finance.books_fee||0))-Number(finance.books_paid||0))),
+      recorded_by:ctx?.display_name||'المعلم',
+      note:document.getElementById('privateStudentNotes')?.value?.trim()||null,
+      created_at:new Date().toISOString()
+    };
     for(const item of items){
       const paymentId='PP-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
       let dbSaved=false;
       if(sid){
         try{
           await dataApiFetch('/rpc/teacher_private_payment_add',{method:'POST',body:JSON.stringify({
-            p_private_student_id:sid,p_amount:item.amount,p_date:date,p_method:finance.method||'cash',p_note:item.note,p_payment_kind:item.kind
+            p_private_student_id:sid,p_amount:item.amount,p_date:date,p_method:finance.method||'cash',
+            p_note:item.note,p_payment_kind:item.kind,p_receipt_no:receiptNo
           })});
           dbSaved=true;
         }catch(payErr){
           if(!/unsupported_action|unknown_custom_action|unsupported action|not supported/i.test(String(payErr?.message||payErr||'')))throw payErr;
         }
       }
-      await sendStructuredMail(ctx.internal_email,'PRIVATE_PAYMENT',paymentId,{
-        payment_id:paymentId,private_student_id:sid||null,group_id:groupId,student_name:name,
-        amount:item.amount,payment_kind:item.kind,date,method:finance.method||'cash',note:item.note,db_saved:dbSaved,created_at:new Date().toISOString()
-      });
+      const paymentRecord={
+        payment_id:paymentId,receipt_no:receiptNo,private_student_id:sid||null,group_id:groupId,
+        group_name:receipt.group_name,subject:receipt.subject,student_name:name,parent_name:receipt.parent_name,
+        amount:item.amount,payment_kind:item.kind,payment_label:item.label,date,method:finance.method||'cash',
+        note:item.note,db_saved:dbSaved,total_due:receipt.total_due,remaining_after:receipt.remaining,
+        receipt_items:receipt.items,receipt_total_paid:receipt.total_paid,created_at:new Date().toISOString()
+      };
+      await sendStructuredMail(ctx.internal_email,'PRIVATE_PAYMENT',paymentId,paymentRecord);
       await sendStructuredMail(ctx.internal_email,'TEACHER_FINANCE',paymentId,{
         entry_id:paymentId,type:'income',amount:item.amount,category:item.category,date,note:item.note,
-        private_student_id:sid||null,group_id:groupId,created_at:new Date().toISOString()
+        private_student_id:sid||null,group_id:groupId,receipt_no:receiptNo,created_at:new Date().toISOString()
       });
     }
+    return receipt;
   };
 
   const openPrivateStudentModal=(student,groupId)=>{
@@ -3321,10 +3385,10 @@
         p_notes:document.getElementById('privateStudentNotes').value.trim()||null
       })});
       const finance={tuition,tuition_paid:existingTuition+tuitionPaidNow,tuition_paid_now:tuitionPaidNow,books_free:booksFree,books_fee:booksFee,books_paid:existingBooks+booksPaidNow,books_paid_now:booksPaidNow,method:paymentMethod,date:document.getElementById('privateStudentJoinedOn').value||new Date().toISOString().slice(0,10),parent_name:document.getElementById('privateStudentParentName').value.trim()||null};
-      if(tuitionPaidNow>0||booksPaidNow>0)await recordPrivateRegistrationPayments(result,groupId,name,finance);
+      if(tuitionPaidNow>0||booksPaidNow>0)finance.receipt=await recordPrivateRegistrationPayments(result,groupId,name,finance);
       if(!id){
         renderPrivateCredentialCard(result,name,groupId,finance);
-        msg.textContent='تم إنشاء الطالب وملفه المالي وحساب ولي الأمر. بطاقة البيانات جاهزة للنسخ والإرسال.';
+        msg.textContent=finance.receipt?'تم إنشاء الطالب وملفه المالي. تم إصدار إيصال رقم '+finance.receipt.receipt_no+' ويمكن طباعته من البطاقة.':'تم إنشاء الطالب وملفه المالي وحساب ولي الأمر. بطاقة البيانات جاهزة للنسخ والإرسال.';
       }else msg.textContent='تم تحديث بيانات الطالب وتسجيل الحركة المالية.';
       msg.className='student-form-msg success show';
       if(typeof loadTeacherHub==='function')await loadTeacherHub();
@@ -3355,7 +3419,7 @@
           };
           await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',fallbackId,record);
           const finance={private_student_id:fallbackId,tuition,tuition_paid:record.month_paid,tuition_paid_now:tuitionPaidNow,books_free:booksFree,books_fee:booksFee,books_paid:record.books_paid,books_paid_now:booksPaidNow,method:paymentMethod,date:record.joined_on,parent_name:record.parent_name};
-          if(tuitionPaidNow>0||booksPaidNow>0)await recordPrivateRegistrationPayments(record,groupId,name,finance);
+          if(tuitionPaidNow>0||booksPaidNow>0)finance.receipt=await recordPrivateRegistrationPayments(record,groupId,name,finance);
           msg.textContent=id?'تم تحديث بيانات الطالب الخاص وتسجيل الحركة المالية.':'تم حفظ الطالب وفتح ملفه المالي.';
           msg.className='student-form-msg success show';
           renderPrivateCredentialCard(null,name,groupId,finance);
@@ -3700,6 +3764,11 @@
     const fallbackPrivateStudents=[...fallbackPrivateMap.values()].filter(x=>x.status!=='deleted');
     const dbPrivateIds=new Set(dbPrivateStudents.map(x=>String(x.id||x.private_student_id||'')));
     teacherPrivateStudentsCache=[...dbPrivateStudents,...fallbackPrivateStudents.filter(x=>!dbPrivateIds.has(String(x.id||x.private_student_id||'')))];
+    const privatePaymentMap=new Map();
+    [...inbox,...sent].filter(m=>String(m.subject||'').startsWith('[PRIVATE_PAYMENT]'))
+      .sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0))
+      .forEach(m=>{let x=null;try{x=JSON.parse(String(m.body||'{}'))}catch{} if(x?.payment_id)privatePaymentMap.set(String(x.payment_id),{...x,_mail:m})});
+    teacherPrivatePaymentsCache=[...privatePaymentMap.values()];
 
     if(results[1].status==='fulfilled'&&Array.isArray(results[1].value)){
       teacherRoomContractsCache=results[1].value;
@@ -3759,7 +3828,7 @@
           '<td>'+(st.books_free?'مجانية':(Number(st.books_fee||0).toFixed(2)+'<br><span style="font-size:9px;color:var(--muted)">مسدد '+Number(st.books_paid||0).toFixed(2)+'</span>'))+'</td>'+
           '<td class="due">'+(Math.max(0,Number(st.monthly_fee||0)-Number(st.month_paid||0))+Math.max(0,(st.books_free?0:Number(st.books_fee||0))-Number(st.books_paid||0))).toFixed(2)+'<br><span style="font-size:9px;color:var(--muted)">'+(((Math.max(0,Number(st.monthly_fee||0)-Number(st.month_paid||0))+Math.max(0,(st.books_free?0:Number(st.books_fee||0))-Number(st.books_paid||0)))<=0.001)?'تم السداد':'متبقي')+'</span></td>'+
           '<td>'+escapeHtml(st.parent_name||'—')+'<br><span style="font-size:9px;color:var(--muted)">'+escapeHtml(st.parent_phone||'')+'</span></td>'+
-          '<td><button class="secondary-action edit-private-student" type="button" data-id="'+escapeHtml(id)+'">تعديل</button></td>'+
+          '<td><div class="private-money-actions"><button class="secondary-action edit-private-student" type="button" data-id="'+escapeHtml(id)+'">تعديل</button><button class="secondary-action print-private-receipt" type="button" data-id="'+escapeHtml(id)+'">🧾 آخر إيصال</button></div></td>'+
         '</tr>';
       }).join('');
     }else{
@@ -3828,6 +3897,26 @@
 
   document.getElementById('refreshTeacherHub')?.addEventListener('click',loadTeacherHub);
   document.getElementById('teacherPrivateStudentsRows')?.addEventListener('click',e=>{
+    const receiptBtn=e.target.closest('.print-private-receipt');
+    if(receiptBtn){
+      const sid=String(receiptBtn.dataset.id||'');
+      const rows=teacherPrivatePaymentsCache.filter(x=>String(x.private_student_id||'')===sid)
+        .sort((a,b)=>new Date(b.date||b.created_at||0)-new Date(a.date||a.created_at||0));
+      if(!rows.length){alert('لا يوجد إيصال دفع مسجل لهذا الطالب حتى الآن.');return}
+      const first=rows[0],sameReceipt=rows.filter(x=>String(x.receipt_no||'')===String(first.receipt_no||''));
+      const st=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id)===sid)||{};
+      const receipt={
+        receipt_no:first.receipt_no||('ROV-PR-'+String(first.payment_id||'')),
+        student_name:first.student_name||st.full_name||'طالب',parent_name:first.parent_name||st.parent_name||null,
+        group_name:first.group_name||st.group_name||'—',subject:first.subject||'—',
+        date:first.date||String(first.created_at||'').slice(0,10),method:first.method||'cash',
+        items:Array.isArray(first.receipt_items)?first.receipt_items:sameReceipt.map(x=>({kind:x.payment_kind,label:x.payment_label||x.payment_kind,amount:Number(x.amount||0)})),
+        total_paid:Number(first.receipt_total_paid||sameReceipt.reduce((n,x)=>n+Number(x.amount||0),0)),
+        total_due:Number(first.total_due||0),remaining:Number(first.remaining_after||0),
+        recorded_by:first.recorded_by||'المعلم',note:first.note||null
+      };
+      printPrivateReceipt(receipt);return;
+    }
     const b=e.target.closest('.edit-private-student');if(!b)return;
     const st=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id)===String(b.dataset.id));
     if(st)openPrivateStudentModal(st,st.group_id);
