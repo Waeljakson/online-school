@@ -269,6 +269,7 @@ async function ensureSchema(){
       sold_at timestamptz not null default now(),
       note text
     )`;
+    await sql`alter table public.teachers add column if not exists subjects_text text`;
     await sql`alter table public.study_groups add column if not exists meeting_started_at timestamptz`;
     await sql`alter table public.study_groups add column if not exists meeting_ended_at timestamptz`;
     await sql`create index if not exists tps_teacher_idx on public.teacher_private_students(teacher_account_id,status)`;
@@ -2465,6 +2466,7 @@ async function custom(action,a,p){
   if(action==='admin_teachers_all'){
     must(a,adminEntityAllowed());
     return await sql`select t.*,t.id teacher_id,
+      coalesce(nullif(t.subjects_text,''),nullif(to_jsonb(t)->>'subjects','')) subjects_edit,
       pa.id account_id,pa.account_code,pa.username,pa.internal_email,coalesce(pa.is_active,false) account_active
       from public.teachers t
       left join public.platform_accounts pa on pa.teacher_id=t.id
@@ -2474,6 +2476,51 @@ async function custom(action,a,p){
           where ar.school_id=t.school_id and ar.entity_type='teacher' and ar.entity_id=t.id
         )
       order by (t.status='active') desc,t.full_name`;
+  }
+
+  if(action==='admin_teacher_update_details'){
+    must(a,adminEntityAllowed());
+    const teacherId=String(p.p_teacher_id||'').trim();
+    const fullName=String(p.p_full_name||'').replace(/\s+/g,' ').trim();
+    if(!teacherId)throw new Error('teacher_id_required');
+    if(fullName.length<2)throw new Error('teacher_name_required');
+
+    const salaryType=String(p.p_salary_type||'monthly');
+    const allowedSalary=new Set(['monthly','per_lesson','per_hour','percentage','custom']);
+    if(!allowedSalary.has(salaryType))throw new Error('invalid_salary_type');
+
+    const row=(await sql`update public.teachers set
+      full_name=${fullName},
+      phone=${p.p_phone||null},
+      email=${p.p_email||null},
+      national_id=${p.p_national_id||null},
+      gender=${p.p_gender||null},
+      birth_date=${p.p_birth_date||null}::date,
+      address=${p.p_address||null},
+      qualification=${p.p_qualification||null},
+      specialization=${p.p_specialization||null},
+      hire_date=${p.p_hire_date||null}::date,
+      salary_type=${salaryType},
+      base_salary=${Number(p.p_base_salary||0)},
+      rate_value=${Number(p.p_rate_value||0)},
+      bank_name=${p.p_bank_name||null},
+      bank_account=${p.p_bank_account||null},
+      subjects_text=${Array.isArray(p.p_subject_names)?p.p_subject_names.join('، '):(p.p_subjects||null)},
+      notes=${p.p_notes||null}
+      where id=${teacherId}::uuid and school_id=${a.school_id}
+      returning *`)[0];
+    if(!row)throw new Error('teacher_not_found');
+
+    await sql`update public.platform_accounts
+      set display_name=${fullName},updated_at=now()
+      where teacher_id=${teacherId}::uuid and school_id=${a.school_id}`;
+
+    return {
+      ...row,
+      teacher_id:row.id,
+      subjects:row.subjects_text,
+      updated:true
+    };
   }
 
   if(action==='admin_teacher_name_update'){
@@ -3311,7 +3358,7 @@ export default{
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
         'platform_group_room_details','platform_set_group_meeting','teacher_update_group_schedule',
-        'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all','admin_teacher_name_update',
+        'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all','admin_teacher_name_update','admin_teacher_update_details',
         'admin_entity_set_active','admin_entity_delete','admin_purge_students_parents'
       ]);
 
