@@ -1089,6 +1089,25 @@
   </div>
 </div>
 
+<div class="student-modal" id="examReviewModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:950px">
+    <div class="student-dialog-head">
+      <div>
+        <h3 id="examReviewTitle">مراجعة إجابات الطالب</h3>
+        <p id="examReviewMeta">الإجابة المختارة والإجابة الصحيحة لكل سؤال.</p>
+      </div>
+      <button class="close-modal" type="button" id="closeExamReviewModal">×</button>
+    </div>
+    <div class="student-form">
+      <div id="examReviewSummary" class="finance-student-balance"></div>
+      <div id="examReviewQuestions" style="display:grid;gap:10px;margin-top:12px"></div>
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="closeExamReviewBottom">إغلاق</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="student-modal" id="teacherPrivatePaymentModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:620px">
     <div class="student-dialog-head">
@@ -5907,7 +5926,10 @@
         <td>${calc.mcqScore.toFixed(2)}</td>
         <td>${calc.essayMax?('من '+calc.essayMax.toFixed(2)):'لا يوجد'}</td>
         <td>${escapeHtml(resultText)}</td>
-        <td>${g?'<span class="status active">معتمد</span>':`<button class="secondary-action grade-exam-submission" type="button" data-submission-id="${escapeHtml(s.submission_id)}">تصحيح واعتماد</button>`}</td>
+        <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="secondary-action review-exam-submission" type="button" data-submission-id="${escapeHtml(s.submission_id)}">عرض الإجابات</button>
+          ${g?'<span class="status active">معتمد</span>':`<button class="secondary-action grade-exam-submission" type="button" data-submission-id="${escapeHtml(s.submission_id)}">تصحيح واعتماد</button>`}
+        </div></td>
       </tr>`;
     }).join('');
   };
@@ -6118,12 +6140,102 @@
     }catch(err){msg.textContent=err.message||'تعذر تسليم الاختبار';msg.className='student-form-msg error show'}
   });
 
+  const examReviewModal=document.getElementById('examReviewModal');
+  const closeExamReview=()=>{
+    examReviewModal.classList.remove('show');
+    examReviewModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  document.getElementById('closeExamReviewModal')?.addEventListener('click',closeExamReview);
+  document.getElementById('closeExamReviewBottom')?.addEventListener('click',closeExamReview);
+  examReviewModal?.addEventListener('click',e=>{if(e.target===examReviewModal)closeExamReview()});
+
+  const examAnswerText=(q,value)=>{
+    if(value===null||value===undefined||value==='')return 'لم يجب';
+    if(q.type==='mcq'){
+      const index=Number(value);
+      const choice=Array.isArray(q.choices)?q.choices[index]:null;
+      return choice!==undefined&&choice!==null
+        ?String.fromCharCode(65+index)+' — '+String(choice)
+        :'اختيار '+String(index+1);
+    }
+    if(q.type==='true_false')return String(value)==='true'?'صح':'غلط';
+    return String(value);
+  };
+
+  const renderExamReview=(exam,submission,gradedResult=null)=>{
+    const questions=Array.isArray(exam?.questions)?exam.questions:[];
+    let objectiveCorrect=0,objectiveWrong=0,unanswered=0,objectiveScore=0,objectiveMax=0;
+
+    const cards=questions.map((q,index)=>{
+      const answer=submission?.answers?.[q.id];
+      const pts=Number(q.points||0);
+      let state='essay',isCorrect=null,correctText='';
+
+      if(q.type==='essay'){
+        state='essay';
+      }else{
+        objectiveMax+=pts;
+        if(answer===null||answer===undefined||answer===''){
+          state='unanswered';unanswered++;
+        }else{
+          isCorrect=q.type==='mcq'
+            ?Number(answer)===Number(q.correct)
+            :String(answer)===String(q.correct);
+          if(isCorrect){
+            state='correct';objectiveCorrect++;objectiveScore+=pts;
+          }else{
+            state='wrong';objectiveWrong++;
+          }
+        }
+        correctText=examAnswerText(q,q.correct);
+      }
+
+      const stateLabel=state==='correct'?'✓ إجابة صحيحة':state==='wrong'?'✗ إجابة خاطئة':state==='unanswered'?'لم يجب':'سؤال مقالي';
+      const stateClass=state==='correct'?'active':state==='wrong'?'watch':'';
+      const studentAnswer=examAnswerText(q,answer);
+      return `<div class="exam-answer-block" style="border:1px solid var(--border);border-radius:12px;padding:12px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <h4 style="margin:0">${index+1}. ${escapeHtml(q.text||'سؤال')}</h4>
+          <span class="status ${stateClass}">${escapeHtml(stateLabel)} • ${pts.toFixed(2)} درجة</span>
+        </div>
+        <div style="margin-top:10px;display:grid;gap:7px">
+          <div><b>إجابة الطالب:</b> <span class="${state==='wrong'?'due':state==='correct'?'paid':''}">${escapeHtml(studentAnswer)}</span></div>
+          ${q.type!=='essay'?'<div><b>الإجابة الصحيحة:</b> <span class="paid">'+escapeHtml(correctText)+'</span></div>':''}
+          ${q.type==='essay'?'<div style="background:var(--surface-2);padding:10px;border-radius:10px;white-space:pre-wrap">'+escapeHtml(studentAnswer)+'</div>':''}
+        </div>
+      </div>`;
+    }).join('');
+
+    const finalScore=gradedResult?Number(gradedResult.score||0):null;
+    const maxScore=gradedResult?Number(gradedResult.max_score||0):questions.reduce((s,q)=>s+Number(q.points||0),0);
+    document.getElementById('examReviewTitle').textContent='مراجعة إجابات '+String(submission?.student_name||'الطالب');
+    document.getElementById('examReviewMeta').textContent=String(exam?.title||submission?.exam_title||'الاختبار')+' • '+new Date(submission?.submitted_at||Date.now()).toLocaleString('ar-EG');
+    document.getElementById('examReviewSummary').innerHTML=
+      'الصحيح: <b class="paid">'+objectiveCorrect+'</b> • الخطأ: <b class="due">'+objectiveWrong+'</b> • بدون إجابة: <b>'+unanswered+
+      '</b> • درجة الأسئلة الموضوعية: <b>'+objectiveScore.toFixed(2)+' / '+objectiveMax.toFixed(2)+'</b>'+
+      (gradedResult?' • النتيجة النهائية: <b>'+finalScore.toFixed(2)+' / '+maxScore.toFixed(2)+'</b>':'');
+    document.getElementById('examReviewQuestions').innerHTML=cards||'<div class="students-empty">لا توجد أسئلة للمراجعة.</div>';
+    examReviewModal.classList.add('show');
+    examReviewModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  };
+
   document.getElementById('examSubmissionsRows').addEventListener('click',async e=>{
-    const btn=e.target.closest('.grade-exam-submission');if(!btn)return;
+    const reviewBtn=e.target.closest('.review-exam-submission');
+    const gradeBtn=e.target.closest('.grade-exam-submission');
+    const btn=reviewBtn||gradeBtn;if(!btn)return;
     const inbox=await structuredMail('inbox');
-    const submission=latestStructuredBy(inbox,'EXAM_SUBMISSION','submission_id').find(x=>x.submission_id===btn.dataset.submissionId);
+    const submission=latestStructuredBy(inbox,'EXAM_SUBMISSION','submission_id').find(x=>String(x.submission_id)===String(btn.dataset.submissionId));
     if(!submission)return;
     const exam=teacherExamDefs.find(x=>String(x.exam_id)===String(submission.exam_id));if(!exam)return;
+
+    if(reviewBtn){
+      const graded=latestStructuredBy(inbox,'EXAM_GRADED','submission_id')
+        .find(x=>String(x.submission_id)===String(submission.submission_id))||null;
+      renderExamReview(exam,submission,graded);
+      return;
+    }
     const calc=examScoreMcq(exam,submission);
     let essayScore=0;
     if(calc.essayMax>0){
