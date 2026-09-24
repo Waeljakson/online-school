@@ -2488,8 +2488,26 @@ export default{
         // then enrich it with room details. This keeps "My groups" and attendance
         // on the same canonical group ids.
         if(a.account_type==='teacher'){
-          const attendanceGroups=await custom('platform_attendance_groups_local',a,{});
-          if(Array.isArray(attendanceGroups)&&attendanceGroups.length){
+          let attendanceGroups=await custom('platform_attendance_groups_local',a,{});
+          let legacyGroups=[];
+          try{
+            const rr=await sql`select public.roven_rpc(
+              'platform_attendance_groups',
+              ${token},
+              ${JSON.stringify(p||{})}::jsonb
+            ) result`;
+            legacyGroups=Array.isArray(rr[0]?.result)?rr[0].result:[];
+          }catch{}
+
+          const mergedGroups=new Map();
+          for(const row of [...(Array.isArray(attendanceGroups)?attendanceGroups:[]),...legacyGroups]){
+            const key=String(row?.group_name||row?.name||row?.group_id||'').trim().toLowerCase();
+            if(!key)continue;
+            if(!mergedGroups.has(key))mergedGroups.set(key,row);
+          }
+          attendanceGroups=[...mergedGroups.values()];
+
+          if(attendanceGroups.length){
             const ids=attendanceGroups.map(x=>String(x.group_id)).filter(Boolean);
             const details=ids.length?await sql`select
                 g.id group_id,
