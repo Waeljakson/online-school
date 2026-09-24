@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1748" />
+  <meta name="roven-build" content="20260924-1805" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1554,7 +1554,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1748';
+  window.__ROVEN_BUILD__='20260924-1805';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3195,6 +3195,40 @@
       if(typeof loadTeacherHub==='function')await loadTeacherHub();
     }catch(err){
       const raw=String(err&&err.message||err||'');
+      const unsupported=/unsupported_action|unknown_custom_action|unsupported action|not supported/i.test(raw);
+      if(unsupported){
+        try{
+          const ctx=await hydratePlatformContext();
+          if(!ctx?.internal_email)throw err;
+          const previous=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id||'')===String(id||''));
+          const fallbackId=id||((typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function')?crypto.randomUUID():('00000000-0000-4000-8000-'+Date.now().toString().padStart(12,'0').slice(-12)));
+          const contract=teacherRoomContractsCache.find(x=>String(x.group_id)===String(groupId));
+          const record={
+            id:fallbackId,private_student_id:fallbackId,
+            private_code:previous?.private_code||('TPS-'+Date.now().toString(36).toUpperCase()),
+            group_id:groupId,group_name:contract?.group_name||contract?.name||null,
+            full_name:name,
+            phone:document.getElementById('privateStudentPhone').value.trim()||null,
+            parent_name:document.getElementById('privateStudentParentName').value.trim()||null,
+            parent_phone:document.getElementById('privateStudentParentPhone').value.trim()||null,
+            monthly_fee:Number(document.getElementById('privateStudentMonthlyFee').value)||0,
+            joined_on:document.getElementById('privateStudentJoinedOn').value||new Date().toISOString().slice(0,10),
+            notes:document.getElementById('privateStudentNotes').value.trim()||null,
+            month_paid:Number(previous?.month_paid||0),status:'active',ownership:'teacher_private',
+            created_at:previous?.created_at||new Date().toISOString(),updated_at:new Date().toISOString()
+          };
+          await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',fallbackId,record);
+          msg.textContent=id?'تم تحديث بيانات الطالب الخاص.':'تم حفظ الطالب الخاص بنجاح.';
+          msg.className='student-form-msg success show';
+          renderPrivateCredentialCard(null,name);
+          if(typeof loadTeacherHub==='function')await loadTeacherHub();
+          return;
+        }catch(fallbackErr){
+          msg.textContent=fallbackErr?.message||'تعذر حفظ الطالب الخاص.';
+          msg.className='student-form-msg error show';
+          return;
+        }
+      }
       msg.textContent=raw.includes('room_capacity_reached')?'القاعة ممتلئة حسب السعة المتعاقد عليها. يجب زيادة السعة أولًا.':(err.message||'تعذر حفظ الطالب');
       msg.className='student-form-msg error show';
     }
@@ -3207,7 +3241,21 @@
       await dataApiFetch('/rpc/teacher_private_student_delete',{method:'POST',body:JSON.stringify({p_private_student_id:id})});
       closePrivateStudentModal();
       if(typeof loadTeacherHub==='function')await loadTeacherHub();
-    }catch(err){alert(err.message||'تعذر حذف الطالب')}
+    }catch(err){
+      const raw=String(err&&err.message||err||'');
+      if(/unsupported_action|unknown_custom_action|unsupported action|not supported/i.test(raw)){
+        try{
+          const ctx=await hydratePlatformContext();
+          const student=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id||'')===String(id));
+          if(!ctx?.internal_email||!student)throw err;
+          await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',id,{...student,id,private_student_id:id,status:'deleted',updated_at:new Date().toISOString()});
+          closePrivateStudentModal();
+          if(typeof loadTeacherHub==='function')await loadTeacherHub();
+          return;
+        }catch(fallbackErr){alert(fallbackErr?.message||'تعذر حذف الطالب');return}
+      }
+      alert(err.message||'تعذر حذف الطالب')
+    }
   });
 
   // ===== Teacher private assistant lifecycle =====
@@ -3498,9 +3546,22 @@
     ]);
 
     teacherHubGroupsCache=results[0].status==='fulfilled'&&Array.isArray(results[0].value)?results[0].value:[];
-    teacherPrivateStudentsCache=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[];
+    const dbPrivateStudents=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[];
     const inbox=results[4].status==='fulfilled'&&Array.isArray(results[4].value)?results[4].value:[];
     const sent=results[5].status==='fulfilled'&&Array.isArray(results[5].value)?results[5].value:[];
+    const fallbackPrivateMap=new Map();
+    [...inbox,...sent]
+      .filter(m=>String(m.subject||'').startsWith('[PRIVATE_STUDENT]'))
+      .sort((a,b)=>new Date(a.sent_at||0)-new Date(b.sent_at||0))
+      .forEach(m=>{
+        let x=null;try{x=JSON.parse(String(m.body||'{}'))}catch{}
+        if(!x)return;
+        const key=String(x.private_student_id||x.id||'');
+        if(key)fallbackPrivateMap.set(key,{...x,id:x.id||key,private_student_id:x.private_student_id||key,_fallback:true});
+      });
+    const fallbackPrivateStudents=[...fallbackPrivateMap.values()].filter(x=>x.status!=='deleted');
+    const dbPrivateIds=new Set(dbPrivateStudents.map(x=>String(x.id||x.private_student_id||'')));
+    teacherPrivateStudentsCache=[...dbPrivateStudents,...fallbackPrivateStudents.filter(x=>!dbPrivateIds.has(String(x.id||x.private_student_id||'')))];
 
     if(results[1].status==='fulfilled'&&Array.isArray(results[1].value)){
       teacherRoomContractsCache=results[1].value;
