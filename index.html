@@ -4025,6 +4025,50 @@
   });
 
 
+  const teacherUpcomingFromGroups=(groups,now=new Date())=>{
+    const rows=[];
+    const jsDayMap={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+
+    for(const g of (groups||[])){
+      const groupRows=[];
+      for(const sess of parseScheduleSessions(g.schedule_json)){
+        const day=String(sess.day||'').toLowerCase();
+        if(jsDayMap[day]===undefined||!sess.time)continue;
+        const d=new Date(now);
+        const diff=(jsDayMap[day]-d.getDay()+7)%7;
+        d.setDate(d.getDate()+diff);
+        const dateStr=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+        const instant=zonedDateFromLocal(dateStr,String(sess.time),'Africa/Cairo');
+        const duration=Math.max(15,Number(sess.duration||60)||60);
+        groupRows.push({
+          g,s:sess,instant,
+          endInstant:new Date(instant.getTime()+duration*60000),
+          duration
+        });
+      }
+
+      let endedIndex=-1;
+      const endedAt=g.meeting_ended_at?new Date(g.meeting_ended_at):null;
+      if(endedAt&&!Number.isNaN(endedAt.getTime())&&groupRows.length){
+        let best=Infinity;
+        groupRows.forEach((x,i)=>{
+          const delta=Math.abs(x.instant.getTime()-endedAt.getTime());
+          // Only match an occurrence from the same calendar day and reasonably close to the end event.
+          if(x.instant.toDateString()!==endedAt.toDateString())return;
+          if(delta<best){best=delta;endedIndex=i}
+        });
+      }
+
+      groupRows.forEach((x,i)=>{
+        if(i===endedIndex)return;
+        if(x.endInstant<=now)return;
+        rows.push(x);
+      });
+    }
+
+    return rows.sort((a,b)=>a.instant-b.instant);
+  };
+
   const loadTeacherHub=async()=>{
     const ctx=await hydratePlatformContext();
     if(ctx?.account_type!=='teacher')return;
@@ -4214,11 +4258,12 @@
       return '<tr><td><b>'+escapeHtml(r.room_name||'قاعة')+'</b></td><td>'+escapeHtml(r.subject||'—')+'</td><td><b>'+escapeHtml(Number(z?.capacity||r.capacity||0)||'—')+'</b></td><td>'+Number(r.proposed_price||0).toFixed(2)+'</td><td>'+(z?Number(z.agreed_price||0).toFixed(2):'—')+'</td><td><span class="room-request-status '+escapeHtml(status)+'">'+escapeHtml(statusLabels[status]||status)+'</span></td></tr>';
     }).join(''):'<tr><td colspan="6" class="students-empty">لا توجد طلبات بعد.</td></tr>';
 
-    const upcoming=[];
-    teacherHubGroupsCache.forEach(g=>parseScheduleSessions(g.schedule_json).forEach(x=>upcoming.push({g:g,s:x})));
+    const upcoming=teacherUpcomingFromGroups(teacherHubGroupsCache,new Date());
     document.getElementById('teacherUpcomingLessons').innerHTML=upcoming.length?upcoming.slice(0,8).map(x=>{
-      return '<div class="lesson"><time>'+escapeHtml(x.s.time||'')+'</time><div><strong>'+escapeHtml(x.g.subject_name||x.g.group_name||'حصة')+'</strong><span>'+escapeHtml(weekDayLabels[x.s.day]||x.s.day||'')+'</span></div></div>';
-    }).join(''):'<div class="students-empty">لا توجد مواعيد في الجداول الحالية.</div>';
+      const live=Boolean(x.g.meeting_url);
+      const status=live?' • الحصة مفعلة':'';
+      return '<div class="lesson"><time>'+escapeHtml(x.s.time||'')+'</time><div><strong>'+escapeHtml(x.g.subject_name||x.g.group_name||'حصة')+'</strong><span>'+escapeHtml(weekDayLabels[String(x.s.day||'').toLowerCase()]||x.s.day||'')+status+'</span></div></div>';
+    }).join(''):'<div class="students-empty">لا توجد حصص حالية أو قادمة هذا الأسبوع.</div>';
     renderTeacherScheduleManager();
 
     if(typeof syncTeacherAssistants==='function')syncTeacherAssistants().catch(()=>{});
@@ -7251,7 +7296,7 @@
       document.getElementById('roomMeetingUrl').value=savedUrl;
       const link=document.getElementById('openRoomLink');
       link.href=savedUrl;link.style.display='inline-flex';
-      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
+      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule(),loadTeacherHub()]);
       alert('تم تفعيل رابط الحصة. أصبح زر «انضم للحصة» ظاهرًا للطلاب.');
     }catch(err){alert(String(err.message||'').includes('Invalid URL')?'الرابط غير صحيح.':(err.message||'تعذر حفظ رابط الحصة'))}
   });
@@ -7263,7 +7308,7 @@
       await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:null})});
       document.getElementById('roomMeetingUrl').value='';
       const link=document.getElementById('openRoomLink');link.removeAttribute('href');link.style.display='none';
-      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
+      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule(),loadTeacherHub()]);
     }catch(err){alert(err.message||'تعذر إنهاء الحصة')}
   });
 
