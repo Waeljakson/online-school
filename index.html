@@ -7084,21 +7084,30 @@
   document.getElementById('closeGroupRoomModal').addEventListener('click',closeGroupRoom);
   groupRoomModal.addEventListener('click',e=>{if(e.target===groupRoomModal)closeGroupRoom()});
 
-  const loadGroupChat=async()=>{
+  const loadGroupChat=async(silent=false)=>{
     if(!currentRoomGroupId)return;
     const box=document.getElementById('groupChatMessages');
-    box.innerHTML='<div class="students-empty">جارٍ تحميل الرسائل...</div>';
+    if(!silent)box.innerHTML='<div class="students-empty">جارٍ تحميل الرسائل...</div>';
     try{
       const data=await dataApiFetch('/rpc/platform_group_chat_list',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId})});
-      if(!Array.isArray(data)||!data.length){box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';return}
+      if(!Array.isArray(data)||!data.length){
+        if(!silent||!box.querySelector('.chat-msg'))box.innerHTML='<div class="students-empty">لا توجد رسائل بعد. ابدأ المحادثة.</div>';
+        return;
+      }
       if(typeof markGroupNotificationSeen==='function') markGroupNotificationSeen(currentRoomGroupId,data);
-      box.innerHTML=data.map(m=>`<div class="chat-msg">
+      const nextHtml=data.map(m=>`<div class="chat-msg">
         ${m.sender_photo?`<img class="platform-avatar" src="${escapeHtml(m.sender_photo)}" alt="">`:`<span class="platform-avatar">${escapeHtml((m.sender_name||'?')[0])}</span>`}
         <div class="bubble"><div class="meta"><b>${escapeHtml(m.sender_name||'مستخدم')}</b> • ${escapeHtml(new Date(m.created_at).toLocaleString('ar-EG'))}</div>
         <div>${escapeHtml(m.body||'')}</div>${m.attachment_name?attachmentLink(m.attachment_name,m.attachment_mime,m.attachment_base64):''}</div>
       </div>`).join('');
-      box.scrollTop=box.scrollHeight;
-    }catch(err){box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الشات')+'</div>'}
+      if(box.innerHTML!==nextHtml){
+        const wasNearBottom=(box.scrollHeight-box.scrollTop-box.clientHeight)<80;
+        box.innerHTML=nextHtml;
+        if(!silent||wasNearBottom)box.scrollTop=box.scrollHeight;
+      }
+    }catch(err){
+      if(!silent)box.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الشات')+'</div>';
+    }
   };
 
   const openGroupRoom=async(group)=>{
@@ -7150,6 +7159,12 @@
       await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
     }catch(err){alert(err.message||'تعذر إنهاء الحصة')}
   });
+
+  setInterval(()=>{
+    if(currentRoomGroupId && groupRoomModal.classList.contains('show')){
+      loadGroupChat(true).catch(()=>{});
+    }
+  },5000);
 
   document.getElementById('sendGroupChat').addEventListener('click',async()=>{
     if(!currentRoomGroupId)return;
