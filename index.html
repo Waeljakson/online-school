@@ -3504,7 +3504,11 @@
       platform_reward_create_admin:['academic','إنشاء مكافأة'],platform_reward_update_status:['academic','تحديث طلب مكافأة'],
       platform_set_group_meeting:['update','تعديل رابط القاعة'],platform_update_profile:['update','تعديل الحساب'],
       teacher_assistant_create:['create','إنشاء مساعد معلم'],teacher_assistant_update:['update','تعديل مساعد معلم'],
-      teacher_assistant_delete:['delete','إلغاء مساعد معلم'],create_system_user_admin:['create','إنشاء مستخدم']
+      teacher_assistant_delete:['delete','إلغاء مساعد معلم'],create_system_user_admin:['create','إنشاء مستخدم'],
+      archive_school_entity:['status','أرشفة/إيقاف عنصر'],
+      certificate_create:['academic','إصدار شهادة'],certificate_delete:['academic','إلغاء شهادة'],
+      exam_create:['academic','إنشاء اختبار'],exam_publish:['academic','نشر اختبار'],exam_delete:['delete','حذف اختبار'],exam_grade_essay:['academic','اعتماد نتيجة اختبار'],
+      product_create:['create','إنشاء منتج تعليمي'],product_delete:['delete','إيقاف منتج تعليمي'],product_sale_add:['finance','بيع منتج تعليمي']
     };
     if(map[action])return map[action];
     if(action==='admin_entity_set_active')return ['status','تفعيل/إيقاف حساب أو عنصر'];
@@ -3547,7 +3551,7 @@
     if(auditBusy||['platform_mail_send','platform_mail_list','platform_mail_mark_read','platform_my_profile'].includes(action))return;
     const meta=auditActionMeta(action);if(!meta)return;
     const id=result?.student_id||result?.teacher_id||result?.group_id||result?.account_id||payload?.p_id||payload?.p_student_id||payload?.p_group_id||null;
-    const entity=action.includes('student')?'student':action.includes('teacher')?'teacher':action.includes('group')?'group':action.includes('attendance')?'attendance':action.includes('points')?'points':'system';
+    const entity=action.includes('student')?'student':action.includes('teacher')?'teacher':action.includes('group')?'group':action.includes('attendance')?'attendance':action.includes('points')?'points':action.includes('exam')?'exam':action.includes('certificate')?'certificate':action.includes('product')?'product':'system';
     await recordAudit(meta[0],meta[1],entity,id,null,{action,payload:{...payload,p_password:payload?.p_password?'***':undefined}});
   };
   const renderAuditLog=()=>{
@@ -4805,6 +4809,7 @@
     };
     try{
       await sendSchoolPaymentToManagement('SCHOOL_PAYMENT',payment.payment_id,payment);
+      await recordAudit('finance','تسجيل دفعة طالب','payment',payment.payment_id,payment.student_name,{amount:payment.amount,receipt_no:payment.receipt_no});
       if(payment.parent_internal_email)await sendStructuredMail(payment.parent_internal_email,'PARENT_PAYMENT',payment.payment_id,payment);
       if(payment.student_internal_email)await sendStructuredMail(payment.student_internal_email,'STUDENT_PAYMENT',payment.payment_id,payment);
       msg.textContent='تم تسجيل الدفعة وإرسال التحديث لولي الأمر. رقم الإيصال: '+payment.receipt_no;
@@ -4822,6 +4827,7 @@
     const voidEvent={payment_id:p.payment_id,receipt_no:p.receipt_no,student_id:p.student_id,student_no:p.student_no,student_name:p.student_name,amount:p.amount,voided_by:ctx?.display_name||'ROVEN',voided_at:new Date().toISOString()};
     try{
       await sendSchoolPaymentToManagement('SCHOOL_PAYMENT_VOID',p.payment_id,voidEvent);
+      await recordAudit('finance','إلغاء دفعة طالب','payment',p.payment_id,p.student_name,{amount:p.amount,receipt_no:p.receipt_no});
       if(p.parent_internal_email)await sendStructuredMail(p.parent_internal_email,'PARENT_PAYMENT_VOID',p.payment_id,voidEvent);
       if(p.student_internal_email)await sendStructuredMail(p.student_internal_email,'STUDENT_PAYMENT_VOID',p.payment_id,voidEvent);
       await loadSchoolFinance();
@@ -5787,6 +5793,12 @@
       switchTo('rewards','النقاط والمكافآت');
       await loadRewards();
     }else if(item.section==='parenthub'){
+      if(String(item.uid||'').startsWith('parent-att:')){
+        const seen=getStoredMap('parent_attendance_seen');seen[String(item.uid).replace('parent-att:','')]=Date.now();setStoredMap('parent_attendance_seen',seen);
+      }
+      if(String(item.uid||'').startsWith('parent-result:')){
+        const seen=getStoredMap('parent_result_seen');seen[String(item.uid).replace('parent-result:','')]=Date.now();setStoredMap('parent_result_seen',seen);
+      }
       switchTo('parenthub','متابعة الأبناء');
       await loadParentHub();
     }else if(item.section==='homework'){
@@ -5880,6 +5892,23 @@
           if(key&&!seen[key])items.push({uid:'homework-grade:'+key,section:'homework',count:1,icon:'✅',title:'تم تصحيح الواجب',text:(g.homework_title||'واجب')+' — '+Number(g.score||0)+' / '+Number(g.max_score||0),time:g.graded_at});
         });
       }catch{}
+
+      // Parent academic alerts: absence and published results.
+      if(['parent','private_parent'].includes(type)){
+        try{
+          const inboxAcademic=await structuredMail('inbox');
+          const attSeen=getStoredMap('parent_attendance_seen');
+          latestStructuredBy(inboxAcademic,'PARENT_ATTENDANCE','event_id').slice(-20).filter(a=>['absent','late'].includes(String(a.status||''))).forEach(a=>{
+            const key=String(a.event_id||'');if(!key||attSeen[key])return;
+            items.push({uid:'parent-att:'+key,section:'parenthub',count:1,icon:a.status==='absent'?'⚠️':'⏰',title:(a.status==='absent'?'غياب ':'تأخر ')+(a.student_name||'الطالب'),text:(a.date||'')+(a.note?' — '+a.note:''),time:a._mail?.sent_at||a.date});
+          });
+          const resultSeen=getStoredMap('parent_result_seen');
+          latestStructuredBy(inboxAcademic,'EXAM_RESULT_PARENT','result_id').slice(-20).forEach(r=>{
+            const key=String(r.result_id||'');if(!key||resultSeen[key])return;
+            items.push({uid:'parent-result:'+key,section:'parenthub',count:1,icon:'📝',title:'نتيجة جديدة لـ '+(r.student_name||'الطالب'),text:(r.exam_title||r.title||'اختبار')+' — '+Number(r.score||0)+' / '+Number(r.max_score||0),time:r.graded_at||r.submitted_at||r._mail?.sent_at});
+          });
+        }catch{}
+      }
 
       // Financial reminder for parent/student accounts.
       if(['parent','private_parent'].includes(type)){
@@ -6117,6 +6146,7 @@
     };
     try{
       await sendSchoolPaymentToManagement('SCHOOL_LEDGER_ENTRY',entry.entry_id,entry);
+      await recordAudit('finance',entry.type==='income'?'تسجيل إيراد':'تسجيل مصروف','ledger',entry.entry_id,entry.category,{amount:entry.amount,method:entry.method});
       msg.textContent='تم حفظ الحركة المالية.';msg.className='student-form-msg success show';
       document.getElementById('ledgerAmount').value='';document.getElementById('ledgerNote').value='';
       await loadSchoolLedger();
@@ -6128,6 +6158,7 @@
     if(!confirm('إلغاء هذه الحركة المالية؟ ستظل محفوظة في سجل المراجعة كحركة ملغاة.'))return;
     try{
       await sendSchoolPaymentToManagement('SCHOOL_LEDGER_VOID',entry.entry_id,{entry_id:entry.entry_id,voided_at:new Date().toISOString()});
+      await recordAudit('finance','إلغاء حركة مالية','ledger',entry.entry_id,entry.category,{amount:entry.amount});
       await loadSchoolLedger();
     }catch(err){alert(err.message||'تعذر إلغاء الحركة')}
   });
