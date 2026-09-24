@@ -3290,6 +3290,7 @@
       parent_name:finance.parent_name||result?.parent_name||document.getElementById('privateStudentParentName')?.value?.trim()||null,
       parent_username:result?.parent_username||null,
       parent_password:result?.parent_password||null,
+      parent_reused:Boolean(result?.parent_reused),
       tuition,tuitionPaid,tuitionRemaining,booksFree,booksFee,booksPaid,booksRemaining,totalRemaining
     };
     document.getElementById('privateCredentialStudentName').textContent=privateCredentialCurrent.name;
@@ -3317,7 +3318,7 @@
     const parent=document.getElementById('privateParentCredentials');
     if(privateCredentialCurrent.parent_username){
       parent.style.display='';
-      parent.innerHTML='<b>حساب ولي الأمر — '+escapeHtml(privateCredentialCurrent.parent_name||'ولي الأمر')+'</b><br>اسم المستخدم: <span dir="ltr">'+escapeHtml(privateCredentialCurrent.parent_username)+'</span> — كلمة المرور: <span dir="ltr">'+escapeHtml(privateCredentialCurrent.parent_password||'')+'</span>';
+      parent.innerHTML='<b>حساب ولي الأمر — '+escapeHtml(privateCredentialCurrent.parent_name||'ولي الأمر')+'</b><br>اسم المستخدم: <span dir="ltr">'+escapeHtml(privateCredentialCurrent.parent_username)+'</span> — '+(privateCredentialCurrent.parent_reused?'<b>حساب موحد موجود مسبقًا؛ استخدم كلمة المرور الحالية.</b>':'كلمة المرور: <span dir="ltr">'+escapeHtml(privateCredentialCurrent.parent_password||'')+'</span>');
     }else parent.style.display='none';
     card.style.display='';
     requestAnimationFrame(()=>card.scrollIntoView({behavior:'smooth',block:'start'}));
@@ -3363,7 +3364,7 @@
     roundRect(105,y+5,870,235,18,'#f7fafc','#e0eaec');
     ctx.fillStyle='#0f766e';ctx.font='700 25px Cairo,Tahoma,Arial';ctx.fillText('حساب ولي الأمر',930,y+45);
     const parentUser=privateCredentialCurrent.parent_username||'—';
-    const parentPass=privateCredentialCurrent.parent_password||'—';
+    const parentPass=privateCredentialCurrent.parent_reused?'استخدم كلمة المرور الحالية':(privateCredentialCurrent.parent_password||'—');
     ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';ctx.fillText('اسم المستخدم',930,y+90);
     ctx.fillStyle='#102a32';ctx.font='700 27px Cairo,Tahoma,Arial';ctx.fillText(parentUser,930,y+125);
     ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';ctx.fillText('كلمة المرور',930,y+165);
@@ -3401,7 +3402,7 @@
       '\nإجمالي المتبقي: '+privateCredentialCurrent.totalRemaining.toFixed(2)+
       '\nحالة السداد: '+(privateCredentialCurrent.totalRemaining<=0.001?'تم السداد بالكامل':'يوجد متبقي');
     if(privateCredentialCurrent.parent_username){
-      txt+='\n\nحساب ولي الأمر'+(privateCredentialCurrent.parent_name?' - '+privateCredentialCurrent.parent_name:'')+'\nاسم المستخدم: '+privateCredentialCurrent.parent_username+'\nكلمة المرور: '+(privateCredentialCurrent.parent_password||'');
+      txt+='\n\nحساب ولي الأمر'+(privateCredentialCurrent.parent_name?' - '+privateCredentialCurrent.parent_name:'')+'\nاسم المستخدم: '+privateCredentialCurrent.parent_username+'\n'+(privateCredentialCurrent.parent_reused?'هذا حساب موحد موجود مسبقًا؛ استخدم كلمة المرور الحالية.':'كلمة المرور: '+(privateCredentialCurrent.parent_password||''));
     }
     try{await navigator.clipboard.writeText(txt);alert('تم نسخ بيانات الدخول.')}catch{prompt('انسخ بيانات الدخول:',txt)}
   });
@@ -3591,7 +3592,9 @@
             });
           }
         }catch{}
-        msg.textContent=finance.receipt?'تم إنشاء الطالب وملفه المالي. تم إصدار إيصال رقم '+finance.receipt.receipt_no+' ويمكن طباعته من البطاقة.':'تم إنشاء الطالب وملفه المالي وحساب ولي الأمر. بطاقة البيانات جاهزة للنسخ والإرسال.';
+        msg.textContent=result?.parent_reused
+          ?(finance.receipt?'تم إنشاء الطالب وربطه بحساب ولي الأمر الموجود مسبقًا. تم إصدار إيصال رقم '+finance.receipt.receipt_no+'.':'تم إنشاء الطالب وربطه بنفس حساب ولي الأمر الموجود مسبقًا؛ سيظهر الطالبان في حساب واحد.')
+          :(finance.receipt?'تم إنشاء الطالب وملفه المالي. تم إصدار إيصال رقم '+finance.receipt.receipt_no+' ويمكن طباعته من البطاقة.':'تم إنشاء الطالب وملفه المالي وحساب ولي الأمر. بطاقة البيانات جاهزة للنسخ والإرسال.');
       }else msg.textContent='تم تحديث بيانات الطالب وتسجيل الحركة المالية.';
       msg.className='student-form-msg success show';
       if(typeof loadTeacherHub==='function')setTimeout(()=>loadTeacherHub().catch(()=>{}),700);
