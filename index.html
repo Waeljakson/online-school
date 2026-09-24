@@ -512,7 +512,7 @@
           <article class="panel"><div class="panel-head"><div><h3>الشهادات والتقدير</h3><p>الشهادات المرسلة لأبنائك.</p></div><span>🏅</span></div><div id="parentCertificatesList"><div class="students-empty">لا توجد شهادات.</div></div></article>
           <article class="panel"><div class="panel-head"><div><h3>نتائج الاختبارات</h3><p>الدرجات التي تم اعتمادها.</p></div><span>📝</span></div><div id="parentExamResults"><div class="students-empty">لا توجد نتائج.</div></div></article>
         </div>
-        <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>سجل الرسوم والسداد</h3><p>كل دفعة مسجلة على الأبناء مع الرصيد المحدث.</p></div><span>💳</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الطالب</th><th>رقم الإيصال</th><th>التاريخ</th><th>المبلغ</th><th>الحالة</th></tr></thead><tbody id="parentPaymentsRows"><tr><td colspan="5" class="students-empty">لا توجد دفعات.</td></tr></tbody></table></div></article>
+        <article class="panel" style="margin-top:15px"><div class="panel-head"><div><h3>سجل الرسوم والسداد</h3><p>كشف الرسوم والفواتير والمدفوع والمتبقي من قاعدة البيانات.</p></div><span>💳</span></div><div class="table-wrap"><table class="table"><thead><tr><th>الطالب</th><th>البيان</th><th>المرجع</th><th>التاريخ</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody id="parentPaymentsRows"><tr><td colspan="7" class="students-empty">لا توجد حركات مالية.</td></tr></tbody></table></div></article>
       </section>
 
 
@@ -6333,7 +6333,94 @@
     const parentPayments=latestStructuredBy(inbox,'PARENT_PAYMENT','payment_id');
     const parentVoids=new Set(latestStructuredBy(inbox,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
 
+    const rawDbFinance=Array.isArray(dashboardResult?.finance_records)?dashboardResult.finance_records:[];
+    const asObj=value=>{
+      if(!value)return {};
+      if(typeof value==='object')return value;
+      try{return JSON.parse(String(value))}catch{return {}}
+    };
+    const num=(...values)=>{
+      for(const v of values){
+        if(v===null||v===undefined||v==='')continue;
+        const n=Number(v);
+        if(Number.isFinite(n))return n;
+      }
+      return 0;
+    };
+    const dbFinance=rawDbFinance.map(r=>{
+      const j=asObj(r.record_json);
+      if(r.record_type==='private_fee'){
+        const due=num(j.monthly_fee)+(j.books_free?0:num(j.books_fee));
+        const paid=num(j.month_paid)+num(j.books_paid);
+        return {
+          key:String(r.record_id),
+          student_id:null,
+          private_student_id:r.private_student_id||null,
+          student_name:r.student_name||'الطالب',
+          type:'fee',
+          label:'رسوم الاشتراك'+(j.books_free?' — الكتب مجانية':''),
+          reference:r.record_id||'—',
+          date:j.joined_on||'',
+          due,paid,balance:Math.max(0,due-paid),
+          status:Math.max(0,due-paid)<=0.001?'paid':'due'
+        };
+      }
+      if(r.record_type==='private_payment'){
+        return {
+          key:String(r.record_id),
+          student_id:null,
+          private_student_id:r.private_student_id||null,
+          student_name:r.student_name||'الطالب',
+          type:'payment',
+          label:j.payment_kind==='books'?'سداد كتب':'سداد اشتراك',
+          reference:String(r.record_id||'—').slice(0,12),
+          date:j.paid_on||j.created_at||'',
+          due:0,paid:num(j.amount),balance:null,status:'paid'
+        };
+      }
+
+      const due=num(
+        j.total,j.total_amount,j.net,j.net_amount,j.final_amount,j.amount,j.fee,j.due_amount
+      );
+      const balance=num(
+        j.balance,j.remaining,j.remaining_amount,j.due_balance,j.balance_due
+      );
+      let paid=num(j.paid,j.paid_amount,j.amount_paid,j.total_paid);
+      if(!paid&&due>=balance)paid=Math.max(0,due-balance);
+      return {
+        key:String(r.record_id),
+        student_id:r.student_id||null,
+        private_student_id:null,
+        student_name:r.student_name||'الطالب',
+        type:'invoice',
+        label:'فاتورة رسوم',
+        reference:j.invoice_no||j.invoice_number||j.number||j.code||j.invoice_code||String(r.record_id||'—').slice(0,12),
+        date:j.issued_on||j.issued_at||j.created_at||j.date||j.due_date||'',
+        due,paid,balance:Math.max(0,balance),status:String(j.status||'active')
+      };
+    });
+
+    const financeForStudent=x=>{
+      const rows=dbFinance.filter(r=>
+        (x.student_id&&r.student_id&&String(r.student_id)===String(x.student_id))||
+        (x.private_student_id&&r.private_student_id&&String(r.private_student_id)===String(x.private_student_id))
+      );
+      if(!rows.length)return null;
+      const invoices=rows.filter(r=>r.type==='invoice'||r.type==='fee');
+      if(invoices.length){
+        return {
+          due:invoices.reduce((s,r)=>s+Number(r.due||0),0),
+          paid:invoices.reduce((s,r)=>s+Number(r.paid||0),0),
+          balance:invoices.reduce((s,r)=>s+Number(r.balance||0),0)
+        };
+      }
+      return null;
+    };
+
     const parentFinanceFor=x=>{
+      const db=financeForStudent(x);
+      if(db)return db;
+
       const extra=parentPayments.filter(p=>!parentVoids.has(String(p.payment_id))&&(
         (x.student_id&&String(p.student_id||'')===String(x.student_id))||
         (x.student_no&&String(p.student_no||'')===String(x.student_no))
@@ -6373,11 +6460,30 @@
     }).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
 
     const parentPaymentsRows=document.getElementById('parentPaymentsRows');
-    const sortedPayments=[...parentPayments].sort((a,b)=>new Date(b.date||b._mail?.sent_at||0)-new Date(a.date||a._mail?.sent_at||0));
-    parentPaymentsRows.innerHTML=sortedPayments.length?sortedPayments.map(p=>{
-      const voided=parentVoids.has(String(p.payment_id));
-      return `<tr class="${voided?'payment-void':''}"><td>${escapeHtml(p.student_name||'—')}</td><td><span class="receipt-code">${escapeHtml(p.receipt_no||p.payment_id)}</span></td><td>${escapeHtml(p.date||'—')}</td><td><b>${Number(p.amount||0).toFixed(2)}</b></td><td><span class="status ${voided?'finance-status-void':'active'}">${voided?'ملغي':'معتمد'}</span></td></tr>`;
-    }).join(''):'<tr><td colspan="5" class="students-empty">لا توجد دفعات مسجلة.</td></tr>';
+    const mailFinance=dbFinance.length?[]:parentPayments.map(p=>({
+      key:'mail:'+String(p.payment_id||p.receipt_no||Math.random()),
+      student_name:p.student_name||'الطالب',
+      label:'دفعة مسجلة',
+      reference:p.receipt_no||p.payment_id||'—',
+      date:p.date||p._mail?.sent_at||'',
+      due:0,
+      paid:Number(p.amount||0),
+      balance:null,
+      voided:parentVoids.has(String(p.payment_id))
+    }));
+    const financeRows=[...dbFinance,...mailFinance].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    parentPaymentsRows.innerHTML=financeRows.length?financeRows.map(r=>{
+      const balanceText=r.balance===null||r.balance===undefined?'—':Number(r.balance||0).toFixed(2);
+      return `<tr class="${r.voided?'payment-void':''}">
+        <td>${escapeHtml(r.student_name||'—')}</td>
+        <td>${escapeHtml(r.label||'حركة مالية')}</td>
+        <td><span class="receipt-code">${escapeHtml(r.reference||'—')}</span></td>
+        <td>${escapeHtml(r.date?String(r.date).slice(0,10):'—')}</td>
+        <td><b>${Number(r.due||0).toFixed(2)}</b></td>
+        <td><b class="paid">${Number(r.paid||0).toFixed(2)}</b></td>
+        <td><b class="${Number(r.balance||0)>0?'due':'paid'}">${balanceText}</b></td>
+      </tr>`;
+    }).join(''):'<tr><td colspan="7" class="students-empty">لا توجد حركات مالية مسجلة.</td></tr>';
 
     const certBox=document.getElementById('parentCertificatesList');
     certBox.innerHTML=certs.length?certs.map(c=>`<div class="certificate-list-item"><b>🏅 ${escapeHtml(c.title||'شهادة تقدير')}</b><span>${escapeHtml(c.student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleDateString('ar-EG'))}</span><p style="font-size:11px;margin:6px 0 0">${escapeHtml(c.body||'')}</p></div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
