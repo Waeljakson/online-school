@@ -1254,8 +1254,7 @@
           <div class="form-field"><label>المرحلة</label><select id="ngStage"><option value="">اختر المرحلة</option><option value="الابتدائية">الابتدائية</option><option value="الإعدادية">الإعدادية</option><option value="الثانوية">الثانوية</option></select></div>
           <div class="form-field"><label>الصف الدراسي</label><input id="ngGrade" placeholder="مثال: أول ثانوي" /></div>
           <div class="form-field"><label>الحد الأقصى للطلاب</label><input id="ngCapacity" type="number" min="1" placeholder="اختياري" /></div>
-          <div class="form-field"><label>نوع القاعة</label><select id="ngMeetingProvider"><option value="zoom">Zoom</option><option value="google_meet">Google Meet</option><option value="microsoft_teams">Microsoft Teams</option><option value="other">رابط آخر</option></select></div>
-          <div class="form-field"><label>رابط القاعة</label><input id="ngMeetingUrl" type="url" placeholder="https://..." /></div>
+          <div class="teacher-private-note" style="grid-column:1/-1">🎥 الإدارة تنشئ القاعة والجدول فقط. رابط الحصة يضيفه المعلم من حسابه قبل الحصة، سواء Zoom أو Google Meet أو Microsoft Teams.</div>
         </div>
       </div>
 
@@ -1397,6 +1396,7 @@
           <div class="form-field"><label>جوال بديل</label><input id="nsParentAltPhone" inputmode="tel" /></div>
           <div class="form-field"><label>بريد ولي الأمر</label><input id="nsParentEmail" type="email" /></div>
         </div>
+        <div class="user-activation-note" style="margin-top:10px">🔐 عند حفظ الطالب ينشئ النظام حساب ولي الأمر تلقائيًا ويربطه بهذا الطالب. ستظهر بيانات دخول ولي الأمر بعد نجاح التسجيل مباشرة.</div>
       </div>
 
       <div class="form-section">
@@ -1424,12 +1424,22 @@
 
 <div class="student-modal" id="groupRoomModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" style="max-width:900px">
-    <div class="student-dialog-head"><div><h3 id="groupRoomTitle">قاعة المجموعة</h3><p>رابط الحصة وشات المجموعة والملفات.</p></div><button class="close-modal" type="button" id="closeGroupRoomModal">×</button></div>
+    <div class="student-dialog-head"><div><h3 id="groupRoomTitle">قاعة المجموعة</h3><p id="groupRoomSubtitle">رابط الحصة وشات المجموعة والملفات.</p></div><button class="close-modal" type="button" id="closeGroupRoomModal">×</button></div>
     <div class="student-form chat-shell">
-      <div class="form-section"><div class="form-grid">
-        <div class="form-field"><label>نوع القاعة</label><select id="roomProvider"><option value="zoom">Zoom</option><option value="google_meet">Google Meet</option><option value="microsoft_teams">Microsoft Teams</option><option value="other">رابط آخر</option></select></div>
-        <div class="form-field"><label>رابط القاعة</label><input id="roomMeetingUrl" type="url" placeholder="https://..."></div>
-      </div><div class="room-actions"><button class="secondary-action" id="saveRoomLink" type="button">حفظ الرابط</button><a class="primary-action" id="openRoomLink" target="_blank" rel="noopener" style="text-decoration:none;display:none">دخول القاعة ↗</a></div></div>
+      <div class="form-section">
+        <div id="teacherMeetingEditor">
+          <div class="teacher-private-note" style="margin-bottom:10px">🎥 قبل بداية الحصة ضع رابط Zoom أو Meet أو Teams. بمجرد الحفظ يظهر للطلاب زر «انضم للحصة».</div>
+          <div class="form-grid">
+            <div class="form-field"><label>منصة الحصة</label><select id="roomProvider"><option value="zoom">Zoom</option><option value="google_meet">Google Meet</option><option value="microsoft_teams">Microsoft Teams</option><option value="other">رابط آخر</option></select></div>
+            <div class="form-field"><label>رابط الحصة</label><input id="roomMeetingUrl" type="url" placeholder="https://..."></div>
+          </div>
+          <div class="room-actions"><button class="primary-action" id="saveRoomLink" type="button">تفعيل رابط الحصة</button><button class="secondary-action" id="clearRoomLink" type="button">إنهاء الحصة وإخفاء الرابط</button></div>
+        </div>
+        <div id="meetingViewerBox">
+          <div class="teacher-private-note" id="meetingViewerStatus">لم يفعّل المعلم رابط الحصة بعد.</div>
+        </div>
+        <div class="room-actions" style="margin-top:10px"><a class="primary-action" id="openRoomLink" target="_blank" rel="noopener" style="text-decoration:none;display:none">انضم للحصة ↗</a></div>
+      </div>
       <div class="chat-messages" id="groupChatMessages"><div class="students-empty">لا توجد رسائل بعد.</div></div>
       <div><div class="chat-compose"><textarea id="groupChatBody" placeholder="اكتب رسالة للمجموعة..."></textarea><button class="primary-action" id="sendGroupChat" type="button">إرسال</button></div><input id="groupChatFile" type="file" style="margin-top:8px"><div class="form-hint">يمكن إرفاق ملف حتى 3 MB.</div></div>
     </div>
@@ -2291,10 +2301,10 @@
         <td>${escapeHtml(g.subject_name||'—')}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(g.grade_name||'بدون صف')}</span></td>
         <td><span class="group-count">${Number(g.students_count||0)}</span></td>
         <td>${scheduleLabel(g.schedule_json)}</td>
-        <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="color:var(--primary)">${escapeHtml((g.meeting_provider||'zoom').replace('_',' '))} ↗</a>`:'—'}</td>
+        <td>${g.meeting_url?`<span class="status active">الرابط مفعّل بواسطة المعلم</span>`:'<span class="status watch">لم يفعّله المعلم</span>'}</td>
         <td><span class="status ${g.is_active?'active':'watch'}">${g.is_active?'نشطة':'متوقفة'}</span></td>
         <td><div class="admin-row-actions">
-          <button class="secondary-action room-chat-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">القاعة / الشات</button>
+          <button class="secondary-action room-chat-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">مشاهدة القاعة / الشات</button>
           <button class="secondary-action group-state-btn ${g.is_active?'inactive-action':'activate-action'}" type="button" data-group-id="${escapeHtml(g.group_id)}" data-active="${g.is_active?'1':'0'}">${g.is_active?'إيقاف':'تفعيل'}</button>
           <button class="secondary-action danger-action delete-group-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-name="${escapeHtml(g.group_name||'القاعة')}">حذف</button>
         </div></td>
@@ -2319,8 +2329,8 @@
       p_subject_name:document.getElementById('ngSubject').value.trim(),
       p_stage_name:document.getElementById('ngStage').value.trim()||null,
       p_grade_name:document.getElementById('ngGrade').value.trim()||null,
-      p_meeting_provider:document.getElementById('ngMeetingProvider').value,
-      p_meeting_url:document.getElementById('ngMeetingUrl').value.trim()||null,
+      p_meeting_provider:null,
+      p_meeting_url:null,
       p_capacity:capacityVal,
       p_schedule:{sessions:schedule},
       p_student_ids:studentIds.length?studentIds:null
@@ -2347,8 +2357,8 @@
             status:'created',
             group_id:r?.group_id||null,
             group_name:r?.group_name||payload.p_group_name,
-            meeting_provider:payload.p_meeting_provider,
-            meeting_url:payload.p_meeting_url,
+            meeting_provider:null,
+            meeting_url:null,
             agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
             pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'custom',
             management_mode:pendingRoomCreateRequest.review_response?.management_mode||pendingRoomCreateRequest.management_mode||'teacher',
@@ -2627,7 +2637,7 @@
         <div class="result-item"><span>اسم المستخدم</span><b>${escapeHtml(r?.username||r?.student_no||'—')}</b></div>
         <div class="result-item"><span>كلمة المرور</span><b style="direction:ltr">${escapeHtml(r?.generated_password||payload.p_password||'—')}</b></div>
         <div class="result-item"><span>بريد الطالب الداخلي</span><b class="internal-email">${escapeHtml(r?.internal_email||'—')}</b></div>
-        <div class="result-item"><span>حساب ولي الأمر</span><b>${escapeHtml(r?.parent_username||'—')}</b></div>
+        <div class="result-item"><span>حساب ولي الأمر — تم إنشاؤه تلقائيًا</span><b>${escapeHtml(r?.parent_username||'—')}</b></div>
         <div class="result-item"><span>كلمة مرور ولي الأمر</span><b style="direction:ltr">${escapeHtml(r?.parent_generated_password||'—')}</b></div>
       </div>`;
       registrationResult.className='registration-result show';
@@ -3431,8 +3441,7 @@
       document.getElementById('ngSubject').value=r.subject||'';
       document.getElementById('ngStage').value=r.stage||'';
       document.getElementById('ngGrade').value=r.grade||'';
-      document.getElementById('ngMeetingProvider').value='zoom';
-      groupFormMsg.textContent='تم تعبئة بيانات طلب القاعة. أضف المواعيد والطلاب ثم احفظ المجموعة.';
+      groupFormMsg.textContent='تم تعبئة بيانات طلب القاعة. أضف المواعيد والطلاب ثم احفظ المجموعة. رابط الحصة سيضيفه المعلم من حسابه.';
       groupFormMsg.className='student-form-msg success show';
     }
   });
@@ -3777,7 +3786,7 @@
       board.className='week-board';
       board.innerHTML=weekDayOrder.map(day=>{
         const rows=lessons.filter(x=>x.day===day).sort((a,b)=>a.instant-b.instant);
-        return `<div class="week-day"><h4>${weekDayLabels[day]}</h4>${rows.length?rows.map(x=>`<div class="week-lesson"><b>${escapeHtml(x.group.subject_name||x.group.group_name||'حصة')}</b><div>${escapeHtml(x.time)} • ${x.duration} د</div><div>${escapeHtml([x.group.group_name,x.group.teacher_name].filter(Boolean).join(' • '))}</div>${x.group.meeting_url?`<div style="margin-top:5px"><a href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener">دخول القاعة</a></div>`:''}</div>`).join(''):'<div class="students-empty" style="padding:10px">لا توجد حصص</div>'}</div>`;
+        return `<div class="week-day"><h4>${weekDayLabels[day]}</h4>${rows.length?rows.map(x=>`<div class="week-lesson"><b>${escapeHtml(x.group.subject_name||x.group.group_name||'حصة')}</b><div>${escapeHtml(x.time)} • ${x.duration} د</div><div>${escapeHtml([x.group.group_name,x.group.teacher_name].filter(Boolean).join(' • '))}</div>${x.group.meeting_url?`<div style="margin-top:5px"><a href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener">انضم للحصة</a></div>`:''}</div>`).join(''):'<div class="students-empty" style="padding:10px">لا توجد حصص</div>'}</div>`;
       }).join('');
     }catch(err){board.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الجدول')+'</div>'}
   };
@@ -5511,25 +5520,41 @@
     document.getElementById('roomProvider').value=group.meeting_provider||'zoom';
     document.getElementById('roomMeetingUrl').value=group.meeting_url||'';
     const link=document.getElementById('openRoomLink');
+    const accountType=String(currentPlatformAccount?.account_type||'');
+    const canEdit=accountType==='teacher';
+    document.getElementById('teacherMeetingEditor').style.display=canEdit?'':'none';
+    document.getElementById('meetingViewerBox').style.display=canEdit?'none':'';
+    document.getElementById('groupRoomSubtitle').textContent=canEdit?'جهّز رابط الحصة ثم استخدم شات المجموعة والملفات.':'انضم للحصة من الرابط الذي يفعّله المعلم واستخدم شات المجموعة.';
+    document.getElementById('meetingViewerStatus').textContent=group.meeting_url?'رابط الحصة جاهز الآن. اضغط «انضم للحصة».':'لم يفعّل المعلم رابط الحصة بعد.';
     if(group.meeting_url){link.href=group.meeting_url;link.style.display='inline-flex'}else{link.removeAttribute('href');link.style.display='none'}
-    const canEdit=!currentPlatformAccount||['teacher','staff','admin'].includes(String(currentPlatformAccount?.account_type||'admin'));
-    document.getElementById('roomProvider').disabled=!canEdit;
-    document.getElementById('roomMeetingUrl').disabled=!canEdit;
-    document.getElementById('saveRoomLink').style.display=canEdit?'':'none';
     groupRoomModal.classList.add('show');groupRoomModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     await loadGroupChat();
   };
 
   document.getElementById('saveRoomLink').addEventListener('click',async()=>{
-    if(!currentRoomGroupId)return;
+    if(!currentRoomGroupId||String(currentPlatformAccount?.account_type||'')!=='teacher')return;
     const provider=document.getElementById('roomProvider').value;
     const url=document.getElementById('roomMeetingUrl').value.trim();
+    if(!url){alert('ضع رابط الحصة أولًا.');return}
     try{
+      new URL(url);
       await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:url})});
       const link=document.getElementById('openRoomLink');
-      if(url){link.href=url;link.style.display='inline-flex'}else link.style.display='none';
-      await Promise.allSettled([loadPlatformGroups(),loadGroups()]);
-    }catch(err){alert(err.message||'تعذر حفظ رابط القاعة')}
+      link.href=url;link.style.display='inline-flex';
+      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
+      alert('تم تفعيل رابط الحصة. أصبح زر «انضم للحصة» ظاهرًا للطلاب.');
+    }catch(err){alert(String(err.message||'').includes('Invalid URL')?'الرابط غير صحيح.':(err.message||'تعذر حفظ رابط الحصة'))}
+  });
+  document.getElementById('clearRoomLink').addEventListener('click',async()=>{
+    if(!currentRoomGroupId||String(currentPlatformAccount?.account_type||'')!=='teacher')return;
+    if(!confirm('إنهاء الحصة وإخفاء الرابط الحالي عن الطلاب؟'))return;
+    const provider=document.getElementById('roomProvider').value;
+    try{
+      await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:null})});
+      document.getElementById('roomMeetingUrl').value='';
+      const link=document.getElementById('openRoomLink');link.removeAttribute('href');link.style.display='none';
+      await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
+    }catch(err){alert(err.message||'تعذر إنهاء الحصة')}
   });
 
   document.getElementById('sendGroupChat').addEventListener('click',async()=>{
@@ -5582,8 +5607,8 @@
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد مجموعات مرتبطة بهذا الحساب.</td></tr>';return}
       tbody.innerHTML=data.map(g=>`<tr>
         <td><b>${escapeHtml(g.group_name)}</b></td><td>${escapeHtml(g.subject_name||'—')}</td><td>${escapeHtml(g.teacher_name||'—')}</td>
-        <td>${g.meeting_url?`<a href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener">دخول ${escapeHtml((g.meeting_provider||'zoom').replace('_',' '))} ↗</a>`:'لم يضع المعلم رابطًا بعد'}</td>
-        <td><button class="secondary-action platform-room-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">فتح الشات والقاعة</button></td>
+        <td>${g.meeting_url?`<a class="primary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">انضم للحصة ↗</a>`:'لم يفعّل المعلم رابط الحصة بعد'}</td>
+        <td><button class="secondary-action platform-room-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">${String(currentPlatformAccount?.account_type||'')==='teacher'?'تجهيز الحصة / الشات':'فتح القاعة / الشات'}</button></td>
       </tr>`).join('');
     }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
   };
