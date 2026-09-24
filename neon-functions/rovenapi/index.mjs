@@ -170,6 +170,9 @@ async function ensureSchema(){
       revoked_at timestamptz,
       check((student_id is not null) <> (private_student_id is not null))
     )`;
+    await sql`alter table public.platform_certificates add column if not exists legacy_ref text`;
+    await sql`create unique index if not exists platform_certificates_legacy_ref_uidx
+      on public.platform_certificates(school_id,legacy_ref) where legacy_ref is not null`;
     await sql`create table if not exists public.platform_exams(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -1079,6 +1082,8 @@ async function custom(action,a,p){
     let groupIds=null;
     if(link)groupIds=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
     const rows=await sql`select ps.*,g.name group_name,trm.capacity room_capacity,
+      spa.internal_email student_internal_email,
+      gpa.internal_email parent_internal_email,
       coalesce((select count(*) from public.teacher_private_students ps2 where ps2.group_id=ps.group_id and ps2.teacher_account_id=ps.teacher_account_id and ps2.status='active'),0)::int room_students_count,
       coalesce((select sum(pp.amount) from public.teacher_private_payments pp
         where pp.private_student_id=ps.id and coalesce(pp.payment_kind,'tuition')='tuition'
@@ -1086,6 +1091,8 @@ async function custom(action,a,p){
       coalesce((select sum(pp.amount) from public.teacher_private_payments pp
         where pp.private_student_id=ps.id and pp.payment_kind='books'),0) books_paid
       from public.teacher_private_students ps
+      left join public.platform_accounts spa on spa.id=ps.platform_account_id and spa.is_active=true
+      left join public.platform_accounts gpa on gpa.id=ps.guardian_account_id and gpa.is_active=true
       left join public.study_groups g on g.id=ps.group_id
       left join public.teacher_room_management trm on trm.group_id=ps.group_id and trm.teacher_account_id=ps.teacher_account_id
       where ps.teacher_account_id=${teacherId} and ps.status='active'
@@ -1705,6 +1712,16 @@ async function custom(action,a,p){
     const link=await assistantLink(a);
     must(a,a.account_type==='teacher'||a.account_type==='admin'||(a.account_type==='staff'&&!link));
     const sid=p.p_student_id||null,psid=p.p_private_student_id||null;
+    const legacyRef=String(p.p_legacy_ref||'').trim()||null;
+    if(Boolean(sid)===Boolean(psid))throw new Error('certificate_student_required');
+
+    if(legacyRef){
+      const existing=(await sql`select * from public.platform_certificates
+        where school_id=${a.school_id} and legacy_ref=${legacyRef}
+        limit 1`)[0]||null;
+      if(existing)return existing;
+    }
+
     if(a.account_type==='teacher'&&sid){
       const ok=await sql`select 1
         from public.enrollments en
@@ -1718,11 +1735,12 @@ async function custom(action,a,p){
         where id=${psid}::uuid and teacher_account_id=${a.account_id} and status='active' limit 1`;
       if(!ok.length)throw new Error('private_student_not_found');
     }
+
     return (await sql`insert into public.platform_certificates(
-      school_id,issuer_account_id,student_id,private_student_id,title,certificate_type,body,template
+      school_id,issuer_account_id,student_id,private_student_id,title,certificate_type,body,template,legacy_ref
     ) values(
       ${a.school_id},${a.account_id},${sid},${psid},${String(p.p_title||'شهادة تقدير')},
-      ${p.p_type||'appreciation'},${p.p_body||null},${p.p_template||'classic'}
+      ${p.p_type||'appreciation'},${p.p_body||null},${p.p_template||'classic'},${legacyRef}
     ) returning *`)[0];
   }
 
