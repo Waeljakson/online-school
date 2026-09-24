@@ -2274,7 +2274,7 @@
     }
   };
 
-  const openGroupModal=async()=>{groupModal.classList.add('show');groupModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';groupFormMsg.className='student-form-msg';groupRegistrationResult.className='registration-result';await loadGroupChoices();};
+  const openGroupModal=async()=>{groupModal.classList.add('show');groupModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';groupFormMsg.className='student-form-msg';groupRegistrationResult.className='registration-result';document.getElementById('ngCapacity').readOnly=false;await loadGroupChoices();};
   const closeGroupModal=()=>{pendingRoomCreateRequest=null;groupModal.classList.remove('show');groupModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('openGroupModal').addEventListener('click',openGroupModal);
   document.getElementById('closeGroupModal').addEventListener('click',closeGroupModal);
@@ -2364,6 +2364,20 @@
       groupRegistrationResult.className='registration-result show';
       groupFormMsg.textContent='تم ربط المعلم والطلاب بالمجموعة وحفظ مواعيد الحصص الأسبوعية.';
       groupFormMsg.className='student-form-msg success show';
+      if(pendingRoomCreateRequest?.sender_email && r?.group_id){
+        try{
+          await dataApiFetch('/rpc/teacher_room_contract_set',{method:'POST',body:JSON.stringify({
+            p_group_id:r.group_id,
+            p_teacher_id:payload.p_teacher_id,
+            p_capacity:capacityVal,
+            p_agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
+            p_pricing_basis:pendingRoomCreateRequest.review_response?.pricing_basis||pendingRoomCreateRequest.pricing_basis||'monthly',
+            p_management_mode:pendingRoomCreateRequest.review_response?.management_mode||pendingRoomCreateRequest.management_mode||'teacher',
+            p_management_fee:Number(pendingRoomCreateRequest.review_response?.management_fee||0),
+            p_management_fee_basis:pendingRoomCreateRequest.review_response?.management_fee_basis||'monthly'
+          })});
+        }catch{}
+      }
       if(pendingRoomCreateRequest?.sender_email){
         try{
           const roomCreatedPayload={
@@ -2371,6 +2385,9 @@
             status:'created',
             group_id:r?.group_id||null,
             group_name:r?.group_name||payload.p_group_name,
+            capacity:capacityVal,
+            current_students:Number(r?.students_count||0),
+            remaining_capacity:capacityVal?Math.max(0,capacityVal-Number(r?.students_count||0)):null,
             meeting_provider:null,
             meeting_url:null,
             agreed_price:Number(pendingRoomCreateRequest.review_response?.agreed_price||0),
@@ -2393,6 +2410,7 @@
       }
       await loadGroups();
       newGroupForm.reset();
+      document.getElementById('ngCapacity').readOnly=false;
       document.getElementById('scheduleBuilder').innerHTML='';addScheduleRow();groupStudentsCache=[];updateSelectedCount();
     }catch(err){groupFormMsg.textContent=err.message||'حدث خطأ أثناء إنشاء المجموعة.';groupFormMsg.className='student-form-msg error show'}
     finally{saveGroupBtn.disabled=false;saveGroupBtn.textContent='حفظ المجموعة'}
@@ -3449,6 +3467,7 @@
       subject:document.getElementById('teacherRoomSubject').value.trim(),
       stage:document.getElementById('teacherRoomStage').value||null,
       grade:document.getElementById('teacherRoomGrade').value.trim()||null,
+      capacity:Math.max(1,Number(document.getElementById('teacherRoomCapacity').value)||0),
       proposed_price:Number(document.getElementById('teacherRoomPrice').value)||0,
       pricing_basis:document.getElementById('teacherRoomPricing').value,
       management_mode:document.getElementById('teacherRoomManagementMode').value,
@@ -3458,7 +3477,7 @@
     const recipient=document.getElementById('teacherRoomAdmin').value;
     payload.management_internal_email=payload.management_mode==='roven'?recipient:null;
     if(!recipient){msg.textContent='تعذر تحديد حساب مدير النظام. تواصل مع إدارة ROVEN.';msg.className='student-form-msg error show';return}
-    if(!payload.room_name||!payload.subject){msg.textContent='اكتب اسم القاعة والمادة.';msg.className='student-form-msg error show';return}
+    if(!payload.room_name||!payload.subject||!payload.capacity){msg.textContent='اكتب اسم القاعة والمادة وعدد الطلاب المطلوب.';msg.className='student-form-msg error show';return}
     try{
       await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
         p_recipient:recipient,p_subject:'[ROOM_REQUEST] '+requestId,p_body:JSON.stringify(payload)
@@ -3468,6 +3487,7 @@
       document.getElementById('teacherRoomRequestForm').reset();
       document.getElementById('teacherRoomPricing').value='monthly';
       document.getElementById('teacherRoomManagementMode').value='teacher';
+      document.getElementById('teacherRoomCapacity').value='20';
       await loadTeacherHub();
     }catch(err){msg.textContent=err.message||'تعذر إرسال طلب القاعة';msg.className='student-form-msg error show'}
   });
@@ -3513,7 +3533,7 @@
     panel.style.display=allowed?'':'none';
     if(!allowed)return;
     const tbody=document.getElementById('teacherRoomAdminRows');
-    tbody.innerHTML='<tr><td colspan="7" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ تحميل الطلبات...</td></tr>';
     try{
       const [inbox,sent]=await Promise.all([
         dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})}),
@@ -3552,12 +3572,13 @@
       document.getElementById('roomSessionTotal').textContent=sessionTotal.toFixed(2);
       document.getElementById('roomManagedCount').textContent=String(managedCount);
       document.getElementById('roomManagementMonthlyTotal').textContent=managementMonthlyTotal.toFixed(2);
-      if(!requests.length){tbody.innerHTML='<tr><td colspan="7" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
+      if(!requests.length){tbody.innerHTML='<tr><td colspan="8" class="students-empty">لا توجد طلبات فتح قاعات.</td></tr>';return}
       tbody.innerHTML=requests.map(r=>{
         const response=responses.get(r.request_id),status=response?.status||'pending';
         return `<tr>
           <td><b>${escapeHtml(r.teacher_name||r.sender_name||'معلم')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.teacher_code||r.sender_email||'')}</span></td>
           <td><b>${escapeHtml(r.room_name||'—')}</b><br><span style="font-size:9px;color:var(--muted)">${escapeHtml(r.subject||'')} ${r.grade?'• '+escapeHtml(r.grade):''}</span></td>
+          <td><b>${Number(response?.capacity||r.capacity||0)||'—'}</b> طالب</td>
           <td>${Number(r.proposed_price||0).toFixed(2)}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(teacherPricingLabel[r.pricing_basis]||'')}</span></td>
           <td>${response?Number(response.agreed_price||0).toFixed(2):'—'}<br><span style="font-size:9px;color:var(--muted)">${escapeHtml(response?teacherPricingLabel[response.pricing_basis]||'':'')}</span></td>
           <td>${(response?.management_mode||r.management_mode)==='roven'?'<span class="status active">ROVEN</span><br><span style="font-size:9px;color:var(--muted)">رسوم '+Number(response?.management_fee||0).toFixed(2)+'</span>':'المعلم'}</td>
@@ -3568,7 +3589,7 @@
           </div></td>
         </tr>`;
       }).join('');
-    }catch(err){tbody.innerHTML='<tr><td colspan="7" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلبات القاعات')+'</td></tr>'}
+    }catch(err){tbody.innerHTML='<tr><td colspan="8" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل طلبات القاعات')+'</td></tr>'}
   };
 
   document.getElementById('refreshTeacherRoomAdmin').addEventListener('click',loadTeacherRoomRequestsAdmin);
@@ -3579,6 +3600,7 @@
       document.getElementById('reviewRoomRequestId').value=r.request_id;
       document.getElementById('reviewRoomRecipient').value=r.sender_email||'';
       document.getElementById('teacherRoomReviewTitle').textContent=(r.teacher_name||'المعلم')+' — '+(r.room_name||'القاعة');
+      document.getElementById('reviewRoomCapacity').value=Number(r.review_response?.capacity||r.capacity||20);
       document.getElementById('reviewRoomAgreedPrice').value=Number(r.proposed_price||0);
       document.getElementById('reviewRoomPricing').value=r.pricing_basis||'monthly';
       document.getElementById('reviewRoomManagementMode').value=r.management_mode||'teacher';
@@ -3601,7 +3623,9 @@
       document.getElementById('ngSubject').value=r.subject||'';
       document.getElementById('ngStage').value=r.stage||'';
       document.getElementById('ngGrade').value=r.grade||'';
-      groupFormMsg.textContent='تم تعبئة بيانات طلب القاعة. أضف المواعيد والطلاب ثم احفظ المجموعة. رابط الحصة سيضيفه المعلم من حسابه.';
+      document.getElementById('ngCapacity').value=Number(r.review_response?.capacity||r.capacity||20);
+      document.getElementById('ngCapacity').readOnly=true;
+      groupFormMsg.textContent='تم تعبئة بيانات طلب القاعة بالسعة والسعر المعتمدين. أضف المواعيد والطلاب ثم احفظ المجموعة. رابط الحصة سيضيفه المعلم من حسابه.';
       groupFormMsg.className='student-form-msg success show';
     }
   });
@@ -3614,6 +3638,7 @@
     const response={
       request_id:requestId,
       status:document.getElementById('reviewRoomStatus').value,
+      capacity:Math.max(1,Number(document.getElementById('reviewRoomCapacity').value)||0),
       agreed_price:Number(document.getElementById('reviewRoomAgreedPrice').value)||0,
       pricing_basis:document.getElementById('reviewRoomPricing').value,
       management_mode:document.getElementById('reviewRoomManagementMode').value,
