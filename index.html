@@ -6529,8 +6529,15 @@
       if(source==='private'&&ctx?.account_type==='teacher'){
         if(!teacherPrivateStudentsCache.length)await loadTeacherHub();
         teacherPrivateStudentsCache.forEach(s=>{
-          const key='private:'+s.private_student_id;
-          certificateTargetsCache.set(key,{key,kind:'private',id:s.private_student_id,name:s.full_name,parent_phone:s.parent_phone||null,internal_email:s.student_internal_email||null});
+          const privateId=s.id||s.private_student_id;
+          if(!privateId)return;
+          const key='private:'+privateId;
+          certificateTargetsCache.set(key,{
+            key,kind:'private',id:privateId,name:s.full_name,
+            parent_phone:s.parent_phone||null,
+            internal_email:s.student_internal_email||null,
+            parent_internal_email:s.parent_internal_email||null
+          });
         });
       }else if(ctx?.account_type==='teacher'){
         const [groups,directory]=await Promise.all([
@@ -6623,30 +6630,90 @@
     }
   };
 
+  const migrateLegacyCertificates=async(ctx,allMail)=>{
+    if(!['admin','teacher','staff'].includes(String(ctx?.account_type||'')))return;
+    const legacy=latestStructuredBy(allMail,'CERTIFICATE_ISSUED','certificate_id');
+    for(const c of legacy){
+      try{
+        let targetId=c.target_id||null;
+        let targetKind=c.target_kind||null;
+        if(targetKind==='private'&&!targetId){
+          const match=teacherPrivateStudentsCache.find(s=>
+            String(s.full_name||'').trim().toLowerCase()===String(c.student_name||'').trim().toLowerCase()
+          );
+          targetId=match?.id||match?.private_student_id||null;
+        }
+        if(!targetId)continue;
+        await dataApiFetch('/rpc/certificate_create',{method:'POST',body:JSON.stringify({
+          p_student_id:targetKind==='roven'?targetId:null,
+          p_private_student_id:targetKind==='private'?targetId:null,
+          p_title:c.title||'شهادة تقدير',
+          p_type:c.type||'appreciation',
+          p_body:c.body||null,
+          p_template:'classic',
+          p_legacy_ref:c.certificate_id||null
+        })});
+      }catch{}
+    }
+  };
+
   const loadCertificates=async()=>{
     const ctx=await hydratePlatformContext();
+    const type=String(ctx?.account_type||'');
     const createArea=document.getElementById('certificateCreateArea');
-    const canCreate=['admin','teacher','staff'].includes(String(ctx?.account_type||''));
+    const canCreate=['admin','teacher','staff'].includes(type);
     createArea.style.display=canCreate?'':'none';
     if(canCreate)await loadCertificateTargets();
 
     const inbox=await structuredMail('inbox');
     await forwardStudentArtifactsToParent(inbox);
     const sent=await structuredMail('sent');
-    let rows=[];
-    let canRevoke=false;
     const all=inbox.concat(sent);
-    if(['student','private_student'].includes(String(ctx?.account_type||''))){
+
+    if(canCreate)await migrateLegacyCertificates(ctx,all);
+
+    let dbRows=[];
+    try{
+      if(['student','private_student'].includes(type)){
+        const d=await dataApiFetch('/rpc/student_dashboard',{method:'POST',body:'{}'});
+        dbRows=Array.isArray(d?.certificates)?d.certificates:[];
+      }else if(['parent','private_parent'].includes(type)){
+        const d=await dataApiFetch('/rpc/parent_dashboard',{method:'POST',body:'{}'});
+        dbRows=Array.isArray(d?.certificates)?d.certificates:[];
+      }else if(canCreate){
+        const d=await dataApiFetch('/rpc/certificate_list_owned',{method:'POST',body:'{}'});
+        dbRows=Array.isArray(d)?d:[];
+      }
+    }catch{}
+
+    const normalizedDb=dbRows.map(c=>({
+      ...c,
+      certificate_id:c.id||c.certificate_id,
+      student_name:c.student_name||c.private_student_name||'',
+      type:c.certificate_type||c.type||'appreciation',
+      _db:true
+    }));
+
+    let mailRows=[];
+    let canRevoke=false;
+    if(['student','private_student'].includes(type)){
       const revoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED','certificate_id').map(x=>String(x.certificate_id)));
-      rows=latestStructuredBy(inbox,'CERTIFICATE','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
-    }else if(['parent','private_parent'].includes(String(ctx?.account_type||''))){
+      mailRows=latestStructuredBy(inbox,'CERTIFICATE','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+    }else if(['parent','private_parent'].includes(type)){
       const revoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED_PARENT','certificate_id').map(x=>String(x.certificate_id)));
-      rows=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+      mailRows=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
     }else{
       const revoked=new Set(latestStructuredBy(all,'CERTIFICATE_REVOKED','certificate_id').map(x=>String(x.certificate_id)));
-      rows=latestStructuredBy(all,'CERTIFICATE_ISSUED','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
+      mailRows=latestStructuredBy(all,'CERTIFICATE_ISSUED','certificate_id').filter(x=>!revoked.has(String(x.certificate_id)));
       canRevoke=true;
     }
+
+    const map=new Map();
+    [...mailRows,...normalizedDb].forEach(c=>{
+      const key=String(c.id||c.certificate_id||c.legacy_ref||Math.random());
+      map.set(key,c);
+    });
+    const rows=[...map.values()].sort((a,b)=>new Date(b.issued_at||0)-new Date(a.issued_at||0));
 
     certificateRowsCache=rows;
     document.getElementById('certificatesList').innerHTML=rows.length?rows.map(c=>`<div class="certificate-list-item">
@@ -6654,8 +6721,8 @@
       <span>${escapeHtml(c.student_name||c.private_student_name||'')} • ${escapeHtml(new Date(c.issued_at||Date.now()).toLocaleString('ar-EG'))}</span>
       <p style="font-size:11px;margin:6px 0">${escapeHtml(c.body||'')}</p>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="secondary-action print-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}">طباعة</button>
-        ${canRevoke?`<button class="secondary-action revoke-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||'')}" style="color:#b42318">إلغاء الشهادة</button>`:''}
+        <button class="secondary-action print-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||c.id||'')}">طباعة</button>
+        ${canRevoke?`<button class="secondary-action revoke-certificate-btn" type="button" data-certificate-id="${escapeHtml(c.certificate_id||c.id||'')}" style="color:#b42318">إلغاء الشهادة</button>`:''}
       </div>
     </div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
   };
@@ -6665,43 +6732,64 @@
     const ctx=await hydratePlatformContext();
     const target=certificateTargetsCache.get(document.getElementById('certificateStudent').value);
     if(!target){msg.textContent='اختر الطالب أولًا.';msg.className='student-form-msg error show';return}
-    const cert={
-      certificate_id:'CERT-'+Date.now().toString(36).toUpperCase(),
-      target_kind:target.kind,target_id:target.id,student_name:target.name,
-      student_internal_email:target.internal_email||null,
-      title:document.getElementById('certificateTitle').value.trim()||certificateTypeLabel[document.getElementById('certificateType').value]||'شهادة تقدير',
-      type:document.getElementById('certificateType').value,
-      body:document.getElementById('certificateBody').value.trim()||'تقديرًا لتميزه وجهده.',
-      issuer_name:ctx?.display_name||'ROVEN',
-      issued_at:new Date().toISOString()
-    };
+
+    const legacyRef='CERT-'+Date.now().toString(36).toUpperCase();
+    const title=document.getElementById('certificateTitle').value.trim()||certificateTypeLabel[document.getElementById('certificateType').value]||'شهادة تقدير';
+    const type=document.getElementById('certificateType').value;
+    const body=document.getElementById('certificateBody').value.trim()||'تقديرًا لتميزه وجهده.';
+
     try{
-      if(ctx?.internal_email)await sendStructuredMail(ctx.internal_email,'CERTIFICATE_ISSUED',cert.certificate_id,cert);
-      if(target.internal_email)await sendStructuredMail(target.internal_email,'CERTIFICATE',cert.certificate_id,cert);
-      msg.textContent=target.internal_email?'تم إصدار الشهادة وإرسالها إلى حساب الطالب.':'تم حفظ الشهادة. هذا الطالب لا يملك حساب ROVEN مرتبطًا حاليًا ويمكن إرسالها له عبر واتساب.';
+      const saved=await dataApiFetch('/rpc/certificate_create',{method:'POST',body:JSON.stringify({
+        p_student_id:target.kind==='roven'?target.id:null,
+        p_private_student_id:target.kind==='private'?target.id:null,
+        p_title:title,p_type:type,p_body:body,p_template:'classic',p_legacy_ref:legacyRef
+      })});
+
+      const cert={
+        certificate_id:saved?.id||legacyRef,
+        legacy_ref:legacyRef,
+        target_kind:target.kind,target_id:target.id,student_name:target.name,
+        student_internal_email:target.internal_email||null,
+        parent_internal_email:target.parent_internal_email||null,
+        title,type,body,
+        issuer_name:ctx?.display_name||'ROVEN',
+        issued_at:saved?.issued_at||new Date().toISOString()
+      };
+
+      if(ctx?.internal_email)await sendStructuredMail(ctx.internal_email,'CERTIFICATE_ISSUED',legacyRef,cert).catch(()=>{});
+      if(target.internal_email)await sendStructuredMail(target.internal_email,'CERTIFICATE',cert.certificate_id,cert).catch(()=>{});
+      if(target.parent_internal_email)await sendStructuredMail(target.parent_internal_email,'CERTIFICATE_PARENT',cert.certificate_id,cert).catch(()=>{});
+
+      msg.textContent='تم إصدار الشهادة وحفظها في حساب الطالب وولي الأمر.';
       msg.className='student-form-msg success show';
       await loadCertificates();
     }catch(err){msg.textContent=err.message||'تعذر إصدار الشهادة';msg.className='student-form-msg error show'}
   });
+
   document.getElementById('refreshCertificates').addEventListener('click',loadCertificates);
   document.getElementById('certificatesList').addEventListener('click',async e=>{
     const revoke=e.target.closest('.revoke-certificate-btn');
     if(revoke){
       if(!confirm('إلغاء هذه الشهادة؟ ستختفي من السجل النشط للطالب وولي الأمر مع الاحتفاظ بسجل الإلغاء.'))return;
-      const ctx=await hydratePlatformContext();
-      const all=(await structuredMail('inbox')).concat(await structuredMail('sent'));
-      const cert=latestStructuredBy(all,'CERTIFICATE_ISSUED','certificate_id').find(x=>String(x.certificate_id)===String(revoke.dataset.certificateId));
+      const cert=certificateRowsCache.find(c=>String(c.certificate_id||c.id||'')===String(revoke.dataset.certificateId||''));
       if(!cert)return;
-      const rec={certificate_id:cert.certificate_id,student_name:cert.student_name,revoked_at:new Date().toISOString(),reason:'ألغيت بواسطة جهة الإصدار'};
+      const ctx=await hydratePlatformContext();
+      const certId=cert.id||cert.certificate_id;
+      const rec={certificate_id:certId,student_name:cert.student_name||cert.private_student_name,revoked_at:new Date().toISOString(),reason:'ألغيت بواسطة جهة الإصدار'};
       try{
-        await sendStructuredMail(ctx.internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec);
-        if(cert.student_internal_email)await sendStructuredMail(cert.student_internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec);
+        if(cert._db||cert.id){
+          await dataApiFetch('/rpc/certificate_delete',{method:'POST',body:JSON.stringify({p_certificate_id:certId})});
+        }
+        if(ctx?.internal_email)await sendStructuredMail(ctx.internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec).catch(()=>{});
+        if(cert.student_internal_email)await sendStructuredMail(cert.student_internal_email,'CERTIFICATE_REVOKED',rec.certificate_id,rec).catch(()=>{});
+        if(cert.parent_internal_email)await sendStructuredMail(cert.parent_internal_email,'CERTIFICATE_REVOKED_PARENT',rec.certificate_id,rec).catch(()=>{});
         await loadCertificates();
       }catch(err){alert(err.message||'تعذر إلغاء الشهادة')}
       return;
     }
+
     const btn=e.target.closest('.print-certificate-btn');if(!btn)return;
-    const cert=certificateRowsCache.find(c=>String(c.certificate_id||'')===String(btn.dataset.certificateId||''));
+    const cert=certificateRowsCache.find(c=>String(c.certificate_id||c.id||'')===String(btn.dataset.certificateId||''));
     const preview=cert
       ? `<img class="certificate-logo" src="${escapeHtml(certificateLogoUrl)}" alt="شعار أكاديمية ROVEN"><h2>${escapeHtml(cert.title||'شهادة تقدير')}</h2><p>تُمنح إلى</p><h3>${escapeHtml(cert.student_name||cert.private_student_name||'اسم الطالب')}</h3><p>${escapeHtml(cert.body||'تقديرًا لتميزه وجهده.')}</p><small>ROVEN Online School</small>`
       : document.getElementById('certificatePreview').innerHTML;
