@@ -6302,6 +6302,10 @@
         discount:0,
         paid:Number(s.month_paid||0),
         balance_db:Math.max(0,Number(s.monthly_fee||0)-Number(s.month_paid||0)),
+        last_attendance_status:s.last_attendance_status||null,
+        last_attendance_date:s.last_attendance_date||null,
+        last_attendance_minutes_late:Number(s.last_attendance_minutes_late||0),
+        last_attendance_note:s.last_attendance_note||null,
         _db_source:'private'
       });
     }
@@ -6443,7 +6447,18 @@
     document.getElementById('parentResultsCount').textContent=String(results.length);
 
     box.innerHTML=links.length?links.map(x=>{
-      const att=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+      const mailAtt=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+      const dbAtt=x.last_attendance_status?{
+        status:x.last_attendance_status,
+        date:x.last_attendance_date,
+        minutes_late:x.last_attendance_minutes_late||0,
+        note:x.last_attendance_note||null
+      }:null;
+      const att=(()=>{
+        if(!mailAtt)return dbAtt;
+        if(!dbAtt)return mailAtt;
+        return new Date(dbAtt.date||0)>=new Date(mailAtt.date||0)?dbAtt:mailAtt;
+      })();
       const pts=points.filter(a=>String(a.student_id||a.student_name)===String(x.student_id||x.student_name)).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
       const attLabel={present:'حاضر',absent:'غائب',late:'متأخر',excused:'بعذر',left_early:'غادر مبكرًا'}[att?.status]||'لا يوجد';
       const fin=parentFinanceFor(x);
