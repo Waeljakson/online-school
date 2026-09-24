@@ -28,6 +28,7 @@ jobs:
           neon connection-string "$NEON_BRANCH_ID" \
             --project-id "$NEON_PROJECT_ID" \
             --database-name schooldb \
+            --role-name schooldb_owner \
             --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
               select column_name,data_type,is_nullable,column_default
               from information_schema.columns
@@ -37,6 +38,7 @@ jobs:
           neon connection-string "$NEON_BRANCH_ID" \
             --project-id "$NEON_PROJECT_ID" \
             --database-name schooldb \
+            --role-name schooldb_owner \
             --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
               select conname, pg_get_constraintdef(oid)
               from pg_constraint
@@ -45,6 +47,7 @@ jobs:
           neon connection-string "$NEON_BRANCH_ID" \
             --project-id "$NEON_PROJECT_ID" \
             --database-name schooldb \
+            --role-name schooldb_owner \
             --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
               select oid::regprocedure as signature
               from pg_proc
