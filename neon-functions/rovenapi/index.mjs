@@ -771,6 +771,77 @@ async function custom(action,a,p){
     return {school_students:schoolStudents,private_students:privateStudents,certificates:certs,exam_results:results};
   }
 
+  if(action==='platform_groups_list_local'){
+    const subjectExpr="coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject')";
+    if(a.account_type==='teacher' && a.teacher_id){
+      return await sql`select distinct
+        g.id group_id,g.name group_name,
+        coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
+        coalesce(t.full_name,pa.display_name) teacher_name,
+        g.schedule_json,g.meeting_url,g.meeting_provider
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        left join public.teachers t on t.id=c.teacher_id
+        left join public.platform_accounts pa on pa.teacher_id=c.teacher_id and pa.is_active=true
+        where g.school_id=${a.school_id} and g.is_active=true
+          and (c.teacher_id=${a.teacher_id} or exists(
+            select 1 from public.teacher_room_management trm
+            where trm.group_id=g.id and trm.teacher_account_id=${a.account_id} and trm.is_active=true
+          ))
+        order by group_name`;
+    }
+
+    if(a.student_id){
+      return await sql`select distinct
+        g.id group_id,g.name group_name,
+        coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
+        coalesce(t.full_name,pa.display_name) teacher_name,
+        g.schedule_json,g.meeting_url,g.meeting_provider
+        from public.enrollments en
+        join public.study_groups g on g.id=en.group_id
+        join public.courses c on c.id=g.course_id
+        left join public.teachers t on t.id=c.teacher_id
+        left join public.platform_accounts pa on pa.teacher_id=c.teacher_id and pa.is_active=true
+        where en.student_id=${a.student_id}
+          and en.status='active'
+          and g.school_id=${a.school_id}
+          and g.is_active=true
+        order by group_name`;
+    }
+
+    const privateRows=await sql`select distinct
+      g.id group_id,g.name group_name,
+      coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
+      teacher.display_name teacher_name,
+      g.schedule_json,g.meeting_url,g.meeting_provider
+      from public.teacher_private_students ps
+      join public.study_groups g on g.id=ps.group_id
+      left join public.courses c on c.id=g.course_id
+      left join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
+      where ps.platform_account_id=${a.account_id}
+        and ps.school_id=${a.school_id}
+        and ps.status='active'
+        and g.is_active=true
+      order by group_name`;
+    if(privateRows.length)return privateRows;
+
+    if(a.account_type==='admin' || a.account_type==='staff'){
+      return await sql`select distinct
+        g.id group_id,g.name group_name,
+        coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
+        coalesce(t.full_name,pa.display_name) teacher_name,
+        g.schedule_json,g.meeting_url,g.meeting_provider
+        from public.study_groups g
+        left join public.courses c on c.id=g.course_id
+        left join public.teachers t on t.id=c.teacher_id
+        left join public.platform_accounts pa on pa.teacher_id=c.teacher_id and pa.is_active=true
+        where g.school_id=${a.school_id} and g.is_active=true
+        order by group_name`;
+    }
+
+    return [];
+  }
+
   if(action==='private_student_groups_list'){
     const rows=await sql`select
       ps.id private_student_id,
@@ -1383,9 +1454,7 @@ export default{
       if(action==='platform_list_groups'){
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
-        const privateStudent=(await sql`select id from public.teacher_private_students
-          where platform_account_id=${a.account_id} and school_id=${a.school_id} and status='active' limit 1`)[0];
-        if(privateStudent)return json(await custom('private_student_groups_list',a,p),200,o);
+        return json(await custom('platform_groups_list_local',a,p),200,o);
       }
 
       const customActions=new Set([
