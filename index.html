@@ -1374,6 +1374,29 @@
   </div>
 </div>
 
+<div class="student-modal" id="teacherNameModal" aria-hidden="true">
+  <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="teacherNameModalTitle" style="max-width:560px">
+    <div class="student-dialog-head">
+      <div><h3 id="teacherNameModalTitle">تعديل اسم المعلم</h3><p>سيتم تحديث الاسم في ملف المعلم وحساب المنصة والقاعات والتقارير.</p></div>
+      <button class="close-modal" type="button" id="closeTeacherNameModal" aria-label="إغلاق">×</button>
+    </div>
+    <form class="student-form" id="teacherNameForm">
+      <input id="teacherNameTeacherId" type="hidden">
+      <div class="form-section">
+        <div class="form-field">
+          <label>اسم المعلم <span class="required">*</span></label>
+          <input id="teacherNameValue" required autocomplete="off">
+        </div>
+      </div>
+      <div class="student-form-msg" id="teacherNameMsg"></div>
+      <div class="student-form-actions">
+        <button class="secondary-action" type="button" id="cancelTeacherNameModal">إلغاء</button>
+        <button class="save-student" type="submit" id="saveTeacherName">حفظ الاسم</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="student-modal" id="teacherModal" aria-hidden="true">
   <div class="student-dialog" role="dialog" aria-modal="true" aria-labelledby="teacherModalTitle">
     <div class="student-dialog-head">
@@ -2240,7 +2263,64 @@
     }
   });
 
+  const teacherNameModal=document.getElementById('teacherNameModal');
+  const closeTeacherNameModal=()=>{
+    teacherNameModal.classList.remove('show');
+    teacherNameModal.setAttribute('aria-hidden','true');
+    document.body.style.overflow='';
+  };
+  const openTeacherNameModal=teacher=>{
+    if(!teacher)return;
+    document.getElementById('teacherNameTeacherId').value=teacher.teacher_id||'';
+    document.getElementById('teacherNameValue').value=teacher.full_name||'';
+    const msg=document.getElementById('teacherNameMsg');msg.textContent='';msg.className='student-form-msg';
+    teacherNameModal.classList.add('show');
+    teacherNameModal.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+    setTimeout(()=>{const input=document.getElementById('teacherNameValue');input.focus();input.select()},80);
+  };
+  document.getElementById('closeTeacherNameModal')?.addEventListener('click',closeTeacherNameModal);
+  document.getElementById('cancelTeacherNameModal')?.addEventListener('click',closeTeacherNameModal);
+  teacherNameModal?.addEventListener('click',e=>{if(e.target===teacherNameModal)closeTeacherNameModal()});
+
+  document.getElementById('teacherNameForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const teacherId=document.getElementById('teacherNameTeacherId').value;
+    const fullName=document.getElementById('teacherNameValue').value.replace(/\s+/g,' ').trim();
+    const msg=document.getElementById('teacherNameMsg');
+    const btn=document.getElementById('saveTeacherName');
+    msg.className='student-form-msg';
+    if(!teacherId||fullName.length<2){
+      msg.textContent='اكتب اسم المعلم بشكل صحيح.';
+      msg.className='student-form-msg error show';
+      return;
+    }
+    btn.disabled=true;btn.textContent='جارٍ الحفظ...';
+    try{
+      const result=await dataApiFetch('/rpc/admin_teacher_name_update',{method:'POST',body:JSON.stringify({
+        p_teacher_id:teacherId,p_full_name:fullName
+      })});
+      await recordAudit('update','تعديل اسم المعلم','teacher',teacherId,fullName,{new_name:fullName}).catch(()=>{});
+      msg.textContent='تم تحديث اسم المعلم إلى «'+(result?.full_name||fullName)+'».';
+      msg.className='student-form-msg success show';
+      await Promise.allSettled([loadTeachers(),loadGroups(),loadAccountDirectory()]);
+      setTimeout(closeTeacherNameModal,600);
+    }catch(err){
+      const raw=String(err.message||'');
+      msg.textContent=raw.includes('teacher_not_found')?'تعذر العثور على المعلم.':(err.message||'تعذر تعديل اسم المعلم.');
+      msg.className='student-form-msg error show';
+    }finally{
+      btn.disabled=false;btn.textContent='حفظ الاسم';
+    }
+  });
+
   document.getElementById('teachersRows').addEventListener('click',async e=>{
+    const nameEdit=e.target.closest('.teacher-name-edit-btn');
+    if(nameEdit){
+      const teacher=teachersAdminCache.find(x=>String(x.teacher_id)===String(nameEdit.dataset.teacherId));
+      if(!teacher){alert('تعذر تحديد بيانات المعلم.');return}
+      openTeacherNameModal(teacher);return;
+    }
     const edit=e.target.closest('.teacher-edit-btn');
     if(edit){
       if(!edit.dataset.accountId){alert('هذا المعلم لا يملك حساب دخول مرتبطًا حتى الآن.');return}
@@ -2594,7 +2674,8 @@
         <td><b class="paid">${escapeHtml(salaryText(t))}</b></td>
         <td><span class="status ${t.status==='active'&&t.account_active!==false?'active':'watch'}">${t.status==='active'&&t.account_active!==false?'نشط':'غير نشط'}</span></td>
         <td><div class="admin-row-actions">
-          <button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل</button>
+          <button class="secondary-action teacher-name-edit-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}">تعديل الاسم</button>
+          <button class="secondary-action teacher-edit-btn" type="button" data-account-id="${escapeHtml(t.account_id||'')}" data-teacher-id="${escapeHtml(t.teacher_id||'')}">بيانات الدخول</button>
           <button class="secondary-action teacher-state-btn ${t.status==='active'&&t.account_active!==false?'inactive-action':'activate-action'}" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-active="${t.status==='active'&&t.account_active!==false?'1':'0'}">${t.status==='active'&&t.account_active!==false?'إيقاف':'تفعيل'}</button>
           <button class="secondary-action danger-action delete-teacher-btn" type="button" data-teacher-id="${escapeHtml(t.teacher_id||'')}" data-name="${escapeHtml(t.full_name||'المعلم')}">حذف</button>
         </div></td>
