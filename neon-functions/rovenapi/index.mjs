@@ -421,7 +421,7 @@ async function custom(action,a,p){
     must(a,teacherAccountId);
     let groupIds=null;
     if(link)groupIds=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
-    const rows=await sql`select trm.group_id,g.name group_name,c.subject_name,g.schedule_json,g.meeting_url,g.meeting_provider,
+    const rows=await sql`select trm.group_id,g.name group_name,coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,g.schedule_json,g.meeting_url,g.meeting_provider,
       trm.capacity,trm.agreed_price,trm.pricing_basis,trm.management_mode,trm.service_fee,trm.fee_basis,trm.is_active,
       coalesce((select count(*) from public.teacher_private_students ps
         where ps.group_id=trm.group_id and ps.teacher_account_id=trm.teacher_account_id and ps.status='active'),0)::int current_private_students
@@ -776,7 +776,7 @@ async function custom(action,a,p){
       ps.id private_student_id,
       g.id group_id,
       g.name group_name,
-      c.subject_name,
+      coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
       teacher.display_name teacher_name,
       g.schedule_json,
       g.meeting_url,
