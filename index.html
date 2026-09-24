@@ -6258,22 +6258,95 @@
       box.innerHTML='<div class="feature"><b>هذه الصفحة مخصصة لولي الأمر.</b></div>';
       return;
     }
-    const inbox=await structuredMail('inbox');
-    const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
+
+    const [inbox,dashboardResult]=await Promise.all([
+      structuredMail('inbox').catch(()=>[]),
+      dataApiFetch('/rpc/parent_dashboard',{method:'POST',body:'{}'}).catch(()=>null)
+    ]);
+
+    const mailLinks=latestStructuredBy(inbox,'PARENT_LINK','student_no');
+    const linkMap=new Map();
+    mailLinks.forEach(x=>{
+      const key=String(x.student_id||x.student_no||x.student_name||'');
+      if(key)linkMap.set(key,x);
+    });
+
+    for(const s of (dashboardResult?.school_students||[])){
+      const key=String(s.id||s.student_no||s.full_name||'');
+      const existing=linkMap.get(key)||mailLinks.find(x=>
+        (x.student_id&&String(x.student_id)===String(s.id))||
+        (x.student_no&&String(x.student_no)===String(s.student_no))
+      )||{};
+      linkMap.set(key,{
+        ...existing,
+        student_id:s.id,
+        student_no:s.student_no,
+        student_name:s.full_name,
+        grade:s.grade_name||existing.grade||'',
+        balance_db:Number(s.balance||0),
+        points_db:Number(s.points||0),
+        _db_source:'school'
+      });
+    }
+
+    for(const s of (dashboardResult?.private_students||[])){
+      const key='private:'+String(s.id||s.private_code||s.full_name||'');
+      linkMap.set(key,{
+        student_id:null,
+        private_student_id:s.id,
+        student_no:s.private_code,
+        student_name:s.full_name,
+        stage:'دروس خاصة',
+        grade:'',
+        fee:Number(s.monthly_fee||0),
+        discount:0,
+        paid:Number(s.month_paid||0),
+        balance_db:Math.max(0,Number(s.monthly_fee||0)-Number(s.month_paid||0)),
+        _db_source:'private'
+      });
+    }
+
+    const links=[...linkMap.values()];
     const parentRevoked=new Set(latestStructuredBy(inbox,'CERTIFICATE_REVOKED_PARENT','certificate_id').map(x=>String(x.certificate_id)));
-    const certs=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!parentRevoked.has(String(x.certificate_id)));
-    const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
+    const mailCerts=latestStructuredBy(inbox,'CERTIFICATE_PARENT','certificate_id').filter(x=>!parentRevoked.has(String(x.certificate_id)));
+    const dbCerts=(dashboardResult?.certificates||[]).map(x=>({
+      ...x,
+      certificate_id:x.id||x.certificate_id,
+      student_name:x.student_name||x.private_student_name||''
+    }));
+    const certMap=new Map();
+    [...mailCerts,...dbCerts].forEach(x=>certMap.set(String(x.certificate_id||x.id||Math.random()),x));
+    const certs=[...certMap.values()];
+
+    const mailResults=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
+    const dbResults=(dashboardResult?.exam_results||[]).map(x=>({
+      ...x,
+      result_id:x.attempt_id||x.result_id,
+      exam_title:x.title||x.exam_title,
+      student_name:x.student_name||x.private_student_name||''
+    }));
+    const resultMap=new Map();
+    [...mailResults,...dbResults].forEach(x=>resultMap.set(String(x.result_id||x.attempt_id||Math.random()),x));
+    const results=[...resultMap.values()];
     const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
     const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
     const parentPayments=latestStructuredBy(inbox,'PARENT_PAYMENT','payment_id');
     const parentVoids=new Set(latestStructuredBy(inbox,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
 
     const parentFinanceFor=x=>{
-      const due=Math.max(0,Number(x.fee||0)-Number(x.discount||0));
       const extra=parentPayments.filter(p=>!parentVoids.has(String(p.payment_id))&&(
         (x.student_id&&String(p.student_id||'')===String(x.student_id))||
         (x.student_no&&String(p.student_no||'')===String(x.student_no))
       )).reduce((s,p)=>s+Number(p.amount||0),0);
+
+      if(x.balance_db!==undefined&&x.balance_db!==null){
+        const basePaid=Number(x.paid||0);
+        const paid=basePaid+extra;
+        const balance=Math.max(0,Number(x.balance_db||0)-extra);
+        return {due:paid+balance,paid,balance};
+      }
+
+      const due=Math.max(0,Number(x.fee||0)-Number(x.discount||0));
       const paid=Number(x.paid||0)+extra;
       return {due,paid,balance:Math.max(0,due-paid)};
     };
@@ -6294,7 +6367,7 @@
           <span>المدفوع: <b class="paid">${fin.paid.toFixed(2)}</b></span>
           <span>المتبقي: <b class="due">${fin.balance.toFixed(2)}</b></span>
           <span>آخر حضور: <b>${escapeHtml(attLabel)}</b></span>
-          <span>النقاط: <b>${pts?Number(pts.balance||0):'—'}</b></span>
+          <span>النقاط: <b>${pts?Number(pts.balance||0):(x.points_db!==undefined?Number(x.points_db||0):'—')}</b></span>
         </div>
       </div>`;
     }).join(''):'<div class="feature"><b>لا يوجد طالب مرتبط بهذا الحساب حتى الآن.</b><span>الحسابات الجديدة يتم ربطها تلقائيًا عند تسجيل الطالب.</span></div>';
