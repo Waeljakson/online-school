@@ -1,0 +1,52 @@
+name: Diagnose ROVEN Login Schema
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/diagnose-roven-login.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    environment: github-pages
+    runs-on: ubuntu-latest
+    env:
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY || vars.NEON_API_KEY }}
+      NEON_PROJECT_ID: autumn-silence-96565721
+      NEON_BRANCH_ID: br-round-hall-b5qw20e0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Neon CLI
+        run: npm install -g neon
+      - name: Inspect login schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          neon connection-string "$NEON_BRANCH_ID" \
+            --project-id "$NEON_PROJECT_ID" \
+            --database-name schooldb \
+            --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
+              select column_name,data_type,is_nullable,column_default
+              from information_schema.columns
+              where table_schema='public' and table_name='platform_sessions'
+              order by ordinal_position;
+            "
+          neon connection-string "$NEON_BRANCH_ID" \
+            --project-id "$NEON_PROJECT_ID" \
+            --database-name schooldb \
+            --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
+              select conname, pg_get_constraintdef(oid)
+              from pg_constraint
+              where conrelid='public.platform_sessions'::regclass;
+            "
+          neon connection-string "$NEON_BRANCH_ID" \
+            --project-id "$NEON_PROJECT_ID" \
+            --database-name schooldb \
+            --psql -- -v ON_ERROR_STOP=1 -P pager=off -c "
+              select oid::regprocedure as signature
+              from pg_proc
+              where pronamespace='public'::regnamespace and proname='roven_rpc';
+            "
