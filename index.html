@@ -4032,6 +4032,22 @@
 
     if(results[1].status==='fulfilled'&&Array.isArray(results[1].value)){
       teacherRoomContractsCache=results[1].value;
+      const knownGroupIds=new Set(teacherHubGroupsCache.map(g=>String(g.group_id||g.id||'')));
+      for(const room of teacherRoomContractsCache){
+        const gid=String(room.group_id||'');
+        if(!gid||knownGroupIds.has(gid))continue;
+        teacherHubGroupsCache.push({
+          group_id:room.group_id,
+          group_name:room.group_name||'قاعة المعلم',
+          subject_name:room.subject_name||'—',
+          schedule_json:room.schedule_json||null,
+          meeting_url:room.meeting_url||null,
+          meeting_provider:room.meeting_provider||'zoom',
+          teacher_name:ctx.display_name||'المعلم',
+          _from_room_contract:true
+        });
+        knownGroupIds.add(gid);
+      }
     }else{
       const created=latestStructuredBy(inbox,'ROOM_CREATED','request_id');
       teacherRoomContractsCache=created.filter(x=>x.group_id).map(x=>{
