@@ -2535,9 +2535,7 @@
     const ctx=await hydratePlatformContext();
     if(type==='account'&&String(id)===String(ctx?.account_id||'')&&!active)throw new Error('cannot_disable_current_account');
     try{
-      const r=await dataApiFetch('/rpc/admin_entity_set_active',{method:'POST',body:JSON.stringify({p_type:type,p_id:id,p_active:active})});
-      await recordAudit('status',active?'تفعيل':'إيقاف',type,id,label,{active});
-      return r;
+      return await dataApiFetch('/rpc/admin_entity_set_active',{method:'POST',body:JSON.stringify({p_type:type,p_id:id,p_active:active})});
     }catch(err){
       if(!active&&isUnknownAdminAction(err))return await dataApiFetch('/rpc/archive_school_entity',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
       throw err;
@@ -2548,9 +2546,7 @@
     const ctx=await hydratePlatformContext();
     if(type==='account'&&String(id)===String(ctx?.account_id||''))throw new Error('cannot_delete_current_account');
     try{
-      const r=await dataApiFetch('/rpc/admin_entity_delete',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
-      await recordAudit('delete','حذف منطقي',type,id,label,{soft_delete:true});
-      return r;
+      return await dataApiFetch('/rpc/admin_entity_delete',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
     }catch(err){
       if(isUnknownAdminAction(err))return await dataApiFetch('/rpc/archive_school_entity',{method:'POST',body:JSON.stringify({p_type:type,p_id:id})});
       throw err;
@@ -3799,7 +3795,7 @@
           if((roster||[]).some(x=>String(x.student_id)===String(studentId)))memberGroups.push(g);
         }catch{}
       }
-      const attendance=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').filter(x=>x.type==='attendance'&&String(x.details?.payload?.p_records||'').includes(String(studentId))).slice(0,15);
+      const attendance=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').filter(x=>x.type==='attendance'&&JSON.stringify(x.details?.payload?.p_records||[]).includes(String(studentId))).slice(0,15);
       const audit=latestStructuredBy(inbox,'AUDIT_LOG','audit_id').filter(x=>String(x.entity_id||'')===String(studentId)||String(JSON.stringify(x.details||{})).includes(String(studentId))).slice(0,20);
       box.innerHTML=`
         <div class="student360-grid">
@@ -5735,7 +5731,7 @@
     notificationCount.classList.toggle('show',total>0);
     notificationSummary.textContent=total?total+' إشعار غير مقروء':'لا توجد إشعارات جديدة';
 
-    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0};
+    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0,homework:0,schedule:0};
     notificationItems.forEach(x=>{if(sectionCounts[x.section]!==undefined)sectionCounts[x.section]+=Number(x.count||1)});
     Object.entries(sectionCounts).forEach(([k,v])=>setNavNotificationBadge(k,v));
 
@@ -5754,6 +5750,9 @@
     notificationPopover.classList.remove('show');
     if(item.messageId){
       try{await dataApiFetch('/rpc/platform_mail_mark_read',{method:'POST',body:JSON.stringify({p_message_id:item.messageId})})}catch{}
+    }
+    if(String(item.uid||'').startsWith('lesson:')){
+      const seen=getStoredMap('lesson_reminder_seen');seen[String(item.uid).replace('lesson:','')]=Date.now();setStoredMap('lesson_reminder_seen',seen);
     }
     if(item.section==='directchat'){
       switchTo('directchat','شات الإدارة والمعلمين');
@@ -5774,6 +5773,17 @@
     }else if(item.section==='rewards'){
       switchTo('rewards','النقاط والمكافآت');
       await loadRewards();
+    }else if(item.section==='homework'){
+      if(String(item.uid||'').startsWith('homework-grade:')){
+        const seen=getStoredMap('homework_grade_seen');seen[String(item.uid).replace('homework-grade:','')]=Date.now();setStoredMap('homework_grade_seen',seen);
+      }else if(String(item.uid||'').startsWith('homework:')){
+        const seen=getStoredMap('homework_seen');seen[String(item.uid).replace('homework:','')]=Date.now();setStoredMap('homework_seen',seen);
+      }
+      switchTo('homework','الواجبات والتكليفات');
+      await loadHomework();
+    }else if(item.section==='schedule'){
+      switchTo('schedule','الجدول الدراسي');
+      await loadAdvancedSchedule();
     }else if(item.section==='education'){
       switchTo('education','الإدارة التعليمية');
       await loadTeacherRoomRequestsAdmin();
@@ -5854,6 +5864,28 @@
           if(key&&!seen[key])items.push({uid:'homework-grade:'+key,section:'homework',count:1,icon:'✅',title:'تم تصحيح الواجب',text:(g.homework_title||'واجب')+' — '+Number(g.score||0)+' / '+Number(g.max_score||0),time:g.graded_at});
         });
       }catch{}
+
+      // Upcoming lesson reminder.
+      if(['student','private_student','teacher'].includes(type)){
+        try{
+          const groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+          const now=new Date(),todayKey=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
+          const dateStr=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');
+          const upcoming=[];
+          (groups||[]).forEach(g=>parseScheduleSessions(g.schedule_json).forEach(sess=>{
+            if(String(sess.day||'').toLowerCase()!==todayKey||!sess.time)return;
+            const instant=zonedDateFromLocal(dateStr,String(sess.time),'Africa/Cairo');
+            const mins=(instant-now)/60000;
+            if(mins>=0&&mins<=60)upcoming.push({g,sess,instant,mins});
+          }));
+          upcoming.sort((a,b)=>a.instant-b.instant);
+          if(upcoming[0]){
+            const x=upcoming[0],key=String(x.g.group_id)+'|'+x.instant.toISOString();
+            const seen=getStoredMap('lesson_reminder_seen');
+            if(!seen[key])items.push({uid:'lesson:'+key,section:'schedule',count:1,icon:'⏱',title:'حصة قادمة خلال '+Math.max(1,Math.round(x.mins))+' دقيقة',text:(x.g.subject_name||x.g.group_name||'حصة')+' — '+String(x.sess.time),time:x.instant.toISOString()});
+          }
+        }catch{}
+      }
 
       // Internal mail unread.
       try{
