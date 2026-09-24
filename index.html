@@ -6976,8 +6976,14 @@
     const tbody=document.getElementById('platformGroupsRows');
     tbody.innerHTML='<tr><td colspan="5" class="students-empty">جارٍ تحميل المجموعات...</td></tr>';
     try{
-      const data=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+      let data=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
       if(!Array.isArray(data)||!data.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد مجموعات مرتبطة بهذا الحساب.</td></tr>';return}
+      data=await Promise.all(data.map(async g=>{
+        try{
+          const fresh=await dataApiFetch('/rpc/platform_group_room_details',{method:'POST',body:JSON.stringify({p_group_id:g.group_id||g.id})});
+          return fresh&&typeof fresh==='object'?{...g,...fresh}:g;
+        }catch{return g}
+      }));
       tbody.innerHTML=data.map(g=>`<tr>
         <td><b>${escapeHtml(g.group_name)}</b></td><td>${escapeHtml(g.subject_name||'—')}</td><td>${escapeHtml(g.teacher_name||'—')}</td>
         <td>${g.meeting_url?`<a class="primary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">انضم للحصة ↗</a>`:'لم يفعّل المعلم رابط الحصة بعد'}</td>
