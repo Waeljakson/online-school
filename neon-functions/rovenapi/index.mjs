@@ -355,15 +355,27 @@ async function reconcileSinglePrivateRoomByAccount(accountId){
     limit 1`)[0]||null;
   if(!ps)return null;
 
-  const rooms=await sql`select group_id,teacher_account_id,school_id
-    from public.teacher_room_management
-    where teacher_account_id=${ps.teacher_account_id}
-      and is_active=true
-    order by updated_at desc`;
+  const rooms=await sql`select trm.group_id,trm.teacher_account_id,trm.school_id,
+      g.meeting_url,g.meeting_provider,g.name group_name
+    from public.teacher_room_management trm
+    join public.study_groups g on g.id=trm.group_id
+    where trm.teacher_account_id=${ps.teacher_account_id}
+      and trm.is_active=true
+    order by trm.updated_at desc`;
   if(rooms.length!==1)return ps;
 
   const room=rooms[0];
   if(String(ps.group_id||'')!==String(room.group_id)){
+    // Preserve a meeting link that may have been saved on the old duplicate group.
+    const oldGroup=ps.group_id?(await sql`select meeting_url,meeting_provider
+      from public.study_groups where id=${ps.group_id} limit 1`)[0]||null:null;
+    if(!room.meeting_url && oldGroup?.meeting_url){
+      await sql`update public.study_groups
+        set meeting_url=${oldGroup.meeting_url},
+            meeting_provider=coalesce(${oldGroup.meeting_provider||null},meeting_provider)
+        where id=${room.group_id}`;
+    }
+
     const updated=(await sql`update public.teacher_private_students
       set group_id=${room.group_id},updated_at=now()
       where id=${ps.id}
