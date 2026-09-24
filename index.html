@@ -1674,7 +1674,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260925-0124';
+  window.__ROVEN_BUILD__='20260925-0234';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -7940,7 +7940,7 @@
     }catch(err){msg.textContent=err.message||'تعذر إرسال الرسالة';msg.className='student-form-msg error show'}
   });
 
-  let pendingProfilePhoto=null;
+  let pendingProfilePhoto=undefined;
   const loadProfile=async()=>{
     const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
     try{
@@ -7969,10 +7969,12 @@
     const newPass=document.getElementById('profileNewPassword').value;
     if(newPass&&newPass.length<8){msg.textContent='كلمة المرور الجديدة يجب ألا تقل عن 8 أحرف.';msg.className='student-form-msg error show';return}
     try{
-      await dataApiFetch('/rpc/platform_update_profile',{method:'POST',body:JSON.stringify({
-        p_profile_photo:pendingProfilePhoto,p_old_password:oldPass||null,p_new_password:newPass||null
-      })});
-      pendingProfilePhoto=null;document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
+      const profilePayload={p_old_password:oldPass||null,p_new_password:newPass||null};
+      if(typeof pendingProfilePhoto==='string'&&pendingProfilePhoto){
+        profilePayload.p_profile_photo=pendingProfilePhoto;
+      }
+      await dataApiFetch('/rpc/platform_update_profile',{method:'POST',body:JSON.stringify(profilePayload)});
+      pendingProfilePhoto=undefined;document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
       msg.textContent=newPass?'تم حفظ الصورة وتغيير كلمة المرور. استخدم كلمة المرور الجديدة في الدخول القادم.':'تم حفظ الصورة الشخصية.';
       msg.className='student-form-msg success show';
       if(newPass && platformSessionToken){
