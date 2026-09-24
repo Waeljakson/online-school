@@ -49,6 +49,20 @@ async function ensureSchema(){
     )`;
     await sql`alter table public.teacher_private_attendance add column if not exists minutes_late integer not null default 0`;
     await sql`alter table public.teacher_private_attendance add column if not exists note text`;
+    await sql`create table if not exists public.teacher_private_point_ledger(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      teacher_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      group_id uuid references public.study_groups(id) on delete set null,
+      private_student_id uuid not null references public.teacher_private_students(id) on delete cascade,
+      points integer not null check(points<>0),
+      reason text not null,
+      category text,
+      issued_by_account_id uuid references public.platform_accounts(id) on delete set null,
+      created_at timestamptz not null default now()
+    )`;
+    await sql`create index if not exists teacher_private_point_ledger_student_idx
+      on public.teacher_private_point_ledger(private_student_id,created_at desc)`;
     await sql`alter table public.teacher_private_attendance drop constraint if exists teacher_private_attendance_status_check`;
     await sql`alter table public.teacher_private_attendance add constraint teacher_private_attendance_status_check
       check(status in ('present','absent','late','excused','left_early'))`;
@@ -1450,6 +1464,8 @@ async function custom(action,a,p){
           and date_trunc('month',p.paid_on)=date_trunc('month',current_date)),0) month_paid,
       coalesce((select sum(p.amount) from public.teacher_private_payments p
         where p.private_student_id=ps.id and p.payment_kind='books'),0) books_paid,
+      coalesce((select sum(pl.points) from public.teacher_private_point_ledger pl
+        where pl.private_student_id=ps.id),0)::int points,
       (select att.status
         from public.teacher_private_attendance att
         where att.private_student_id=ps.id
@@ -2613,6 +2629,99 @@ export default{
         }
 
         return json([],200,o);
+      }
+
+      if(action==='platform_issue_points'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        await ensureSchema();
+
+        const sid=String(p.p_student_id||'');
+        if(sid){
+          const ps=(await sql`select ps.id,ps.school_id,ps.teacher_account_id,ps.group_id,ps.full_name
+            from public.teacher_private_students ps
+            where ps.id=${sid}::uuid and ps.status='active'
+            limit 1`)[0]||null;
+
+          if(ps){
+            const isOwner=a.account_type==='teacher' && String(ps.teacher_account_id)===String(a.account_id);
+            const isManagement=a.account_type==='admin' || a.account_type==='staff';
+            if(!isOwner&&!isManagement)throw new Error('not_authorized');
+            if(String(ps.school_id)!==String(a.school_id))throw new Error('not_authorized');
+
+            const points=Math.trunc(Number(p.p_points||0));
+            const reason=String(p.p_reason||'').trim();
+            if(!points)throw new Error('points_required');
+            if(!reason)throw new Error('reason_required');
+
+            await sql`insert into public.teacher_private_point_ledger(
+              school_id,teacher_account_id,group_id,private_student_id,points,reason,category,issued_by_account_id
+            ) values(
+              ${ps.school_id},${ps.teacher_account_id},${ps.group_id},${ps.id},
+              ${points},${reason},${p.p_category||null},${a.account_id}
+            )`;
+            const balance=Number((await sql`select coalesce(sum(points),0)::int balance
+              from public.teacher_private_point_ledger
+              where private_student_id=${ps.id}`)[0]?.balance||0);
+            return json({student_id:ps.id,private_student_id:ps.id,balance},200,o);
+          }
+        }
+      }
+
+      if(action==='platform_student_points_summary'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        await ensureSchema();
+
+        const ps=(await sql`select id
+          from public.teacher_private_students
+          where platform_account_id=${a.account_id} and status='active'
+          order by updated_at desc nulls last
+          limit 1`)[0]||null;
+        if(ps){
+          const balance=Number((await sql`select coalesce(sum(points),0)::int balance
+            from public.teacher_private_point_ledger
+            where private_student_id=${ps.id}`)[0]?.balance||0);
+          const recent=await sql`select points,reason,category,created_at
+            from public.teacher_private_point_ledger
+            where private_student_id=${ps.id}
+            order by created_at desc
+            limit 20`;
+          return json({balance,level:'مبتدئ',recent},200,o);
+        }
+      }
+
+      if(action==='platform_points_leaderboard'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        await ensureSchema();
+
+        let legacy=[];
+        try{
+          const rr=await sql`select public.roven_rpc(
+            'platform_points_leaderboard',
+            ${token},
+            ${JSON.stringify(p||{})}::jsonb
+          ) result`;
+          legacy=Array.isArray(rr[0]?.result)?rr[0].result:[];
+        }catch{}
+
+        const privateRows=await sql`select
+          ps.id student_id,
+          ps.full_name student_name,
+          'دروس خاصة'::text grade_name,
+          coalesce(sum(pl.points),0)::int points,
+          'مبتدئ'::text level
+          from public.teacher_private_students ps
+          join public.teacher_private_point_ledger pl on pl.private_student_id=ps.id
+          where ps.school_id=${a.school_id} and ps.status='active'
+          group by ps.id,ps.full_name
+          having coalesce(sum(pl.points),0)<>0`;
+
+        const merged=[...legacy,...privateRows]
+          .sort((x,y)=>Number(y.points||0)-Number(x.points||0))
+          .slice(0,100);
+        return json(merged,200,o);
       }
 
       if(action==='parent_dashboard'){
