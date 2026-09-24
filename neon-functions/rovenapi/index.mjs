@@ -817,12 +817,14 @@ async function custom(action,a,p){
       g.schedule_json,g.meeting_url,g.meeting_provider
       from public.teacher_private_students ps
       join public.study_groups g on g.id=ps.group_id
+      join public.teacher_room_management trm
+        on trm.group_id=ps.group_id
+       and trm.teacher_account_id=ps.teacher_account_id
+       and trm.is_active=true
       left join public.courses c on c.id=g.course_id
       left join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
       where ps.platform_account_id=${a.account_id}
-        and ps.school_id=${a.school_id}
         and ps.status='active'
-        and g.is_active=true
       order by group_name`;
     if(privateRows.length)return privateRows;
 
@@ -855,12 +857,14 @@ async function custom(action,a,p){
       g.meeting_provider
       from public.teacher_private_students ps
       join public.study_groups g on g.id=ps.group_id
+      join public.teacher_room_management trm
+        on trm.group_id=ps.group_id
+       and trm.teacher_account_id=ps.teacher_account_id
+       and trm.is_active=true
       left join public.courses c on c.id=g.course_id
       left join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
       where ps.platform_account_id=${a.account_id}
-        and ps.school_id=${a.school_id}
         and ps.status='active'
-        and g.is_active=true
       order by g.name`;
     return rows;
   }
