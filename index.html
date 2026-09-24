@@ -1674,7 +1674,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260925-0234';
+  window.__ROVEN_BUILD__='20260925-0242';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -7941,6 +7941,73 @@
   });
 
   let pendingProfilePhoto=undefined;
+
+  const profileInitial=name=>String(name||'م').trim().charAt(0)||'م';
+  const renderProfilePhoto=(photo,name)=>{
+    const initial=profileInitial(name);
+    const img=document.getElementById('profilePhotoPreview');
+    const topAvatar=document.querySelector('.top-actions .avatar');
+
+    const clearBroken=()=>{
+      img.removeAttribute('src');
+      img.alt=initial;
+      img.style.display='none';
+      if(topAvatar)topAvatar.textContent=initial;
+    };
+
+    if(!photo){
+      clearBroken();
+      return;
+    }
+
+    img.style.display='block';
+    img.alt='الصورة الشخصية';
+    img.onerror=clearBroken;
+    img.onload=()=>{img.onerror=null};
+    img.src=photo;
+
+    if(topAvatar){
+      topAvatar.textContent='';
+      const topImg=document.createElement('img');
+      topImg.alt='';
+      topImg.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:50%;display:block';
+      topImg.onerror=()=>{topAvatar.textContent=initial};
+      topImg.src=photo;
+      topAvatar.appendChild(topImg);
+    }
+  };
+
+  const normalizeProfilePhoto=async file=>{
+    if(!file)throw new Error('اختر صورة أولًا.');
+    if(file.size>8*1024*1024)throw new Error('حجم الصورة كبير جدًا. الحد الأقصى 8 MB.');
+
+    const objectUrl=URL.createObjectURL(file);
+    try{
+      const source=new Image();
+      source.decoding='async';
+      await new Promise((resolve,reject)=>{
+        source.onload=resolve;
+        source.onerror=()=>reject(new Error('تعذر قراءة الصورة. اختر صورة JPG أو PNG أو AVIF صالحة.'));
+        source.src=objectUrl;
+      });
+
+      const side=Math.min(source.naturalWidth,source.naturalHeight);
+      const sx=Math.max(0,(source.naturalWidth-side)/2);
+      const sy=Math.max(0,(source.naturalHeight-side)/2);
+      const size=480;
+      const canvas=document.createElement('canvas');
+      canvas.width=size;canvas.height=size;
+      const ctx=canvas.getContext('2d',{alpha:false});
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,size,size);
+      ctx.drawImage(source,sx,sy,side,side,0,0,size,size);
+      const data=canvas.toDataURL('image/jpeg',0.86);
+      if(!data.startsWith('data:image/jpeg;base64,'))throw new Error('تعذر تجهيز الصورة للحفظ.');
+      return data;
+    }finally{
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
+
   const loadProfile=async()=>{
     const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
     try{
@@ -7950,18 +8017,26 @@
       document.getElementById('profileAccountCode').value=p?.account_code||'';
       document.getElementById('profileUsername').value=p?.username||'';
       document.getElementById('profileInternalEmail').value=p?.internal_email||'';
-      const img=document.getElementById('profilePhotoPreview');
-      if(p?.profile_photo){img.src=p.profile_photo}else{img.removeAttribute('src');img.alt=(p?.display_name||'م')[0]||'م'}
-      const topAvatar=document.querySelector('.top-actions .avatar');
-      if(topAvatar){
-        topAvatar.innerHTML=p?.profile_photo?`<img src="${escapeHtml(p.profile_photo)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`:escapeHtml((p?.display_name||'م')[0]);
-      }
+      renderProfilePhoto(p?.profile_photo||null,p?.display_name||'م');
     }catch(err){msg.textContent=err.message||'تعذر تحميل الحساب';msg.className='student-form-msg error show'}
   };
-  document.getElementById('profilePhotoFile').addEventListener('change',e=>{
+
+  document.getElementById('profilePhotoFile').addEventListener('change',async e=>{
     const file=e.target.files?.[0];if(!file)return;
-    if(file.size>700*1024){alert('الصورة الشخصية يجب ألا تتجاوز 700 KB.');e.target.value='';return}
-    const reader=new FileReader();reader.onload=()=>{pendingProfilePhoto=String(reader.result);document.getElementById('profilePhotoPreview').src=pendingProfilePhoto};reader.readAsDataURL(file);
+    const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
+    try{
+      msg.textContent='جارٍ تجهيز الصورة...';msg.className='student-form-msg show';
+      pendingProfilePhoto=await normalizeProfilePhoto(file);
+      renderProfilePhoto(pendingProfilePhoto,currentPlatformAccount?.display_name||'م');
+      msg.textContent='الصورة جاهزة. اضغط «حفظ الحساب».';
+      msg.className='student-form-msg success show';
+    }catch(err){
+      pendingProfilePhoto=undefined;
+      e.target.value='';
+      renderProfilePhoto(currentPlatformAccount?.profile_photo||null,currentPlatformAccount?.display_name||'م');
+      msg.textContent=err.message||'تعذر تجهيز الصورة.';
+      msg.className='student-form-msg error show';
+    }
   });
   document.getElementById('saveProfile').addEventListener('click',async()=>{
     const msg=document.getElementById('profileMsg');msg.className='student-form-msg';
@@ -7973,8 +8048,12 @@
       if(typeof pendingProfilePhoto==='string'&&pendingProfilePhoto){
         profilePayload.p_profile_photo=pendingProfilePhoto;
       }
-      await dataApiFetch('/rpc/platform_update_profile',{method:'POST',body:JSON.stringify(profilePayload)});
-      pendingProfilePhoto=undefined;document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
+      const savedProfile=await dataApiFetch('/rpc/platform_update_profile',{method:'POST',body:JSON.stringify(profilePayload)});
+      if(savedProfile?.profile_photo){
+        currentPlatformAccount={...(currentPlatformAccount||{}),profile_photo:savedProfile.profile_photo};
+        renderProfilePhoto(savedProfile.profile_photo,currentPlatformAccount?.display_name||'م');
+      }
+      pendingProfilePhoto=undefined;document.getElementById('profilePhotoFile').value='';document.getElementById('profileOldPassword').value='';document.getElementById('profileNewPassword').value='';
       msg.textContent=newPass?'تم حفظ الصورة وتغيير كلمة المرور. استخدم كلمة المرور الجديدة في الدخول القادم.':'تم حفظ الصورة الشخصية.';
       msg.className='student-form-msg success show';
       if(newPass && platformSessionToken){
