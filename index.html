@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1945" />
+  <meta name="roven-build" content="20260924-2005" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1599,7 +1599,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1945';
+  window.__ROVEN_BUILD__='20260924-2005';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3445,6 +3445,19 @@
       if(tuitionPaidNow>0||booksPaidNow>0)finance.receipt=await recordPrivateRegistrationPayments(result,groupId,name,finance);
       if(!id){
         renderPrivateCredentialCard(result,name,groupId,finance);
+        try{
+          const ctx=await hydratePlatformContext();
+          if(ctx?.internal_email&&result?.student_username&&result?.student_password){
+            await sendStructuredMail(ctx.internal_email,'PRIVATE_CREDENTIAL_CARD',String(result?.id||result?.private_student_id||name),{
+              private_student_id:result?.id||result?.private_student_id||null,
+              group_id:groupId,student_name:name,
+              student_username:result.student_username,student_password:result.student_password,
+              parent_name:document.getElementById('privateStudentParentName').value.trim()||null,
+              parent_username:result.parent_username||null,parent_password:result.parent_password||null,
+              issued_at:new Date().toISOString()
+            });
+          }
+        }catch{}
         msg.textContent=finance.receipt?'تم إنشاء الطالب وملفه المالي. تم إصدار إيصال رقم '+finance.receipt.receipt_no+' ويمكن طباعته من البطاقة.':'تم إنشاء الطالب وملفه المالي وحساب ولي الأمر. بطاقة البيانات جاهزة للنسخ والإرسال.';
       }else msg.textContent='تم تحديث بيانات الطالب وتسجيل الحركة المالية.';
       msg.className='student-form-msg success show';
@@ -3902,7 +3915,7 @@
           '<td>'+(st.books_free?'مجانية':(Number(st.books_fee||0).toFixed(2)+'<br><span style="font-size:9px;color:var(--muted)">مسدد '+Number(st.books_paid||0).toFixed(2)+'</span>'))+'</td>'+
           '<td class="due">'+(Math.max(0,Number(st.monthly_fee||0)-Number(st.month_paid||0))+Math.max(0,(st.books_free?0:Number(st.books_fee||0))-Number(st.books_paid||0))).toFixed(2)+'<br><span style="font-size:9px;color:var(--muted)">'+(((Math.max(0,Number(st.monthly_fee||0)-Number(st.month_paid||0))+Math.max(0,(st.books_free?0:Number(st.books_fee||0))-Number(st.books_paid||0)))<=0.001)?'تم السداد':'متبقي')+'</span></td>'+
           '<td>'+escapeHtml(st.parent_name||'—')+'<br><span style="font-size:9px;color:var(--muted)">'+escapeHtml(st.parent_phone||'')+'</span></td>'+
-          '<td><div class="private-money-actions"><button class="secondary-action edit-private-student" type="button" data-id="'+escapeHtml(id)+'">تعديل</button><button class="secondary-action print-private-receipt" type="button" data-id="'+escapeHtml(id)+'">🧾 آخر إيصال</button></div></td>'+
+          '<td><div class="private-money-actions"><button class="primary-action issue-private-card" type="button" data-id="'+escapeHtml(id)+'">🎫 إصدار بطاقة</button><button class="secondary-action edit-private-student" type="button" data-id="'+escapeHtml(id)+'">تعديل</button><button class="secondary-action print-private-receipt" type="button" data-id="'+escapeHtml(id)+'">🧾 آخر إيصال</button></div></td>'+
         '</tr>';
       }).join('');
     }else{
@@ -3971,7 +3984,83 @@
   };
 
   document.getElementById('refreshTeacherHub')?.addEventListener('click',loadTeacherHub);
+  const privateStudentFinanceSnapshot=st=>({
+    tuition:Number(st?.monthly_fee||0),
+    tuition_paid:Number(st?.month_paid||0),
+    tuition_paid_now:0,
+    books_free:Boolean(st?.books_free),
+    books_fee:Number(st?.books_fee||0),
+    books_paid:Number(st?.books_paid||0),
+    books_paid_now:0,
+    parent_name:st?.parent_name||null
+  });
+
+  const issuePrivateStudentCard=async st=>{
+    if(!st)return;
+    const msg=document.getElementById('privateStudentMsg');
+    openPrivateStudentModal(st,st.group_id);
+    msg.textContent='جارٍ إصدار بطاقة دخول جديدة...';
+    msg.className='student-form-msg show';
+    try{
+      const result=await dataApiFetch('/rpc/teacher_private_student_issue_card',{method:'POST',body:JSON.stringify({
+        p_private_student_id:st.id||st.private_student_id
+      })});
+      const finance=privateStudentFinanceSnapshot(st);
+      renderPrivateCredentialCard(result,st.full_name,st.group_id,finance);
+      msg.textContent='تم إصدار بطاقة جديدة. تم تحديث كلمة مرور الطالب وولي الأمر.';
+      msg.className='student-form-msg success show';
+      const ctx=await hydratePlatformContext();
+      if(ctx?.internal_email){
+        const snapshot={
+          private_student_id:st.id||st.private_student_id,
+          group_id:st.group_id,
+          student_name:st.full_name,
+          student_username:result?.student_username||null,
+          student_password:result?.student_password||null,
+          parent_name:st.parent_name||null,
+          parent_username:result?.parent_username||null,
+          parent_password:result?.parent_password||null,
+          issued_at:new Date().toISOString()
+        };
+        await sendStructuredMail(ctx.internal_email,'PRIVATE_CREDENTIAL_CARD',String(st.id||st.private_student_id),snapshot).catch(()=>{});
+      }
+    }catch(err){
+      const raw=String(err?.message||err||'');
+      if(/unsupported_action|unknown_custom_action|unsupported action|not supported/i.test(raw)){
+        try{
+          const mails=[...(await structuredMail('sent').catch(()=>[])),...(await structuredMail('inbox').catch(()=>[]))];
+          const cards=latestStructuredBy(mails,'PRIVATE_CREDENTIAL_CARD','private_student_id');
+          const old=cards.find(x=>String(x.private_student_id)===String(st.id||st.private_student_id));
+          if(old?.student_username&&old?.student_password){
+            renderPrivateCredentialCard({
+              student_username:old.student_username,
+              student_password:old.student_password,
+              parent_username:old.parent_username||null,
+              parent_password:old.parent_password||null,
+              group_id:st.group_id,
+              full_name:st.full_name
+            },st.full_name,st.group_id,privateStudentFinanceSnapshot(st));
+            msg.textContent='تم فتح آخر بطاقة دخول محفوظة لهذا الطالب.';
+            msg.className='student-form-msg success show';
+            return;
+          }
+        }catch{}
+        msg.textContent='لا توجد بطاقة دخول محفوظة لهذا الطالب حاليًا. يلزم إعادة إصدار كلمة مرور جديدة عند تفعيل خدمة إصدار البطاقات.';
+        msg.className='student-form-msg error show';
+        return;
+      }
+      msg.textContent=err?.message||'تعذر إصدار بطاقة الطالب.';
+      msg.className='student-form-msg error show';
+    }
+  };
+
   document.getElementById('teacherPrivateStudentsRows')?.addEventListener('click',e=>{
+    const issueBtn=e.target.closest('.issue-private-card');
+    if(issueBtn){
+      const st=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id)===String(issueBtn.dataset.id));
+      if(st)issuePrivateStudentCard(st);
+      return;
+    }
     const receiptBtn=e.target.closest('.print-private-receipt');
     if(receiptBtn){
       const sid=String(receiptBtn.dataset.id||'');
@@ -6613,7 +6702,7 @@
       const data=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:folder})});
       const visible=(Array.isArray(data)?data:[]).filter(m=>{
         const s=String(m.subject||'');
-        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[GROUP_SCHEDULE_OVERRIDE]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[DIRECT_CHAT_V2]') && !s.startsWith('[HOMEWORK_ASSIGN]') && !s.startsWith('[HOMEWORK_DEF]') && !s.startsWith('[HOMEWORK_SUBMISSION]') && !s.startsWith('[HOMEWORK_GRADED]') && !s.startsWith('[HOMEWORK_PARENT]') && !s.startsWith('[AUDIT_LOG]') && !s.startsWith('[AUDIT_SELF]');
+        return !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[GROUP_SCHEDULE_OVERRIDE]') && !s.startsWith('[PRIVATE_CREDENTIAL_CARD]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]') && !s.startsWith('[DIRECT_CHAT_V2]') && !s.startsWith('[HOMEWORK_ASSIGN]') && !s.startsWith('[HOMEWORK_DEF]') && !s.startsWith('[HOMEWORK_SUBMISSION]') && !s.startsWith('[HOMEWORK_GRADED]') && !s.startsWith('[HOMEWORK_PARENT]') && !s.startsWith('[AUDIT_LOG]') && !s.startsWith('[AUDIT_SELF]');
       });
       if(!visible.length){tbody.innerHTML='<tr><td colspan="4" class="students-empty">لا توجد رسائل.</td></tr>';return}
       tbody.innerHTML=visible.map(m=>{
@@ -6971,7 +7060,7 @@
         const inbox=await dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'inbox'})});
         (inbox||[]).filter(m=>{
           const s=String(m.subject||'');
-          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[GROUP_SCHEDULE_OVERRIDE]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]');
+          return !m.read_at && !s.startsWith('[TEACHER_FINANCE]') && !s.startsWith('[TAUGHT_LESSON]') && !s.startsWith('[ROOM_REQUEST]') && !s.startsWith('[ROOM_RESPONSE]') && !s.startsWith('[ROOM_CREATED]') && !s.startsWith('[PRIVATE_STUDENT]') && !s.startsWith('[PRIVATE_PAYMENT]') && !s.startsWith('[GROUP_SCHEDULE_OVERRIDE]') && !s.startsWith('[PRIVATE_CREDENTIAL_CARD]') && !s.startsWith('[PRIVATE_ATTENDANCE]') && !s.startsWith('[PARENT_LINK]') && !s.startsWith('[PARENT_LINK_MASTER]') && !s.startsWith('[STUDENT_PARENT_LINK]') && !s.startsWith('[CERTIFICATE]') && !s.startsWith('[CERTIFICATE_PARENT]') && !s.startsWith('[CERTIFICATE_ISSUED]') && !s.startsWith('[EXAM_DEF]') && !s.startsWith('[EXAM_ASSIGN]') && !s.startsWith('[EXAM_SUBMISSION]') && !s.startsWith('[EXAM_RESULT]') && !s.startsWith('[EXAM_RESULT_PARENT]') && !s.startsWith('[EXAM_GRADED]') && !s.startsWith('[EXAM_ATTEMPT_SELF]') && !s.startsWith('[MATERIAL_DEF]') && !s.startsWith('[MATERIAL_SALE]') && !s.startsWith('[ATTENDANCE_EVENT]') && !s.startsWith('[POINT_EVENT]') && !s.startsWith('[PARENT_ATTENDANCE]') && !s.startsWith('[PARENT_POINTS]') && !s.startsWith('[CERTIFICATE_REVOKED]') && !s.startsWith('[CERTIFICATE_REVOKED_PARENT]') && !s.startsWith('[ROOM_MANAGED]') && !s.startsWith('[MANAGED_PRIVATE_STUDENT]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE]') && !s.startsWith('[MANAGED_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[MANAGED_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[ASSISTANT_REQUEST]') && !s.startsWith('[ASSISTANT_REQUEST_SENT]') && !s.startsWith('[ASSISTANT_CREATED]') && !s.startsWith('[ASSISTANT_CREATED_ADMIN]') && !s.startsWith('[ASSISTANT_LINK]') && !s.startsWith('[ASSISTANT_REVOKED]') && !s.startsWith('[ASSISTANT_PRIVATE_STUDENT]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE]') && !s.startsWith('[ASSISTANT_PRIVATE_PAYMENT_ACTION]') && !s.startsWith('[ASSISTANT_PRIVATE_ATTENDANCE_ACTION]') && !s.startsWith('[STUDENT_PAYMENT_VOID]') && !s.startsWith('[STUDENT_PAYMENT]') && !s.startsWith('[PARENT_PAYMENT_VOID]') && !s.startsWith('[PARENT_PAYMENT]') && !s.startsWith('[SCHOOL_PAYMENT_VOID]') && !s.startsWith('[SCHOOL_PAYMENT]');
         }).slice(0,20).forEach(m=>{
           items.push({
             uid:'mail:'+m.message_id,section:'mail',messageId:m.message_id,count:1,icon:'✉',

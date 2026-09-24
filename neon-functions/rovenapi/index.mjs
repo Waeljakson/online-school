@@ -534,6 +534,43 @@ async function custom(action,a,p){
     };
   }
 
+  if(action==='teacher_private_student_issue_card'){
+    const link=await assistantLink(a);
+    const teacherId=a.account_type==='teacher'?a.account_id:link?.teacher_account_id;
+    must(a,teacherId && (a.account_type==='teacher'||Boolean(link?.permissions?.students)));
+    const id=String(p.p_private_student_id||'');
+    const student=(await sql`select ps.*,spa.username student_username,gpa.username parent_username
+      from public.teacher_private_students ps
+      left join public.platform_accounts spa on spa.id=ps.platform_account_id
+      left join public.platform_accounts gpa on gpa.id=ps.guardian_account_id
+      where ps.id=${id}::uuid and ps.teacher_account_id=${teacherId} and ps.status='active'
+      limit 1`)[0];
+    if(!student)throw new Error('private_student_not_found');
+    if(link){
+      const gs=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
+      if(!gs.includes(String(student.group_id)))throw new Error('group_access_denied');
+    }
+    if(!student.platform_account_id)throw new Error('student_login_account_missing');
+    const studentPassword=(await sql`select public.platform_make_password() password`)[0].password;
+    await sql`update public.platform_accounts
+      set password_hash=crypt(${studentPassword},gen_salt('bf',10)),is_active=true,updated_at=now()
+      where id=${student.platform_account_id}`;
+    let parentPassword=null;
+    if(student.guardian_account_id){
+      parentPassword=(await sql`select public.platform_make_password() password`)[0].password;
+      await sql`update public.platform_accounts
+        set password_hash=crypt(${parentPassword},gen_salt('bf',10)),is_active=true,updated_at=now()
+        where id=${student.guardian_account_id}`;
+    }
+    return {
+      ...student,
+      student_username:student.student_username,
+      student_password:studentPassword,
+      parent_username:student.parent_username||null,
+      parent_password:parentPassword
+    };
+  }
+
   if(action==='teacher_private_student_delete'){
     const link=await assistantLink(a);
     const teacherId=a.account_type==='teacher'?a.account_id:link?.teacher_account_id;
@@ -1245,7 +1282,7 @@ export default{
       }
 
       const customActions=new Set([
-        'teacher_private_students_list','teacher_private_student_upsert','teacher_private_student_delete',
+        'teacher_private_students_list','teacher_private_student_upsert','teacher_private_student_delete','teacher_private_student_issue_card',
         'teacher_room_contract_set','teacher_room_contracts_list',
         'teacher_private_attendance_save','teacher_private_payment_add',
         'teacher_assistants_list','teacher_assistant_create','teacher_assistant_update','teacher_assistant_delete',
