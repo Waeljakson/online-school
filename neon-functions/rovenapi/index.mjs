@@ -2636,12 +2636,52 @@ export default{
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
         await ensureSchema();
 
-        const sid=String(p.p_student_id||'');
+        const sid=String(p.p_student_id||'').trim();
+        const gid=String(p.p_group_id||'').trim();
+        const studentNo=String(p.p_student_no||'').trim();
+        const studentName=String(p.p_student_name||'').trim();
+
         if(sid){
-          const ps=(await sql`select ps.id,ps.school_id,ps.teacher_account_id,ps.group_id,ps.full_name
+          let access=null;
+          if(gid){
+            try{
+              access=await privateRoomAccess(a,gid,false);
+              if(access)await materializeLegacyPrivateStudentsForRoom(access);
+            }catch{}
+          }
+
+          let ps=(await sql`select ps.id,ps.school_id,ps.teacher_account_id,ps.group_id,ps.platform_account_id,ps.private_code,ps.full_name
             from public.teacher_private_students ps
-            where ps.id=${sid}::uuid and ps.status='active'
+            where ps.status='active'
+              and ps.school_id=${a.school_id}
+              and (
+                ps.id::text=${sid}
+                or coalesce(ps.platform_account_id::text,'')=${sid}
+                or exists(
+                  select 1
+                  from public.platform_accounts spa
+                  where spa.id=ps.platform_account_id
+                    and coalesce(spa.student_id::text,'')=${sid}
+                )
+                or (${studentNo}<>'' and lower(trim(ps.private_code))=lower(trim(${studentNo})))
+              )
+            order by ps.updated_at desc nulls last
             limit 1`)[0]||null;
+
+          if(!ps && access){
+            const aliases=(access.alias_group_ids||[access.canonical_group_id||gid]).map(String);
+            ps=(await sql`select ps.id,ps.school_id,ps.teacher_account_id,ps.group_id,ps.platform_account_id,ps.private_code,ps.full_name
+              from public.teacher_private_students ps
+              where ps.status='active'
+                and ps.teacher_account_id=${access.teacher_account_id}
+                and ps.group_id=any(${aliases}::uuid[])
+                and (
+                  (${studentNo}<>'' and lower(trim(ps.private_code))=lower(trim(${studentNo})))
+                  or (${studentName}<>'' and lower(trim(ps.full_name))=lower(trim(${studentName})))
+                )
+              order by ps.updated_at desc nulls last
+              limit 1`)[0]||null;
+          }
 
           if(ps){
             const isOwner=a.account_type==='teacher' && String(ps.teacher_account_id)===String(a.account_id);
@@ -2663,7 +2703,12 @@ export default{
             const balance=Number((await sql`select coalesce(sum(points),0)::int balance
               from public.teacher_private_point_ledger
               where private_student_id=${ps.id}`)[0]?.balance||0);
-            return json({student_id:ps.id,private_student_id:ps.id,balance},200,o);
+            return json({
+              student_id:sid,
+              private_student_id:ps.id,
+              student_name:ps.full_name,
+              balance
+            },200,o);
           }
         }
       }
