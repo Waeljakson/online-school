@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-2005" />
+  <meta name="roven-build" content="20260924-2025" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1091,7 +1091,7 @@
       <input id="privateStudentId" type="hidden">
       <div class="student-form-msg" id="privateStudentMsg"></div>
       <div class="private-credential-card" id="privateStudentCredentialsCard" style="display:none">
-        <div class="private-credential-head"><div><span>بطاقة دخول الطالب</span><b id="privateCredentialStudentName">—</b></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="secondary-action" id="printPrivatePaymentReceipt" type="button" style="display:none">🧾 طباعة إيصال الدفع</button><button class="secondary-action" id="copyPrivateStudentCredentials" type="button">نسخ البيانات</button></div></div>
+        <div class="private-credential-head"><div><span>بطاقة دخول الطالب</span><b id="privateCredentialStudentName">—</b></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="secondary-action" id="savePrivateStudentCardImage" type="button">🖼️ حفظ كصورة</button><button class="secondary-action" id="printPrivatePaymentReceipt" type="button" style="display:none">🧾 طباعة إيصال الدفع</button><button class="secondary-action" id="copyPrivateStudentCredentials" type="button">نسخ البيانات</button></div></div>
         <div class="private-credential-grid">
           <div><span>اسم الطالب</span><b id="privateCredentialName">—</b></div>
           <div><span>اسم المجموعة</span><b id="privateCredentialGroup">—</b></div>
@@ -1599,7 +1599,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-2005';
+  window.__ROVEN_BUILD__='20260924-2025';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3246,7 +3246,7 @@
     copyBtn.title=hasCredentials?'نسخ بيانات الدخول':'لم يتم إنشاء حساب دخول فعلي بعد';
     const status=document.getElementById('privateCredentialStatus');
     status.style.display=hasCredentials?'none':'';
-    status.innerHTML=hasCredentials?'':'<b>تنبيه</b><br>تم حفظ الطالب وملفه المالي، لكن خدمة إنشاء حسابات الطلاب الخاصة لم تُنشئ اسم المستخدم وكلمة المرور بعد.';
+    status.innerHTML=hasCredentials?'':'<b>التسجيل غير مكتمل</b><br>لم يتم إنشاء حساب دخول فعلي للطالب وولي الأمر بعد. لا تعتبر البطاقة صالحة للإرسال حتى تظهر بيانات الدخول.';
     const parent=document.getElementById('privateParentCredentials');
     if(privateCredentialCurrent.parent_username){
       parent.style.display='';
@@ -3257,6 +3257,69 @@
   };
 
   document.getElementById('printPrivatePaymentReceipt')?.addEventListener('click',()=>printPrivateReceipt(privateLatestReceipt));
+
+  const downloadPrivateCredentialImage=async()=>{
+    if(!privateCredentialCurrent){alert('لا توجد بطاقة جاهزة للحفظ.');return}
+    const c=document.createElement('canvas');
+    const scale=Math.max(2,Math.min(3,window.devicePixelRatio||2));
+    const W=1080,H=1350;c.width=W*scale;c.height=H*scale;
+    const ctx=c.getContext('2d');ctx.scale(scale,scale);
+    const roundRect=(x,y,w,h,r,fill,stroke)=>{
+      ctx.beginPath();ctx.roundRect(x,y,w,h,r);
+      if(fill){ctx.fillStyle=fill;ctx.fill()}
+      if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}
+    };
+    ctx.fillStyle='#f3f7f8';ctx.fillRect(0,0,W,H);
+    roundRect(55,45,970,1260,34,'#ffffff','#d8e6e8');
+    roundRect(55,45,970,185,34,'#0f766e',null);
+    ctx.direction='rtl';ctx.textAlign='right';
+    ctx.fillStyle='#ffffff';ctx.font='700 46px Cairo,Tahoma,Arial';ctx.fillText('ROVEN Online School',950,115);
+    ctx.font='500 26px Cairo,Tahoma,Arial';ctx.fillText('بطاقة دخول الطالب',950,165);
+    ctx.textAlign='left';ctx.direction='ltr';ctx.font='700 24px Cairo,Tahoma,Arial';ctx.fillText('ROVEN',120,145);
+
+    const rows=[
+      ['اسم الطالب',privateCredentialCurrent.name||'—'],
+      ['المجموعة',privateCredentialCurrent.group||'—'],
+      ['المادة',privateCredentialCurrent.subject||'—'],
+      ['اسم المستخدم',privateCredentialCurrent.username||'—'],
+      ['كلمة المرور',privateCredentialCurrent.password||'—']
+    ];
+    let y=285;
+    ctx.direction='rtl';ctx.textAlign='right';
+    for(const [label,value] of rows){
+      roundRect(105,y,870,115,18,'#f8fbfb','#e0eaec');
+      ctx.fillStyle='#64748b';ctx.font='500 21px Cairo,Tahoma,Arial';ctx.fillText(label,930,y+36);
+      ctx.fillStyle='#102a32';ctx.font='700 30px Cairo,Tahoma,Arial';ctx.fillText(String(value),930,y+78);
+      y+=132;
+    }
+
+    roundRect(105,y+5,870,235,18,'#f7fafc','#e0eaec');
+    ctx.fillStyle='#0f766e';ctx.font='700 25px Cairo,Tahoma,Arial';ctx.fillText('حساب ولي الأمر',930,y+45);
+    const parentUser=privateCredentialCurrent.parent_username||'—';
+    const parentPass=privateCredentialCurrent.parent_password||'—';
+    ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';ctx.fillText('اسم المستخدم',930,y+90);
+    ctx.fillStyle='#102a32';ctx.font='700 27px Cairo,Tahoma,Arial';ctx.fillText(parentUser,930,y+125);
+    ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';ctx.fillText('كلمة المرور',930,y+165);
+    ctx.fillStyle='#102a32';ctx.font='700 27px Cairo,Tahoma,Arial';ctx.fillText(parentPass,930,y+200);
+
+    const fy=y+285;
+    roundRect(105,fy,870,170,18,'#fffdf7','#eee3c8');
+    const status=privateCredentialCurrent.totalRemaining<=0.001?'تم السداد بالكامل':'متبقي '+Number(privateCredentialCurrent.totalRemaining||0).toFixed(2);
+    const bookText=privateCredentialCurrent.booksFree?'الكتب: مجانية':'الكتب: '+Number(privateCredentialCurrent.booksFee||0).toFixed(2);
+    ctx.fillStyle='#725a1c';ctx.font='700 23px Cairo,Tahoma,Arial';ctx.fillText('الملخص المالي',930,fy+38);
+    ctx.fillStyle='#27343a';ctx.font='500 21px Cairo,Tahoma,Arial';ctx.fillText('الاشتراك: '+Number(privateCredentialCurrent.tuition||0).toFixed(2)+' — '+bookText,930,fy+82);
+    ctx.fillText('المسدد: '+(Number(privateCredentialCurrent.tuitionPaid||0)+Number(privateCredentialCurrent.booksPaid||0)).toFixed(2),930,fy+118);
+    ctx.fillText('الحالة: '+status,930,fy+151);
+
+    ctx.fillStyle='#7a8b90';ctx.font='500 18px Cairo,Tahoma,Arial';ctx.textAlign='center';ctx.fillText('بيانات الدخول خاصة بالطالب وولي الأمر — ROVEN Online School',540,1260);
+    const blob=await new Promise(resolve=>c.toBlob(resolve,'image/png',1));
+    if(!blob){alert('تعذر إنشاء صورة البطاقة.');return}
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='ROVEN-'+String(privateCredentialCurrent.name||'student').replace(/[^\p{L}\p{N}_-]+/gu,'-')+'.png';
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+  };
+
+  document.getElementById('savePrivateStudentCardImage')?.addEventListener('click',downloadPrivateCredentialImage);
 
   document.getElementById('copyPrivateStudentCredentials')?.addEventListener('click',async()=>{
     if(!privateCredentialCurrent)return;
@@ -3490,8 +3553,8 @@
           await sendStructuredMail(ctx.internal_email,'PRIVATE_STUDENT',fallbackId,record);
           const finance={private_student_id:fallbackId,tuition,tuition_paid:record.month_paid,tuition_paid_now:tuitionPaidNow,books_free:booksFree,books_fee:booksFee,books_paid:record.books_paid,books_paid_now:booksPaidNow,method:paymentMethod,date:record.joined_on,parent_name:record.parent_name};
           if(tuitionPaidNow>0||booksPaidNow>0)finance.receipt=await recordPrivateRegistrationPayments(record,groupId,name,finance);
-          msg.textContent=id?'تم تحديث بيانات الطالب الخاص وتسجيل الحركة المالية.':'تم حفظ الطالب وفتح ملفه المالي.';
-          msg.className='student-form-msg success show';
+          msg.textContent=id?'تم تحديث البيانات المالية للطالب، لكن حساب الدخول لم يُنشأ لأن خدمة الحسابات الحية لم تُحدَّث بعد.':'تم حفظ بيانات الطالب مؤقتًا، لكن التسجيل غير مكتمل: لم يتم إنشاء حساب الطالب وولي الأمر بعد.';
+          msg.className='student-form-msg error show';
           renderPrivateCredentialCard(null,name,groupId,finance);
           if(typeof loadTeacherHub==='function')setTimeout(()=>loadTeacherHub().catch(()=>{}),700);
           return;
