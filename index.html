@@ -1674,7 +1674,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-2130';
+  window.__ROVEN_BUILD__='20260925-0124';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -5550,32 +5550,78 @@
 
   // ===== Parent progress report =====
   document.getElementById('printParentProgressReport')?.addEventListener('click',async()=>{
-    const ctx=await hydratePlatformContext();if(!['parent','private_parent'].includes(String(ctx?.account_type||'')))return;
-    const inbox=await structuredMail('inbox');
-    const links=latestStructuredBy(inbox,'PARENT_LINK','student_no');
-    const attendance=latestStructuredBy(inbox,'PARENT_ATTENDANCE','event_id');
-    const results=latestStructuredBy(inbox,'EXAM_RESULT_PARENT','result_id');
-    const homework=latestStructuredBy(inbox,'HOMEWORK_PARENT','submission_id');
-    const points=latestStructuredBy(inbox,'PARENT_POINTS','event_id');
-    const payments=latestStructuredBy(inbox,'PARENT_PAYMENT','payment_id');
-    const voids=new Set(latestStructuredBy(inbox,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
-    const cards=links.map(x=>{
-      const att=attendance.filter(a=>String(a.student_id||a.student_no||a.student_name)===String(x.student_id||x.student_no||x.student_name));
-      const absent=att.filter(a=>a.status==='absent').length,late=att.filter(a=>a.status==='late').length,present=att.filter(a=>a.status==='present').length;
-      const exams=results.filter(r=>String(r.student_name||'')===String(x.student_name||''));
-      const hws=homework.filter(r=>String(r.student_name||'')===String(x.student_name||''));
-      const pts=points.filter(r=>String(r.student_id||r.student_name||'')===String(x.student_id||x.student_name||'')).sort((a,b)=>new Date(b.date||b._mail?.sent_at||0)-new Date(a.date||a._mail?.sent_at||0))[0];
-      const due=Math.max(0,Number(x.fee||0)-Number(x.discount||0));
-      const extra=payments.filter(p=>!voids.has(String(p.payment_id))&&((x.student_id&&String(p.student_id||'')===String(x.student_id))||(x.student_no&&String(p.student_no||'')===String(x.student_no)))).reduce((sum,p)=>sum+Number(p.amount||0),0);
-      const paid=Number(x.paid||0)+extra,balance=Math.max(0,due-paid);
-      const avg=exams.length?exams.reduce((sum,r)=>sum+(Number(r.max_score)>0?Number(r.score||0)/Number(r.max_score)*100:0),0)/exams.length:null;
-      return `<div class="report-child"><h2>${escapeHtml(x.student_name||'الطالب')}</h2><p>${escapeHtml([x.stage,x.grade].filter(Boolean).join(' — '))}</p><table><tr><th>الحضور</th><td>حاضر ${present} • غائب ${absent} • متأخر ${late}</td></tr><tr><th>متوسط الاختبارات</th><td>${avg===null?'—':avg.toFixed(1)+'%'}</td></tr><tr><th>الواجبات المصححة</th><td>${hws.length}</td></tr><tr><th>النقاط</th><td>${pts?Number(pts.balance||0):'—'}</td></tr><tr><th>المدفوع / المتبقي</th><td>${paid.toFixed(2)} / ${balance.toFixed(2)}</td></tr></table></div>`;
-    }).join('');
-    const logo=new URL('assets/rivan-logo.jpg',location.href).href;
-    const w=window.open('','_blank','width=1000,height=760');if(!w)return;
-    w.document.write('<html dir="rtl"><head><title>تقرير متابعة ROVEN</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet"><style>@page{size:A4;margin:14mm}body{font-family:Cairo,Arial;color:#172331}.head{text-align:center;border-bottom:2px solid #0f766e;padding-bottom:12px}.head img{width:85px}.head h1{margin:5px}.report-child{margin-top:18px;border:1px solid #dfe7eb;border-radius:12px;padding:14px;page-break-inside:avoid}.report-child h2{margin:0;color:#0f766e}.report-child p{margin:2px 0 10px;color:#64748b}table{width:100%;border-collapse:collapse}th,td{padding:8px;border-bottom:1px solid #e6edf2;text-align:right;font-size:11px}th{width:180px}</style></head><body><div class="head"><img src="'+logo+'"><h1>تقرير متابعة الطالب</h1><p>ROVEN Online School — '+new Date().toLocaleDateString('ar-EG')+'</p></div>'+cards+'<script>window.addEventListener("load",()=>window.print())<\/script></body></html>');w.document.close();
-  });
+    // Open the print window immediately while the click is still a direct user gesture.
+    // Opening it after awaited network calls can leave a blank/blocked window in some browsers.
+    const w=window.open('','_blank','width=1000,height=760');
+    if(!w){
+      alert('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.');
+      return;
+    }
+    w.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>جاري تجهيز تقرير المتابعة</title></head><body style="font-family:Cairo,Arial;padding:30px;text-align:center">جاري تجهيز تقرير متابعة ولي الأمر...</body></html>');
+    w.document.close();
 
+    try{
+      const ctx=await hydratePlatformContext();
+      if(!['parent','private_parent'].includes(String(ctx?.account_type||''))){
+        w.close();
+        return;
+      }
+
+      // Refresh the parent hub first. It is DB-backed through parent_dashboard and
+      // already merges the legacy mail records only as a fallback.
+      await loadParentHub();
+
+      const logo=new URL('assets/rivan-logo.jpg',location.href).href;
+      const childCards=document.getElementById('parentChildrenCards')?.innerHTML||'<div class="empty">لا توجد بيانات أبناء.</div>';
+      const certs=document.getElementById('parentCertificatesList')?.innerHTML||'<div class="empty">لا توجد شهادات.</div>';
+      const results=document.getElementById('parentExamResults')?.innerHTML||'<div class="empty">لا توجد نتائج اختبارات.</div>';
+      const paymentRows=document.getElementById('parentPaymentsRows')?.innerHTML||'<tr><td colspan="7">لا توجد حركات مالية.</td></tr>';
+      const childrenCount=document.getElementById('parentChildrenCount')?.textContent||'0';
+      const balanceTotal=document.getElementById('parentBalanceTotal')?.textContent||'0.00';
+      const certCount=document.getElementById('parentCertificatesCount')?.textContent||'0';
+      const resultCount=document.getElementById('parentResultsCount')?.textContent||'0';
+
+      const html='<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>تقرير متابعة ROVEN</title>'+
+        '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">'+
+        '<style>'+
+        '@page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Cairo,Arial,sans-serif;color:#172331;margin:0;background:#fff;font-size:11px}'+
+        '.head{text-align:center;border-bottom:2px solid #0f766e;padding-bottom:10px;margin-bottom:14px}.head img{width:78px;height:78px;object-fit:contain}.head h1{margin:3px 0;font-size:21px}.head p{margin:2px 0;color:#64748b}'+
+        '.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}.stat{border:1px solid #dfe7eb;border-radius:10px;padding:9px;text-align:center}.stat span{display:block;color:#64748b;font-size:9px}.stat b{display:block;margin-top:3px;font-size:14px;color:#0f766e}'+
+        'h2{font-size:14px;margin:15px 0 7px;border-right:4px solid #0f766e;padding-right:7px}.cards3{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.feature{border:1px solid #dfe7eb;border-radius:10px;padding:10px;page-break-inside:avoid}.feature>b{display:block;font-size:12px;margin-bottom:3px}.feature>span{color:#64748b}.feature div{line-height:1.9}'+
+        '.certificate-list-item,.exam-list-item{border:1px solid #dfe7eb;border-radius:9px;padding:9px;margin-bottom:7px;page-break-inside:avoid}.certificate-list-item b,.exam-list-item b{display:block}.certificate-list-item span,.exam-list-item span{color:#64748b}.certificate-list-item p{margin:4px 0 0}'+
+        'table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #e4eaee;padding:6px;text-align:right;vertical-align:top}th{background:#f5f8f9;font-size:9px}.paid{color:#13795b}.due{color:#b42318}.payment-void{opacity:.55;text-decoration:line-through}.receipt-code{font-family:monospace}.empty,.students-empty{text-align:center;color:#64748b;padding:14px}'+
+        '.footer{margin-top:18px;padding-top:8px;border-top:1px solid #dfe7eb;text-align:center;color:#64748b;font-size:9px}'+
+        '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}'+
+        '</style></head><body>'+
+        '<div class="head"><img src="'+logo+'"><h1>تقرير متابعة ولي الأمر</h1><p>ROVEN Online School — '+new Date().toLocaleDateString('ar-EG')+'</p></div>'+
+        '<div class="stats">'+
+          '<div class="stat"><span>الأبناء المرتبطون</span><b>'+escapeHtml(childrenCount)+'</b></div>'+
+          '<div class="stat"><span>إجمالي المتبقي</span><b>'+escapeHtml(balanceTotal)+'</b></div>'+
+          '<div class="stat"><span>الشهادات</span><b>'+escapeHtml(certCount)+'</b></div>'+
+          '<div class="stat"><span>نتائج الاختبارات</span><b>'+escapeHtml(resultCount)+'</b></div>'+
+        '</div>'+
+        '<h2>ملخص الأبناء</h2><div class="cards3">'+childCards+'</div>'+
+        '<h2>نتائج الاختبارات</h2><div>'+results+'</div>'+
+        '<h2>الشهادات والتقدير</h2><div>'+certs+'</div>'+
+        '<h2>سجل الرسوم والسداد</h2><table><thead><tr><th>الطالب</th><th>البيان</th><th>المرجع</th><th>التاريخ</th><th>المستحق</th><th>المدفوع</th><th>المتبقي</th></tr></thead><tbody>'+paymentRows+'</tbody></table>'+
+        '<div class="footer">تم إنشاء هذا التقرير إلكترونيًا من نظام ROVEN.</div>'+
+        '</body></html>';
+
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+
+      const printNow=()=>setTimeout(()=>{try{w.focus();w.print()}catch{}},500);
+      if(w.document.readyState==='complete')printNow();
+      else w.addEventListener('load',printNow,{once:true});
+    }catch(err){
+      try{
+        w.document.open();
+        w.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>تعذر إنشاء التقرير</title></head><body style="font-family:Cairo,Arial;padding:30px"><h2>تعذر إنشاء تقرير المتابعة</h2><p>'+escapeHtml(err?.message||'حدث خطأ أثناء تحميل بيانات التقرير.')+'</p></body></html>');
+        w.document.close();
+      }catch{}
+    }
+  });
 
 
   // ===== ROVEN-managed teacher private rooms =====
