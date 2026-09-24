@@ -33,8 +33,6 @@ async function ensureSchema(){
     )`;
     await sql`alter table public.teacher_private_students add column if not exists books_fee numeric(12,2) not null default 0`;
     await sql`alter table public.teacher_private_students add column if not exists books_free boolean not null default false`;
-    await sql`alter table public.teacher_private_payments add column if not exists payment_kind text not null default 'tuition'`;
-
     await sql`create table if not exists public.teacher_private_attendance(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -60,6 +58,8 @@ async function ensureSchema(){
       recorded_by_account_id uuid references public.platform_accounts(id) on delete set null,
       created_at timestamptz not null default now()
     )`;
+    await sql`alter table public.teacher_private_payments add column if not exists payment_kind text not null default 'tuition'`;
+
     await sql`create table if not exists public.teacher_assistant_links(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
