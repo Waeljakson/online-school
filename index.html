@@ -3059,6 +3059,7 @@
     const used=Number(c&&c.current_private_students||0);
     return {cap:cap,used:used,remaining:cap?Math.max(0,cap-used):null,full:Boolean(cap&&used>=cap)};
   };
+  const roomPricingText=value=>({monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'}[value]||value||'');
 
   const renderPrivateCredentialCard=(result,name)=>{
     const card=document.getElementById('privateStudentCredentialsCard');
