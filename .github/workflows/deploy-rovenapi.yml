@@ -50,17 +50,17 @@ jobs:
               [ -z "$PID" ] && continue
 
               if neon branches list --project-id "$PID" --output json \
-                | jq -e --arg BID "$NEON_BRANCH_ID" 'any((.branches // . // [] )[]; .id == $BID)' >/dev/null 2>&1; then
+                | jq -e --arg BID "$NEON_BRANCH_ID" '((if type=="array" then . else (.branches // []) end) | any(.[]; .id == $BID))' >/dev/null 2>&1; then
                 PROJECT_ID="$PID"
                 break 2
               fi
             done < <(
               neon projects list --org-id "$ORG_ID" --output json \
-                | jq -r '(.projects // . // [])[] | (.id // .project_id // empty)'
+                | jq -r '(if type=="array" then . else (.projects // []) end)[] | (.id // .project_id // empty)'
             )
           done < <(
             neon orgs list --output json \
-              | jq -r '(.organizations // . // [])[] | (.id // .org_id // empty)'
+              | jq -r '(if type=="array" then . else (.organizations // []) end)[] | (.id // .org_id // empty)'
           )
 
           if [ -z "$PROJECT_ID" ]; then
