@@ -1294,6 +1294,39 @@ async function custom(action,a,p){
       returning id group_id,name group_name,schedule_json`)[0];
   }
 
+  if(action==='platform_group_room_details'){
+    const gid=String(p.p_group_id||'');
+    if(!gid)throw new Error('group_id_required');
+
+    let allowed=await privateRoomAccess(a,gid,false);
+    if(!allowed && a.student_id){
+      allowed=(await sql`select 1
+        from public.enrollments en
+        where en.group_id=${gid}::uuid
+          and en.student_id=${a.student_id}
+          and en.status='active'
+        limit 1`)[0]||null;
+    }
+    if(!allowed && a.account_type==='teacher' && a.teacher_id){
+      allowed=(await sql`select 1
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        where g.id=${gid}::uuid
+          and c.teacher_id=${a.teacher_id}
+        limit 1`)[0]||null;
+    }
+    if(!allowed)throw new Error('group_access_denied');
+
+    const room=(await sql`select
+      g.id group_id,g.name group_name,g.schedule_json,
+      g.meeting_url,g.meeting_provider
+      from public.study_groups g
+      where g.id=${gid}::uuid
+      limit 1`)[0];
+    if(!room)throw new Error('group_not_found');
+    return room;
+  }
+
   if(action==='platform_set_group_meeting'){
     must(a,a.account_type==='teacher');
     const gid=String(p.p_group_id||'');
@@ -1638,7 +1671,7 @@ export default{
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
-        'platform_set_group_meeting','teacher_update_group_schedule',
+        'platform_group_room_details','platform_set_group_meeting','teacher_update_group_schedule',
         'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
         'admin_entity_set_active','admin_entity_delete'
       ]);
