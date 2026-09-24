@@ -2,6 +2,10 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta name="roven-build" content="20260924-1703" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1550,6 +1554,7 @@
   </div>
 </div>
 <script>
+  window.__ROVEN_BUILD__='20260924-1703';
 (function(){
   const roles={
     student:{label:'اسم المستخدم أو رقم الطالب',placeholder:'أدخل اسم المستخدم أو رقم الطالب',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
@@ -1866,8 +1871,15 @@
   });
 
   // Remove any service worker/cache from previous broken Vite deployment.
-  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
+  if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
+  try{
+    const u=new URL(location.href);
+    if(u.searchParams.get('roven_build')!==window.__ROVEN_BUILD__){
+      u.searchParams.set('roven_build',window.__ROVEN_BUILD__);
+      history.replaceState(null,'',u.href);
+    }
+  }catch{}
 
 
 
