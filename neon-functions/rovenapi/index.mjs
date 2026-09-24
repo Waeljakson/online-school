@@ -432,6 +432,105 @@ async function reconcileSinglePrivateRoomByAccount(accountId){
   return ps;
 }
 
+async function materializeLegacyPrivateStudentsForRoom(access){
+  if(!access?.teacher_account_id)return 0;
+  const aliases=Array.isArray(access.alias_group_ids)&&access.alias_group_ids.length
+    ?access.alias_group_ids.map(String)
+    :[String(access.canonical_group_id||access.group_id||access.requested_group_id||'')].filter(Boolean);
+  if(!aliases.length)return 0;
+
+  const canonicalId=String(access.canonical_group_id||access.group_id||aliases[0]);
+  const room=(await sql`select g.name group_name
+    from public.study_groups g
+    where g.id=${canonicalId}::uuid
+    limit 1`)[0]||null;
+  const teacher=(await sql`select display_name
+    from public.platform_accounts
+    where id=${access.teacher_account_id}
+    limit 1`)[0]||null;
+  if(!room?.group_name)return 0;
+
+  const candidates=await sql`select
+      s.id student_id,
+      s.student_no,
+      s.full_name,
+      coalesce(to_jsonb(s)->>'phone','') phone,
+      coalesce(to_jsonb(s)->>'notes','') notes,
+      pa.id platform_account_id,
+      pa.account_code,
+      pa.username
+    from public.students s
+    join public.platform_accounts pa
+      on pa.student_id=s.id
+     and pa.is_active=true
+    where s.status='active'
+      and (
+        s.school_id=${access.school_id}
+        or pa.school_id=${access.school_id}
+      )
+      and coalesce(to_jsonb(s)->>'notes','') ilike '%طالب خاص تابع للمعلم%'
+      and coalesce(to_jsonb(s)->>'notes','') ilike ${'%'+String(room.group_name).trim()+'%'}
+      and (
+        ${String(teacher?.display_name||'')}=''
+        or coalesce(to_jsonb(s)->>'notes','') ilike ${'%'+String(teacher?.display_name||'').trim()+'%'}
+      )
+      and not exists(
+        select 1 from public.teacher_private_students ps
+        where ps.platform_account_id=pa.id and ps.status='active'
+      )`;
+
+  let created=0;
+  for(const st of candidates){
+    let guardianAccountId=null,parentName=null,parentPhone=null;
+    const direct=(await sql`select ppsl.parent_account_id
+      from public.platform_parent_student_links ppsl
+      where ppsl.student_id=${st.student_id}
+      order by ppsl.created_at desc
+      limit 1`)[0]||null;
+    guardianAccountId=direct?.parent_account_id||null;
+
+    if(!guardianAccountId){
+      const rel=(await sql`select
+          coalesce(to_jsonb(pr)->>'full_name','') parent_name,
+          coalesce(to_jsonb(pr)->>'phone','') parent_phone,
+          pa.id guardian_account_id
+        from public.student_parents sp
+        join public.parents pr on pr.id=sp.parent_id
+        left join public.platform_accounts pa on pa.parent_id=pr.id and pa.is_active=true
+        where sp.student_id=${st.student_id}
+        limit 1`)[0]||null;
+      guardianAccountId=rel?.guardian_account_id||null;
+      parentName=rel?.parent_name||null;
+      parentPhone=rel?.parent_phone||null;
+    }
+
+    const privateCode=String(st.account_code||st.student_no||st.username||('TPS-MIG-'+String(st.platform_account_id).slice(0,8))).slice(0,80);
+    try{
+      const ins=await sql`insert into public.teacher_private_students(
+        school_id,teacher_account_id,group_id,platform_account_id,guardian_account_id,
+        private_code,full_name,phone,parent_name,parent_phone,monthly_fee,books_fee,books_free,
+        joined_on,notes,status,updated_at
+      ) values(
+        ${access.school_id},${access.teacher_account_id},${canonicalId}::uuid,${st.platform_account_id},${guardianAccountId},
+        ${privateCode},${st.full_name},${st.phone||null},${parentName},${parentPhone},
+        0,0,false,current_date,'ترحيل تلقائي من سجل الطالب القديم للقاعة الخاصة','active',now()
+      )
+      on conflict(teacher_account_id,private_code)
+      do update set
+        group_id=excluded.group_id,
+        platform_account_id=excluded.platform_account_id,
+        guardian_account_id=coalesce(excluded.guardian_account_id,teacher_private_students.guardian_account_id),
+        full_name=excluded.full_name,
+        phone=coalesce(excluded.phone,teacher_private_students.phone),
+        status='active',
+        updated_at=now()
+      returning id`;
+      if(ins.length)created++;
+    }catch{}
+  }
+  return created;
+}
+
 async function materializeLegacyPrivateStudentFromMail(a,token,preferredGroupId=null){
   if(!a?.account_id||!token)return null;
   const existing=(await sql`select id,teacher_account_id,group_id,platform_account_id
@@ -703,6 +802,9 @@ async function custom(action,a,p){
     const gid=String(p.p_group_id||'');
     const access=await privateRoomAccess(a,gid,true);
     if(!access)throw new Error('group_access_denied');
+    if(String(access.teacher_account_id)===String(a.account_id)){
+      await materializeLegacyPrivateStudentsForRoom(access);
+    }
     return await sql`select
       m.id message_id,m.sender_account_id,m.body,
       m.attachment_name,m.attachment_mime,m.attachment_base64,m.created_at,
@@ -734,6 +836,8 @@ async function custom(action,a,p){
     const onDate=String(p.p_on_date||new Date().toISOString().slice(0,10));
     const access=await privateRoomAccess(a,gid,false);
     if(!access)throw new Error('group_access_denied');
+
+    await materializeLegacyPrivateStudentsForRoom(access);
 
     return await sql`select
       ps.id student_id,
