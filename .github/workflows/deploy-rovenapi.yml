@@ -15,7 +15,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY || vars.NEON_API_KEY }}
       NEON_BRANCH_ID: br-round-hall-b5qw20e0
       NEON_FUNCTION_SLUG: rovenapi
     steps:
