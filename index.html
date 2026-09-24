@@ -3460,6 +3460,7 @@
 
     document.getElementById('teacherHubName').textContent='أ/ '+(ctx.display_name||'المعلم');
     document.getElementById('teacherHubCode').textContent=ctx.account_code||'—';
+    await resolveTeacherRoomAdmin().catch(()=>{});
 
     const results=await Promise.allSettled([
       dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}),
@@ -3616,6 +3617,31 @@
     if(add)openPrivateStudentModal(null,add.dataset.id);
   });
 
+  const resolveTeacherRoomAdmin=async(force=false)=>{
+    const input=document.getElementById('teacherRoomAdmin');
+    if(!force&&input?.value)return input.value;
+    let contacts=[];
+    try{
+      const r=await dataApiFetch('/rpc/platform_direct_chat_contacts',{method:'POST',body:'{}'});
+      contacts=Array.isArray(r)?r:[];
+    }catch{}
+    let manager=contacts.find(x=>x.internal_email&&String(x.role||'')==='super_admin')
+      ||contacts.find(x=>x.internal_email&&String(x.role||'')==='school_manager')
+      ||contacts.find(x=>x.internal_email&&String(x.account_type||'')==='admin')
+      ||contacts.find(x=>x.internal_email&&['academic_admin','secretary','reception'].includes(String(x.role||'')));
+    if(!manager){
+      try{
+        const r=await dataApiFetch('/rpc/platform_list_directory',{method:'POST',body:'{}'});
+        const rows=Array.isArray(r)?r:[];
+        manager=rows.find(x=>x.internal_email&&String(x.role||'')==='super_admin')
+          ||rows.find(x=>x.internal_email&&String(x.role||'')==='school_manager')
+          ||rows.find(x=>x.internal_email&&String(x.account_type||'')==='admin');
+      }catch{}
+    }
+    if(input)input.value=manager?.internal_email||'';
+    return manager?.internal_email||'';
+  };
+
   document.getElementById('teacherRoomRequestForm').addEventListener('submit',async e=>{
     e.preventDefault();
     const msg=document.getElementById('teacherRoomMsg');msg.className='student-form-msg';
@@ -3638,9 +3664,9 @@
       notes:document.getElementById('teacherRoomNotes').value.trim()||null,
       requested_at:new Date().toISOString()
     };
-    const recipient=document.getElementById('teacherRoomAdmin').value;
+    const recipient=await resolveTeacherRoomAdmin(true);
     payload.management_internal_email=payload.management_mode==='roven'?recipient:null;
-    if(!recipient){msg.textContent='تعذر تحديد حساب مدير النظام. تواصل مع إدارة ROVEN.';msg.className='student-form-msg error show';return}
+    if(!recipient){msg.textContent='لا يوجد حساب إدارة نشط يمكن إرسال طلب القاعة إليه. فعّل حساب مدير النظام أو مدير المدرسة ثم أعد المحاولة.';msg.className='student-form-msg error show';return}
     if(!payload.room_name||!payload.subject||!payload.capacity){msg.textContent='اكتب اسم القاعة والمادة وعدد الطلاب المطلوب.';msg.className='student-form-msg error show';return}
     try{
       await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
