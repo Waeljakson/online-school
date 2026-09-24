@@ -124,6 +124,17 @@ async function ensureSchema(){
     )`;
     await sql`create index if not exists pgm2_group_created_idx
       on public.platform_group_messages_v2(school_id,group_id,created_at)`;
+    await sql`create table if not exists public.platform_parent_student_links(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      parent_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      student_id uuid not null references public.students(id) on delete cascade,
+      relationship text,
+      created_at timestamptz not null default now(),
+      unique(parent_account_id,student_id)
+    )`;
+    await sql`create index if not exists ppsl_parent_idx
+      on public.platform_parent_student_links(school_id,parent_account_id,created_at desc)`;
     await sql`create table if not exists public.platform_certificates(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -925,7 +936,49 @@ async function custom(action,a,p){
     if(resolvedParentId){
       schoolStudentIds=(await sql`select student_id from public.student_parents where parent_id=${resolvedParentId}`).map(x=>x.student_id);
     }
+
+    const directSchoolIds=(await sql`select student_id
+      from public.platform_parent_student_links
+      where school_id=${a.school_id} and parent_account_id=${a.account_id}`).map(x=>x.student_id);
+    schoolStudentIds=[...new Set([...schoolStudentIds.map(String),...directSchoolIds.map(String)])];
+
     privateIds=(await sql`select id from public.teacher_private_students where guardian_account_id=${a.account_id} and status='active'`).map(x=>x.id);
+
+    // Repair private guardian links by the parent name when the old registrar created
+    // the account but did not persist guardian_account_id.
+    if(!privateIds.length && String(a.display_name||'').trim()){
+      const privateMatches=await sql`select id
+        from public.teacher_private_students
+        where school_id=${a.school_id}
+          and status='active'
+          and guardian_account_id is null
+          and lower(trim(coalesce(parent_name,'')))=lower(trim(${String(a.display_name||'')}))`;
+      if(privateMatches.length===1){
+        await sql`update public.teacher_private_students
+          set guardian_account_id=${a.account_id},updated_at=now()
+          where id=${privateMatches[0].id}`;
+        privateIds=[privateMatches[0].id];
+      }
+    }
+
+    // Clean-install bootstrap: after test-data purge, if this is the only active parent
+    // account and there is exactly one active school student, bind them once.
+    if(!schoolStudentIds.length && !privateIds.length && a.account_type==='parent'){
+      const parentCount=Number((await sql`select count(*)::int n
+        from public.platform_accounts
+        where school_id=${a.school_id} and account_type='parent' and is_active=true`)[0]?.n||0);
+      const studentRows=await sql`select id from public.students
+        where school_id=${a.school_id} and status='active'
+        order by joined_on desc nulls last,id desc
+        limit 2`;
+      if(parentCount===1 && studentRows.length===1){
+        await sql`insert into public.platform_parent_student_links(
+          school_id,parent_account_id,student_id,relationship
+        ) values(${a.school_id},${a.account_id},${studentRows[0].id},'guardian')
+        on conflict(parent_account_id,student_id) do nothing`;
+        schoolStudentIds=[String(studentRows[0].id)];
+      }
+    }
 
     const schoolStudents=schoolStudentIds.length?await sql`select s.id,s.student_no,s.full_name,g.name grade_name,
       coalesce((select sum(i.balance) from public.invoices i where i.student_id=s.id and i.status<>'void'),0) balance,
@@ -1839,6 +1892,39 @@ export default{
           session_expires_at:session.expires_at
         };
         return json(await decorateLogin(result),200,o);
+      }
+
+      if(action==='register_new_student'){
+        const rows=await sql`select public.roven_rpc('register_new_student',${token},${JSON.stringify(p)}::jsonb) result`;
+        const result=rows[0]?.result??null;
+        const rr=Array.isArray(result)?result[0]:result;
+        const studentId=rr?.student_id||null;
+        const parentUsername=String(rr?.parent_username||'').trim();
+
+        if(studentId && parentUsername){
+          const student=(await sql`select id,school_id from public.students
+            where id=${studentId}::uuid limit 1`)[0]||null;
+          if(student){
+            const parentAccount=(await sql`select id
+              from public.platform_accounts
+              where school_id=${student.school_id}
+                and account_type='parent'
+                and lower(coalesce(username,''))=lower(${parentUsername})
+                and is_active=true
+              order by created_at desc
+              limit 1`)[0]||null;
+            if(parentAccount){
+              await sql`insert into public.platform_parent_student_links(
+                school_id,parent_account_id,student_id,relationship
+              ) values(
+                ${student.school_id},${parentAccount.id},${student.id},
+                ${String(p.p_relationship||'guardian')}
+              ) on conflict(parent_account_id,student_id)
+                do update set relationship=excluded.relationship`;
+            }
+          }
+        }
+        return json(result,200,o);
       }
 
       if(action==='platform_list_groups'){
