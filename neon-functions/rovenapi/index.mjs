@@ -1303,8 +1303,55 @@ export default{
       const p=b?.payload&&typeof b.payload==='object'?b.payload:{};
 
       if(action==='platform_login'){
-        const rows=await sql`select public.roven_rpc('platform_login',${token},${JSON.stringify(p)}::jsonb) result`;
-        return json(await decorateLogin(rows[0]?.result??null),200,o);
+        let legacyResult=null,legacyError=null;
+        try{
+          const rows=await sql`select public.roven_rpc('platform_login',${token},${JSON.stringify(p)}::jsonb) result`;
+          legacyResult=rows[0]?.result??null;
+        }catch(e){
+          legacyError=e;
+        }
+        if(legacyResult?.account_id){
+          return json(await decorateLogin(legacyResult),200,o);
+        }
+
+        const identity=String(p.p_identity||'').trim();
+        const password=String(p.p_password||'');
+        if(!identity||!password){
+          return json({error:'invalid_credentials'},401,o);
+        }
+
+        const accounts=await sql`select
+          a.id account_id,a.school_id,a.account_type,a.student_id,a.teacher_id,a.parent_id,a.app_user_id,
+          a.account_code,a.username,a.internal_email,a.display_name,u.role
+          from public.platform_accounts a
+          left join public.app_users u on u.id=a.app_user_id and u.is_active=true
+          where a.is_active=true
+            and (
+              lower(coalesce(a.username,''))=lower(${identity})
+              or lower(coalesce(a.internal_email,''))=lower(${identity})
+              or lower(coalesce(a.account_code,''))=lower(${identity})
+            )
+            and a.password_hash is not null
+            and a.password_hash=crypt(${password},a.password_hash)
+          order by a.updated_at desc nulls last
+          limit 1`;
+
+        const account=accounts[0]||null;
+        if(!account){
+          const legacyMessage=String(legacyError?.message||'');
+          return json({error:legacyMessage||'invalid_credentials'},401,o);
+        }
+
+        const session=(await sql`insert into public.platform_sessions(account_id)
+          values(${account.account_id})
+          returning token,created_at,expires_at`)[0];
+
+        const result={
+          ...account,
+          session_token:session.token,
+          session_expires_at:session.expires_at
+        };
+        return json(await decorateLogin(result),200,o);
       }
 
       const customActions=new Set([
