@@ -365,11 +365,40 @@ async function reconcileSinglePrivateRoomByAccount(accountId){
   if(rooms.length!==1)return ps;
 
   const room=rooms[0];
+
+  // If the contracted room has no meeting link, recover it from an old duplicate
+  // group with the same name that belongs to the same teacher.
+  if(!room.meeting_url){
+    const teacher=(await sql`select teacher_id
+      from public.platform_accounts
+      where id=${ps.teacher_account_id}
+      limit 1`)[0]||null;
+    if(teacher?.teacher_id){
+      const legacyMeeting=(await sql`select g.meeting_url,g.meeting_provider
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        where c.teacher_id=${teacher.teacher_id}
+          and g.id<>${room.group_id}
+          and lower(trim(g.name))=lower(trim(${room.group_name}))
+          and g.meeting_url is not null
+          and length(trim(g.meeting_url))>0
+        order by g.id
+        limit 1`)[0]||null;
+      if(legacyMeeting?.meeting_url){
+        await sql`update public.study_groups
+          set meeting_url=${legacyMeeting.meeting_url},
+              meeting_provider=coalesce(${legacyMeeting.meeting_provider||null},meeting_provider)
+          where id=${room.group_id}`;
+      }
+    }
+  }
+
   if(String(ps.group_id||'')!==String(room.group_id)){
-    // Preserve a meeting link that may have been saved on the old duplicate group.
+    // Preserve a meeting link that may have been saved on the exact old group id.
     const oldGroup=ps.group_id?(await sql`select meeting_url,meeting_provider
       from public.study_groups where id=${ps.group_id} limit 1`)[0]||null:null;
-    if(!room.meeting_url && oldGroup?.meeting_url){
+    const currentRoom=(await sql`select meeting_url from public.study_groups where id=${room.group_id}`)[0]||null;
+    if(!currentRoom?.meeting_url && oldGroup?.meeting_url){
       await sql`update public.study_groups
         set meeting_url=${oldGroup.meeting_url},
             meeting_provider=coalesce(${oldGroup.meeting_provider||null},meeting_provider)
