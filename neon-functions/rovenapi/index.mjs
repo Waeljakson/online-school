@@ -248,6 +248,8 @@ async function ensureSchema(){
       sold_at timestamptz not null default now(),
       note text
     )`;
+    await sql`alter table public.study_groups add column if not exists meeting_started_at timestamptz`;
+    await sql`alter table public.study_groups add column if not exists meeting_ended_at timestamptz`;
     await sql`create index if not exists tps_teacher_idx on public.teacher_private_students(teacher_account_id,status)`;
     await sql`create index if not exists cert_student_idx on public.platform_certificates(student_id,issued_at desc)`;
     await sql`create index if not exists exam_owner_idx on public.platform_exams(owner_account_id,created_at desc)`;
@@ -2059,7 +2061,7 @@ async function custom(action,a,p){
 
     const room=(await sql`select
       g.id group_id,g.name group_name,g.schedule_json,
-      g.meeting_url,g.meeting_provider
+      g.meeting_url,g.meeting_provider,g.meeting_started_at,g.meeting_ended_at
       from public.study_groups g
       where g.id=${gid}::uuid
       limit 1`)[0];
@@ -2107,9 +2109,12 @@ async function custom(action,a,p){
     if(url&&!/^https:\/\//i.test(url))throw new Error('invalid_meeting_url');
 
     return (await sql`update public.study_groups
-      set meeting_provider=${provider},meeting_url=${url}
+      set meeting_provider=${provider},
+          meeting_url=${url},
+          meeting_started_at=case when ${url}::text is not null then now() else meeting_started_at end,
+          meeting_ended_at=case when ${url}::text is null then now() else null end
       where id=${gid}::uuid
-      returning id group_id,name group_name,meeting_provider,meeting_url`)[0];
+      returning id group_id,name group_name,meeting_provider,meeting_url,meeting_started_at,meeting_ended_at`)[0];
   }
 
   if(action==='admin_accounts_all'){
@@ -2574,7 +2579,9 @@ export default{
                 ) subject_name,
                 g.schedule_json,
                 g.meeting_url,
-                g.meeting_provider
+                g.meeting_provider,
+                g.meeting_started_at,
+                g.meeting_ended_at
               from public.study_groups g
               left join public.courses c on c.id=g.course_id
               where g.id=any(${ids}::uuid[])`:[];
@@ -2588,7 +2595,9 @@ export default{
               subject_name:byId.get(String(g.group_id))?.subject_name||null,
               schedule_json:byId.get(String(g.group_id))?.schedule_json||null,
               meeting_url:byId.get(String(g.group_id))?.meeting_url||null,
-              meeting_provider:byId.get(String(g.group_id))?.meeting_provider||null
+              meeting_provider:byId.get(String(g.group_id))?.meeting_provider||null,
+              meeting_started_at:byId.get(String(g.group_id))?.meeting_started_at||null,
+              meeting_ended_at:byId.get(String(g.group_id))?.meeting_ended_at||null
             }));
             return json(rows,200,o);
           }
