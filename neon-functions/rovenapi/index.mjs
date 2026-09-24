@@ -303,10 +303,16 @@ async function actorFromToken(token){
     order by s.created_at desc limit 1`;
   if(r.length)return r[0];
   r=await sql`select
-      a.id account_id,u.school_id,coalesce(a.account_type,'admin') account_type,
-      a.student_id,a.teacher_id,a.parent_id,a.app_user_id,
-      a.account_code,a.username,a.display_name,a.internal_email,
-      u.role,s."expiresAt" session_expires_at
+      a.id account_id,
+      u.school_id,
+      coalesce(a.account_type,case when u.role in ('super_admin','school_manager') then 'admin' else 'staff' end) account_type,
+      a.student_id,a.teacher_id,a.parent_id,coalesce(a.app_user_id,u.id) app_user_id,
+      a.account_code,
+      a.username,
+      coalesce(a.display_name,to_jsonb(u)->>'full_name',to_jsonb(u)->>'name',to_jsonb(u)->>'email','ROVEN') display_name,
+      coalesce(a.internal_email,to_jsonb(u)->>'email') internal_email,
+      u.role,
+      s."expiresAt" session_expires_at
     from neon_auth.session s
     join public.app_users u on u.auth_user_id=s."userId"::text and u.is_active=true
     left join public.platform_accounts a on a.app_user_id=u.id and a.is_active=true
