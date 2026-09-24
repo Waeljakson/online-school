@@ -432,6 +432,143 @@ async function reconcileSinglePrivateRoomByAccount(accountId){
   return ps;
 }
 
+async function materializeLegacyPrivateStudentFromMail(a,token,preferredGroupId=null){
+  if(!a?.account_id||!token)return null;
+  const existing=(await sql`select id,teacher_account_id,group_id,platform_account_id
+    from public.teacher_private_students
+    where platform_account_id=${a.account_id} and status='active'
+    order by updated_at desc nulls last
+    limit 1`)[0]||null;
+  if(existing)return existing;
+  if(String(a.account_type||'')!=='student')return null;
+
+  let mails=[];
+  try{
+    const mailRpc=await sql`select public.roven_rpc(
+      'platform_mail_list',
+      ${token},
+      ${JSON.stringify({p_folder:'inbox'})}::jsonb
+    ) result`;
+    mails=Array.isArray(mailRpc[0]?.result)?mailRpc[0].result:[];
+  }catch{
+    return null;
+  }
+
+  const links=mails
+    .filter(m=>String(m?.subject||'').startsWith('[PRIVATE_STUDENT_LINK]'))
+    .map(m=>{
+      let body=m?.body;
+      if(typeof body==='string'){
+        try{body=JSON.parse(body)}catch{body={}}
+      }
+      return {...(body&&typeof body==='object'?body:{}),_sent_at:m?.sent_at||null};
+    })
+    .filter(x=>x.group_id||x.teacher_internal_email)
+    .sort((x,y)=>{
+      const px=preferredGroupId&&String(x.group_id)===String(preferredGroupId)?1:0;
+      const py=preferredGroupId&&String(y.group_id)===String(preferredGroupId)?1:0;
+      if(px!==py)return py-px;
+      return new Date(y.linked_at||y._sent_at||0)-new Date(x.linked_at||x._sent_at||0);
+    });
+
+  const link=links[0]||null;
+  if(!link)return null;
+
+  let teacherAccount=null;
+  if(link.teacher_internal_email){
+    teacherAccount=(await sql`select id,school_id,display_name
+      from public.platform_accounts
+      where account_type='teacher'
+        and is_active=true
+        and lower(coalesce(internal_email,''))=lower(${String(link.teacher_internal_email)})
+      order by updated_at desc nulls last
+      limit 1`)[0]||null;
+  }
+  if(!teacherAccount&&link.group_id){
+    teacherAccount=(await sql`select pa.id,pa.school_id,pa.display_name
+      from public.teacher_room_management trm
+      join public.platform_accounts pa on pa.id=trm.teacher_account_id
+      where trm.group_id=${String(link.group_id)}::uuid
+        and trm.is_active=true
+        and pa.is_active=true
+      limit 1`)[0]||null;
+  }
+  if(!teacherAccount)return null;
+
+  const oldGroup=link.group_id?(await sql`select id,name
+    from public.study_groups where id=${String(link.group_id)}::uuid limit 1`)[0]||null:null;
+  const wantedName=String(link.group_name||oldGroup?.name||'').trim();
+
+  let rooms=await sql`select trm.group_id,trm.school_id,trm.teacher_account_id,trm.updated_at,g.name group_name
+    from public.teacher_room_management trm
+    join public.study_groups g on g.id=trm.group_id
+    where trm.teacher_account_id=${teacherAccount.id}
+      and trm.is_active=true
+    order by trm.updated_at desc nulls last`;
+
+  let room=rooms.find(x=>String(x.group_id)===String(link.group_id||preferredGroupId||''))||null;
+  if(!room&&preferredGroupId)room=rooms.find(x=>String(x.group_id)===String(preferredGroupId))||null;
+  if(!room&&wantedName)room=rooms.find(x=>String(x.group_name||'').trim().toLowerCase()===wantedName.toLowerCase())||null;
+  if(!room&&rooms.length===1)room=rooms[0];
+  if(!room)return null;
+
+  const account=(await sql`select account_code,username,display_name,student_id
+    from public.platform_accounts where id=${a.account_id} limit 1`)[0]||{};
+  const schoolStudent=a.student_id?(await sql`select full_name,phone
+    from public.students where id=${a.student_id} limit 1`)[0]||null:null;
+
+  let parentName=null,parentPhone=null,guardianAccountId=null;
+  if(a.student_id){
+    const parent=(await sql`select pr.id parent_id,
+        coalesce(to_jsonb(pr)->>'full_name','') full_name,
+        coalesce(to_jsonb(pr)->>'phone','') phone,
+        pa.id guardian_account_id
+      from public.student_parents sp
+      join public.parents pr on pr.id=sp.parent_id
+      left join public.platform_accounts pa
+        on pa.parent_id=pr.id and pa.is_active=true
+      where sp.student_id=${a.student_id}
+      limit 1`)[0]||null;
+    if(parent){
+      parentName=parent.full_name||null;
+      parentPhone=parent.phone||null;
+      guardianAccountId=parent.guardian_account_id||null;
+    }
+  }
+
+  const privateCode=String(account.account_code||account.username||('TPS-MIG-'+String(a.account_id).slice(0,8))).slice(0,80);
+  try{
+    return (await sql`insert into public.teacher_private_students(
+      school_id,teacher_account_id,group_id,platform_account_id,guardian_account_id,
+      private_code,full_name,phone,parent_name,parent_phone,monthly_fee,books_fee,books_free,joined_on,notes,status,updated_at
+    ) values(
+      ${room.school_id||teacherAccount.school_id},${teacherAccount.id},${room.group_id},
+      ${a.account_id},${guardianAccountId},
+      ${privateCode},${schoolStudent?.full_name||account.display_name||a.display_name||'طالب'},
+      ${schoolStudent?.phone||null},${parentName},${parentPhone},
+      0,0,false,current_date,'ترحيل تلقائي من PRIVATE_STUDENT_LINK','active',now()
+    )
+    on conflict(teacher_account_id,private_code)
+    do update set
+      group_id=excluded.group_id,
+      platform_account_id=excluded.platform_account_id,
+      guardian_account_id=coalesce(excluded.guardian_account_id,teacher_private_students.guardian_account_id),
+      full_name=excluded.full_name,
+      phone=coalesce(excluded.phone,teacher_private_students.phone),
+      parent_name=coalesce(excluded.parent_name,teacher_private_students.parent_name),
+      parent_phone=coalesce(excluded.parent_phone,teacher_private_students.parent_phone),
+      status='active',
+      updated_at=now()
+    returning id,teacher_account_id,group_id,platform_account_id`)[0]||null;
+  }catch{
+    const byAccount=(await sql`select id,teacher_account_id,group_id,platform_account_id
+      from public.teacher_private_students
+      where platform_account_id=${a.account_id} and status='active'
+      limit 1`)[0]||null;
+    return byAccount;
+  }
+}
+
 async function privateRoomAccess(a,groupId,requireChat=false){
   const gid=String(groupId||'');
   if(!gid)return null;
@@ -2106,6 +2243,7 @@ export default{
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
 
+        await materializeLegacyPrivateStudentFromMail(a,token,null);
         const directGroups=await custom('platform_groups_list_local',a,p);
         if(Array.isArray(directGroups)&&directGroups.length)return json(directGroups,200,o);
 
@@ -2305,6 +2443,7 @@ export default{
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
         const gid=String(p.p_group_id||'');
+        await materializeLegacyPrivateStudentFromMail(a,token,gid);
         const room=await privateRoomAccess(a,gid,false);
         if(room){
           const mapped=action==='platform_attendance_roster'
@@ -2318,6 +2457,7 @@ export default{
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
         const gid=String(p.p_group_id||'');
+        await materializeLegacyPrivateStudentFromMail(a,token,gid);
         const room=await privateRoomAccess(a,gid,true);
         if(room){
           const mapped=action==='platform_group_chat_list'?'platform_group_chat_list_v2':'platform_group_chat_send_v2';
