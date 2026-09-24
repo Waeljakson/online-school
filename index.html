@@ -3452,6 +3452,169 @@
     }
   });
 
+
+  const loadTeacherHub=async()=>{
+    const ctx=await hydratePlatformContext();
+    if(ctx?.account_type!=='teacher')return;
+
+    document.getElementById('teacherHubName').textContent='أ/ '+(ctx.display_name||'المعلم');
+    document.getElementById('teacherHubCode').textContent=ctx.account_code||'—';
+
+    const results=await Promise.allSettled([
+      dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/teacher_room_contracts_list',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/teacher_private_students_list',{method:'POST',body:'{}'}),
+      dataApiFetch('/rpc/teacher_assistants_list',{method:'POST',body:'{}'}),
+      structuredMail('inbox'),
+      structuredMail('sent')
+    ]);
+
+    teacherHubGroupsCache=results[0].status==='fulfilled'&&Array.isArray(results[0].value)?results[0].value:[];
+    teacherPrivateStudentsCache=results[2].status==='fulfilled'&&Array.isArray(results[2].value)?results[2].value:[];
+    const inbox=results[4].status==='fulfilled'&&Array.isArray(results[4].value)?results[4].value:[];
+    const sent=results[5].status==='fulfilled'&&Array.isArray(results[5].value)?results[5].value:[];
+
+    if(results[1].status==='fulfilled'&&Array.isArray(results[1].value)){
+      teacherRoomContractsCache=results[1].value;
+    }else{
+      const created=latestStructuredBy(inbox,'ROOM_CREATED','request_id');
+      teacherRoomContractsCache=created.filter(x=>x.group_id).map(x=>{
+        return {
+          group_id:x.group_id,
+          group_name:x.group_name,
+          capacity:Number(x.capacity||0)||null,
+          agreed_price:Number(x.agreed_price||0),
+          pricing_basis:x.pricing_basis||'monthly',
+          management_mode:x.management_mode||'teacher',
+          current_private_students:teacherPrivateStudentsCache.filter(st=>String(st.group_id)===String(x.group_id)).length
+        };
+      });
+    }
+    teacherRoomContractsCache=teacherRoomContractsCache.map(c=>{
+      const used=teacherPrivateStudentsCache.filter(st=>String(st.group_id)===String(c.group_id)).length;
+      return {...c,current_private_students:Number(c.current_private_students??used)};
+    });
+    teacherPrivateGroupIds=new Set(teacherRoomContractsCache.map(x=>String(x.group_id)));
+
+    const assistantRows=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[];
+    teacherAssistantLinksCache=assistantRows.map(x=>{
+      const ids=Array.isArray(x.group_ids)?x.group_ids.map(String):[];
+      return {...x,request_id:x.link_id,assistant_name:x.display_name,groups:teacherRoomContractsCache.filter(g=>ids.includes(String(g.group_id)))};
+    });
+    if(typeof renderTeacherAssistants==='function')renderTeacherAssistants();
+
+    document.getElementById('teacherStudentsCount').textContent=String(teacherPrivateStudentsCache.length);
+    document.getElementById('teacherGroupsCount').textContent=String(teacherHubGroupsCache.length);
+    document.getElementById('teacherWeeklyCount').textContent=String(teacherHubGroupsCache.reduce((n,g)=>n+parseScheduleSessions(g.schedule_json).length,0));
+    document.getElementById('teacherAssignedStudentsCount').textContent=String(teacherHubGroupsCache.reduce((n,g)=>n+Number(g.students_count||0),0));
+
+    let due=0,paid=0,debtors=0;
+    teacherPrivateStudentsCache.forEach(st=>{
+      const d=Number(st.monthly_fee||0),p=Number(st.month_paid||0);
+      due+=d;paid+=p;if(d-p>0.001)debtors++;
+    });
+    document.getElementById('privateFeesDueMonth').textContent=due.toFixed(2);
+    document.getElementById('privateFeesCollectedMonth').textContent=paid.toFixed(2);
+    document.getElementById('privateFeesRemainingMonth').textContent=Math.max(0,due-paid).toFixed(2);
+    document.getElementById('privateStudentsWithBalance').textContent=String(debtors);
+
+    const privateBody=document.getElementById('teacherPrivateStudentsRows');
+    if(teacherPrivateStudentsCache.length){
+      privateBody.innerHTML=teacherPrivateStudentsCache.map(st=>{
+        const id=st.id||st.private_student_id;
+        const roomInfo=st.room_capacity?(Number(st.room_students_count||0)+' / '+Number(st.room_capacity)):'سعة غير محددة';
+        return '<tr>'+
+          '<td><b>'+escapeHtml(st.private_code||'—')+'</b></td>'+
+          '<td><b>'+escapeHtml(st.full_name||'طالب')+'</b></td>'+
+          '<td>'+escapeHtml(st.group_name||'—')+'<br><span style="font-size:9px;color:var(--muted)">'+escapeHtml(roomInfo)+'</span></td>'+
+          '<td>'+Number(st.monthly_fee||0).toFixed(2)+'</td>'+
+          '<td class="paid">'+Number(st.month_paid||0).toFixed(2)+'</td>'+
+          '<td class="due">'+Math.max(0,Number(st.monthly_fee||0)-Number(st.month_paid||0)).toFixed(2)+'</td>'+
+          '<td>'+escapeHtml(st.parent_name||'—')+'<br><span style="font-size:9px;color:var(--muted)">'+escapeHtml(st.parent_phone||'')+'</span></td>'+
+          '<td><button class="secondary-action edit-private-student" type="button" data-id="'+escapeHtml(id)+'">تعديل</button></td>'+
+        '</tr>';
+      }).join('');
+    }else{
+      privateBody.innerHTML='<tr><td colspan="8" class="students-empty">لا يوجد طلاب خاصون بعد.</td></tr>';
+    }
+
+    let groupHtml='';
+    teacherHubGroupsCache.forEach(g=>{
+      const contract=teacherRoomContractsCache.find(c=>String(c.group_id)===String(g.group_id));
+      let contractHtml='';
+      if(contract){
+        const cap=roomCapacitySummary(contract);
+        contractHtml='<div class="room-contract-card"><div class="room-contract-grid">'+
+          '<div><span>السعة</span><b>'+escapeHtml(cap.cap||'—')+'</b></div>'+
+          '<div><span>المستخدم</span><b>'+cap.used+'</b></div>'+
+          '<div><span>المتاح</span><b class="'+(cap.full?'capacity-full':'capacity-ok')+'">'+escapeHtml(cap.remaining===null?'—':cap.remaining)+'</b></div>'+
+          '<div><span>السعر</span><b>'+Number(contract.agreed_price||0).toFixed(2)+'</b></div>'+
+          '<div><span>طريقة الحساب</span><b>'+escapeHtml(roomPricingText(contract.pricing_basis))+'</b></div>'+
+        '</div></div>';
+      }
+      groupHtml+='<div class="teacher-hub-group"><div><b>'+escapeHtml(g.group_name||'قاعة')+'</b><span>'+escapeHtml(g.subject_name||'')+(contract?' • قاعة خاصة':'')+'</span>'+contractHtml+'</div>'+
+        '<div class="room-actions"><button class="secondary-action teacher-open-room" data-id="'+escapeHtml(g.group_id)+'" type="button">تجهيز الحصة / الشات</button>'+
+        (contract?'<button class="primary-action teacher-add-private-room" data-id="'+escapeHtml(g.group_id)+'" type="button">＋ إضافة طالب</button>':'')+'</div></div>';
+    });
+    document.getElementById('teacherHubGroups').innerHTML=groupHtml||'<div class="students-empty">لا توجد قاعات مرتبطة بحسابك.</div>';
+
+    fillPrivateGroupSelect('');
+    const assistantSelect=document.getElementById('assistantRequestGroups');
+    assistantSelect.innerHTML=teacherRoomContractsCache.map(g=>'<option value="'+escapeHtml(g.group_id)+'">'+escapeHtml(g.group_name||'قاعة')+'</option>').join('');
+
+    const taught=latestStructuredBy(sent,'TAUGHT_LESSON','date');
+    document.getElementById('teacherTaughtCount').textContent=String(taught.length);
+
+    const finance=latestStructuredBy(sent,'TEACHER_FINANCE','entry_id');
+    const income=finance.filter(x=>x.type==='income').reduce((n,x)=>n+Number(x.amount||0),0);
+    const expense=finance.filter(x=>x.type==='expense').reduce((n,x)=>n+Number(x.amount||0),0);
+    document.getElementById('teacherIncomeTotal').textContent=income.toFixed(2);
+    document.getElementById('teacherExpenseTotal').textContent=expense.toFixed(2);
+    document.getElementById('teacherNetTotal').textContent=(income-expense).toFixed(2);
+    document.getElementById('teacherExpectedTotal').textContent=teacherRoomContractsCache.filter(x=>x.pricing_basis==='monthly').reduce((n,x)=>n+Number(x.agreed_price||0),0).toFixed(2);
+
+    document.getElementById('teacherFinanceRows').innerHTML=finance.length?finance.slice().reverse().slice(0,30).map(x=>{
+      return '<tr><td>'+escapeHtml(x.date||'')+'</td><td>'+(x.type==='income'?'إيراد':'مصروف')+'</td><td>'+escapeHtml(x.category||'')+'</td><td>'+escapeHtml(x.note||'—')+'</td><td>'+Number(x.amount||0).toFixed(2)+'</td></tr>';
+    }).join(''):'<tr><td colspan="5" class="students-empty">لا توجد حركات مالية بعد.</td></tr>';
+
+    const requests=latestStructuredBy(sent,'ROOM_REQUEST','request_id');
+    const responses=latestStructuredBy(inbox,'ROOM_RESPONSE','request_id');
+    const created=latestStructuredBy(inbox,'ROOM_CREATED','request_id');
+    const responseMap=new Map();
+    responses.forEach(x=>responseMap.set(String(x.request_id),x));
+    created.forEach(x=>responseMap.set(String(x.request_id),x));
+    const statusLabels={pending:'قيد المراجعة',approved:'تمت الموافقة',rejected:'مرفوض',created:'تم إنشاء القاعة'};
+    document.getElementById('teacherRoomRequestsRows').innerHTML=requests.length?requests.slice().reverse().map(r=>{
+      const z=responseMap.get(String(r.request_id)),status=z?.status||'pending';
+      return '<tr><td><b>'+escapeHtml(r.room_name||'قاعة')+'</b></td><td>'+escapeHtml(r.subject||'—')+'</td><td><b>'+escapeHtml(Number(z?.capacity||r.capacity||0)||'—')+'</b></td><td>'+Number(r.proposed_price||0).toFixed(2)+'</td><td>'+(z?Number(z.agreed_price||0).toFixed(2):'—')+'</td><td><span class="room-request-status '+escapeHtml(status)+'">'+escapeHtml(statusLabels[status]||status)+'</span></td></tr>';
+    }).join(''):'<tr><td colspan="6" class="students-empty">لا توجد طلبات بعد.</td></tr>';
+
+    const upcoming=[];
+    teacherHubGroupsCache.forEach(g=>parseScheduleSessions(g.schedule_json).forEach(x=>upcoming.push({g:g,s:x})));
+    document.getElementById('teacherUpcomingLessons').innerHTML=upcoming.length?upcoming.slice(0,8).map(x=>{
+      return '<div class="lesson"><time>'+escapeHtml(x.s.time||'')+'</time><div><strong>'+escapeHtml(x.g.subject_name||x.g.group_name||'حصة')+'</strong><span>'+escapeHtml(weekDayLabels[x.s.day]||x.s.day||'')+'</span></div></div>';
+    }).join(''):'<div class="students-empty">لا توجد مواعيد في الجداول الحالية.</div>';
+
+    if(typeof syncTeacherAssistants==='function')syncTeacherAssistants().catch(()=>{});
+  };
+
+  document.getElementById('refreshTeacherHub')?.addEventListener('click',loadTeacherHub);
+  document.getElementById('teacherPrivateStudentsRows')?.addEventListener('click',e=>{
+    const b=e.target.closest('.edit-private-student');if(!b)return;
+    const st=teacherPrivateStudentsCache.find(x=>String(x.id||x.private_student_id)===String(b.dataset.id));
+    if(st)openPrivateStudentModal(st,st.group_id);
+  });
+  document.getElementById('teacherHubGroups')?.addEventListener('click',e=>{
+    const room=e.target.closest('.teacher-open-room');
+    if(room){
+      const g=teacherHubGroupsCache.find(x=>String(x.group_id)===String(room.dataset.id));
+      if(g)openGroupRoom(g);
+      return;
+    }
+    const add=e.target.closest('.teacher-add-private-room');
+    if(add)openPrivateStudentModal(null,add.dataset.id);
+  });
+
   document.getElementById('teacherRoomRequestForm').addEventListener('submit',async e=>{
     e.preventDefault();
     const msg=document.getElementById('teacherRoomMsg');msg.className='student-form-msg';
