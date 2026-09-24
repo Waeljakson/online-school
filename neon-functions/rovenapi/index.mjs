@@ -817,7 +817,7 @@ async function custom(action,a,p){
       const privateGroups=await sql`select distinct
           trm.group_id,
           g.name group_name,
-          coalesce(t.full_name,a.display_name) teacher_name,
+          coalesce(t.full_name,${a.display_name||null}) teacher_name,
           null::text grade_name,
           0 sort_order
         from public.teacher_room_management trm
@@ -831,13 +831,12 @@ async function custom(action,a,p){
       const normalGroups=a.teacher_id?await sql`select distinct
           g.id group_id,
           g.name group_name,
-          coalesce(t.full_name,a.display_name) teacher_name,
-          gr.name grade_name,
+          coalesce(t.full_name,${a.display_name||null}) teacher_name,
+          null::text grade_name,
           1 sort_order
         from public.study_groups g
         join public.courses c on c.id=g.course_id
         left join public.teachers t on t.id=c.teacher_id
-        left join public.grades gr on gr.id=g.grade_id
         where c.teacher_id=${a.teacher_id}
           and g.school_id=${a.school_id}
           and coalesce(g.is_active,true)=true
