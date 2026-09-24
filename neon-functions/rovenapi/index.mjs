@@ -2483,6 +2483,45 @@ export default{
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
 
         await materializeLegacyPrivateStudentFromMail(a,token,null);
+
+        // Use the exact same source that powers attendance for teacher rooms,
+        // then enrich it with room details. This keeps "My groups" and attendance
+        // on the same canonical group ids.
+        if(a.account_type==='teacher'){
+          const attendanceGroups=await custom('platform_attendance_groups_local',a,{});
+          if(Array.isArray(attendanceGroups)&&attendanceGroups.length){
+            const ids=attendanceGroups.map(x=>String(x.group_id)).filter(Boolean);
+            const details=ids.length?await sql`select
+                g.id group_id,
+                g.name group_name,
+                coalesce(
+                  to_jsonb(c)->>'subject_name',
+                  to_jsonb(c)->>'name',
+                  to_jsonb(c)->>'title',
+                  to_jsonb(c)->>'subject'
+                ) subject_name,
+                g.schedule_json,
+                g.meeting_url,
+                g.meeting_provider
+              from public.study_groups g
+              left join public.courses c on c.id=g.course_id
+              where g.id=any(${ids}::uuid[])`:[];
+            const byId=new Map(details.map(x=>[String(x.group_id),x]));
+            const rows=attendanceGroups.map(g=>({
+              ...g,
+              ...(byId.get(String(g.group_id))||{}),
+              group_id:g.group_id,
+              group_name:g.group_name||byId.get(String(g.group_id))?.group_name,
+              teacher_name:g.teacher_name||a.display_name||null,
+              subject_name:byId.get(String(g.group_id))?.subject_name||null,
+              schedule_json:byId.get(String(g.group_id))?.schedule_json||null,
+              meeting_url:byId.get(String(g.group_id))?.meeting_url||null,
+              meeting_provider:byId.get(String(g.group_id))?.meeting_provider||null
+            }));
+            return json(rows,200,o);
+          }
+        }
+
         const directGroups=await custom('platform_groups_list_local',a,p);
         if(Array.isArray(directGroups)&&directGroups.length)return json(directGroups,200,o);
 
