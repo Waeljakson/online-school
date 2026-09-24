@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1720" />
+  <meta name="roven-build" content="20260924-1735" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1554,7 +1554,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1720';
+  window.__ROVEN_BUILD__='20260924-1735';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3860,9 +3860,13 @@
     const msg=document.getElementById('teacherRoomReviewMsg');msg.className='student-form-msg';
     const requestId=document.getElementById('reviewRoomRequestId').value;
     const recipient=document.getElementById('reviewRoomRecipient').value;
+    const requestRecord=adminRoomRequestCache.get(requestId)||{};
     const response={
       request_id:requestId,
       status:document.getElementById('reviewRoomStatus').value,
+      room_name:requestRecord.room_name||null,
+      subject:requestRecord.subject||null,
+      teacher_name:requestRecord.teacher_name||requestRecord.sender_name||null,
       capacity:Math.max(1,Number(document.getElementById('reviewRoomCapacity').value)||0),
       agreed_price:Number(document.getElementById('reviewRoomAgreedPrice').value)||0,
       pricing_basis:document.getElementById('reviewRoomPricing').value,
@@ -6411,12 +6415,14 @@
         });
         (inbox||[]).filter(m=>!m.read_at&&String(m.subject||'').startsWith('[ROOM_RESPONSE]')).forEach(m=>{
           const r=teacherSafeJson(m.body)||{};
+          const approved=r.status==='approved',rejected=r.status==='rejected';
+          const roomLabel=r.room_name?(' «'+r.room_name+'»'):'';
           items.push({
-            uid:'room-response:'+m.message_id,section:'teacherhub',messageId:m.message_id,count:1,icon:r.status==='approved'?'✅':'🏫',
-            title:r.status==='approved'?'تمت الموافقة على طلب القاعة':'تم تحديث طلب القاعة',
-            text:r.status==='approved'
-              ?('السعر المتفق: '+Number(r.agreed_price||0).toFixed(2)+' — '+String(teacherPricingLabel[r.pricing_basis]||''))
-              :(r.note||'راجع حالة الطلب من لوحة المعلم.'),
+            uid:'room-response:'+m.message_id,section:'teacherhub',messageId:m.message_id,count:1,icon:approved?'✅':(rejected?'❌':'🏫'),
+            title:approved?('تمت الموافقة على طلب فتح القاعة'+roomLabel):(rejected?('تم رفض طلب فتح القاعة'+roomLabel):'تم تحديث طلب القاعة'),
+            text:approved
+              ?('السعة '+Number(r.capacity||0)+' طالب — السعر المتفق '+Number(r.agreed_price||0).toFixed(2)+' — '+String(teacherPricingLabel[r.pricing_basis]||''))
+              :(rejected?(r.note||'تم رفض الطلب. يمكنك مراجعة إدارة ROVEN لمزيد من التفاصيل.'):(r.note||'راجع حالة الطلب من لوحة المعلم.')),
             time:m.sent_at
           });
         });
