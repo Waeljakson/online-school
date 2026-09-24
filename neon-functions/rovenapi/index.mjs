@@ -1362,8 +1362,20 @@ async function custom(action,a,p){
 
   if(action==='platform_set_group_meeting'){
     must(a,a.account_type==='teacher');
-    const gid=String(p.p_group_id||'');
-    if(!gid)throw new Error('group_id_required');
+    const requestedGid=String(p.p_group_id||'');
+    if(!requestedGid)throw new Error('group_id_required');
+
+    const activePrivateRooms=await sql`select group_id
+      from public.teacher_room_management
+      where teacher_account_id=${a.account_id} and is_active=true
+      order by updated_at desc`;
+
+    // For a teacher with one contracted room, that room is authoritative.
+    // This repairs old duplicate study_group ids that can still exist in the UI.
+    const gid=activePrivateRooms.length===1
+      ?String(activePrivateRooms[0].group_id)
+      :requestedGid;
+
     const contracted=await privateRoomAccess(a,gid,false);
     let owned=contracted;
     if(!owned && a.teacher_id){
@@ -1375,19 +1387,18 @@ async function custom(action,a,p){
     }
     if(!owned)throw new Error('group_not_owned_by_teacher');
 
-    const activePrivateRooms=await sql`select group_id
-      from public.teacher_room_management
-      where teacher_account_id=${a.account_id} and is_active=true`;
-    if(activePrivateRooms.length===1 && String(activePrivateRooms[0].group_id)===gid){
+    if(activePrivateRooms.length===1){
       await sql`update public.teacher_private_students
         set group_id=${gid}::uuid,updated_at=now()
-        where teacher_account_id=${a.account_id} and status='active'
+        where teacher_account_id=${a.account_id}
+          and status='active'
           and group_id is distinct from ${gid}::uuid`;
     }
 
     const provider=String(p.p_provider||'zoom');
     const url=p.p_url?String(p.p_url).trim():null;
     if(url&&!/^https:\/\//i.test(url))throw new Error('invalid_meeting_url');
+
     return (await sql`update public.study_groups
       set meeting_provider=${provider},meeting_url=${url}
       where id=${gid}::uuid
@@ -1691,6 +1702,71 @@ export default{
         }
 
         return json([],200,o);
+      }
+
+      if(action==='parent_dashboard'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+
+        let dashboard=await custom('parent_dashboard',a,p);
+        const hasChildren=(dashboard?.school_students?.length||0)+(dashboard?.private_students?.length||0);
+
+        if(!hasChildren && a.account_type==='parent'){
+          try{
+            const mailRpc=await sql`select public.roven_rpc(
+              'platform_mail_list',
+              ${token},
+              ${JSON.stringify({p_folder:'inbox'})}::jsonb
+            ) result`;
+            const mails=Array.isArray(mailRpc[0]?.result)?mailRpc[0].result:[];
+            const links=mails
+              .filter(m=>String(m?.subject||'').startsWith('[PRIVATE_PARENT_LINK]'))
+              .map(m=>{
+                let body=m?.body;
+                if(typeof body==='string'){
+                  try{body=JSON.parse(body)}catch{body={}}
+                }
+                return {...(body&&typeof body==='object'?body:{}),_sent_at:m?.sent_at||null};
+              })
+              .filter(x=>x.student_name||x.group_id)
+              .sort((x,y)=>new Date(y.linked_at||y._sent_at||0)-new Date(x.linked_at||x._sent_at||0));
+
+            const link=links[0]||null;
+            if(link){
+              let candidate=null;
+
+              if(link.group_id && link.student_name){
+                candidate=(await sql`select ps.id
+                  from public.teacher_private_students ps
+                  where ps.group_id=${String(link.group_id)}::uuid
+                    and ps.status='active'
+                    and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
+                  order by ps.updated_at desc nulls last
+                  limit 1`)[0]||null;
+              }
+
+              if(!candidate && link.student_name && link.teacher_internal_email){
+                candidate=(await sql`select ps.id
+                  from public.teacher_private_students ps
+                  join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
+                  where ps.status='active'
+                    and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
+                    and lower(coalesce(teacher.internal_email,''))=lower(${String(link.teacher_internal_email)})
+                  order by ps.updated_at desc nulls last
+                  limit 1`)[0]||null;
+              }
+
+              if(candidate?.id){
+                await sql`update public.teacher_private_students
+                  set guardian_account_id=${a.account_id},updated_at=now()
+                  where id=${candidate.id}`;
+                dashboard=await custom('parent_dashboard',a,p);
+              }
+            }
+          }catch{}
+        }
+
+        return json(dashboard,200,o);
       }
 
       if(action==='platform_group_chat_list' || action==='platform_group_chat_send'){
