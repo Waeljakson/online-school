@@ -1555,6 +1555,20 @@
 </div>
 <script>
   window.__ROVEN_BUILD__='20260924-1703';
+  const checkRovenBuild=async()=>{
+    try{
+      const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
+      if(!r.ok)return;
+      const v=await r.json();
+      if(v?.build&&String(v.build)!==String(window.__ROVEN_BUILD__)){
+        const u=new URL(location.href);
+        u.searchParams.set('roven_build',String(v.build));
+        location.replace(u.href);
+      }
+    }catch{}
+  };
+  setTimeout(checkRovenBuild,3000);
+  setInterval(checkRovenBuild,60000);
 (function(){
   const roles={
     student:{label:'اسم المستخدم أو رقم الطالب',placeholder:'أدخل اسم المستخدم أو رقم الطالب',button:'دخول الطالب',subtitle:'ادخل إلى حصصك وواجباتك واختباراتك ونتائجك.'},
