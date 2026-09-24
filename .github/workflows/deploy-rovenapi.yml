@@ -26,90 +26,79 @@ jobs:
         shell: bash
         run: |
           if [ -z "$NEON_API_KEY" ]; then
-            echo "::error::Repository secret NEON_API_KEY is missing."
+            echo "::error::NEON_API_KEY is missing."
             exit 1
           fi
 
-      - name: Resolve Neon project from branch
+      - name: Install Neon CLI
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS             -H "Authorization: Bearer $NEON_API_KEY"             "https://console.neon.tech/api/v2/projects?limit=400"             -o /tmp/neon-projects.json
+          npm install -g neon
+          neon --version
+
+      - name: Resolve Neon project from production branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          neon projects list --output json > /tmp/neon-projects.json
 
           PROJECT_ID="$(
             node <<'NODE'
-            const fs = require('fs');
-            const { execFileSync } = require('child_process');
-            const body = JSON.parse(fs.readFileSync('/tmp/neon-projects.json','utf8'));
-            const projects = Array.isArray(body.projects) ? body.projects : [];
-            const branchId = process.env.NEON_BRANCH_ID;
-            const key = process.env.NEON_API_KEY;
-            let found = '';
-            for (const p of projects) {
-              try {
-                execFileSync('curl', [
-                  '-fsS',
-                  '-H', 'Authorization: Bearer ' + key,
-                  'https://console.neon.tech/api/v2/projects/' + p.id + '/branches/' + branchId
-                ], { stdio: 'ignore' });
-                found = p.id;
-                break;
-              } catch {}
+            const fs=require('fs');
+            const cp=require('child_process');
+            const projects=JSON.parse(fs.readFileSync('/tmp/neon-projects.json','utf8'));
+            const rows=Array.isArray(projects)?projects:(projects.projects||[]);
+            const branchId=process.env.NEON_BRANCH_ID;
+            let found='';
+            for(const p of rows){
+              const pid=p.id||p.project_id;
+              if(!pid) continue;
+              try{
+                const out=cp.execFileSync('neon',['branches','list','--project-id',pid,'--output','json'],{
+                  env:process.env,encoding:'utf8',stdio:['ignore','pipe','ignore']
+                });
+                const branches=JSON.parse(out);
+                const list=Array.isArray(branches)?branches:(branches.branches||[]);
+                if(list.some(b=>String(b.id)===branchId)){
+                  found=pid;
+                  break;
+                }
+              }catch{}
             }
-            if (!found) process.exit(2);
+            if(!found) process.exit(2);
             process.stdout.write(found);
             NODE
           )"
 
           if [ -z "$PROJECT_ID" ]; then
-            echo "::error::Could not resolve Neon project for branch $NEON_BRANCH_ID"
+            echo "::error::Could not resolve project for branch $NEON_BRANCH_ID"
             exit 1
           fi
 
           echo "NEON_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
-          echo "Resolved Neon project for production branch."
-
-      - name: Package rovenapi
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd neon-functions/rovenapi
-          zip -q -j "$GITHUB_WORKSPACE/rovenapi.zip" index.mjs
-          test -s "$GITHUB_WORKSPACE/rovenapi.zip"
+          echo "Resolved Neon project successfully."
 
       - name: Deploy rovenapi
         shell: bash
         run: |
           set -euo pipefail
-          URL="https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$NEON_BRANCH_ID/functions/$NEON_FUNCTION_SLUG/deployments"
-          STATUS="$(
-            curl -sS -o /tmp/neon-deploy.json -w "%{http_code}"               -X POST "$URL"               -H "Authorization: Bearer $NEON_API_KEY"               -F "zip=@rovenapi.zip;type=application/zip"               -F "runtime=nodejs24"
-          )"
-          cat /tmp/neon-deploy.json
-          echo
-          if [ "$STATUS" != "201" ]; then
-            echo "::error::Neon Function deployment failed with HTTP $STATUS"
-            exit 1
-          fi
+          neon functions deploy "$NEON_FUNCTION_SLUG"             --src neon-functions/rovenapi/index.mjs             --branch "$NEON_BRANCH_ID"             --project-id "$NEON_PROJECT_ID"             --runtime nodejs24             --wait
 
       - name: Verify active function
         shell: bash
         run: |
           set -euo pipefail
-          URL="https://console.neon.tech/api/v2/projects/$NEON_PROJECT_ID/branches/$NEON_BRANCH_ID/functions/$NEON_FUNCTION_SLUG"
-          for i in $(seq 1 30); do
-            curl -fsS -H "Authorization: Bearer $NEON_API_KEY" "$URL" -o /tmp/neon-function.json
-            STATUS="$(node -e "const x=require('/tmp/neon-function.json'); process.stdout.write(String(x.current_deployment?.status || x.function?.current_deployment?.status || ''))")"
-            echo "deployment status: ${STATUS:-unknown}"
-            if [ "$STATUS" = "completed" ] || [ "$STATUS" = "ready" ] || [ "$STATUS" = "active" ]; then
-              exit 0
-            fi
-            if [ "$STATUS" = "failed" ]; then
-              cat /tmp/neon-function.json
-              exit 1
-            fi
-            sleep 4
-          done
-          cat /tmp/neon-function.json
-          echo "::error::Timed out waiting for rovenapi deployment."
-          exit 1
+          neon functions get "$NEON_FUNCTION_SLUG"             --branch "$NEON_BRANCH_ID"             --project-id "$NEON_PROJECT_ID"             --output json > /tmp/roven-function.json
+          cat /tmp/roven-function.json
+          node <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/roven-function.json','utf8'));
+          const d=x.current_deployment||x.active_deployment||x.function?.current_deployment||x.function?.active_deployment||{};
+          const status=String(d.status||'').toLowerCase();
+          if(!['completed','ready','active'].includes(status)){
+            console.error('Unexpected deployment status:',status||'missing');
+            process.exit(1);
+          }
+          console.log('rovenapi deployment verified:',status);
+          NODE
