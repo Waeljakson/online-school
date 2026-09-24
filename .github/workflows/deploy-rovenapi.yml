@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   deploy:
+    environment: github-pages
     runs-on: ubuntu-latest
     env:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY || vars.NEON_API_KEY }}
