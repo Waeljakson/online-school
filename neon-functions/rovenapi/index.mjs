@@ -40,11 +40,18 @@ async function ensureSchema(){
       group_id uuid not null references public.study_groups(id) on delete cascade,
       private_student_id uuid not null references public.teacher_private_students(id) on delete cascade,
       attendance_date date not null,
-      status text not null check(status in ('present','absent','late','excused')),
+      status text not null check(status in ('present','absent','late','excused','left_early')),
+      minutes_late integer not null default 0,
+      note text,
       recorded_by_account_id uuid references public.platform_accounts(id) on delete set null,
       recorded_at timestamptz not null default now(),
       unique(group_id,private_student_id,attendance_date)
     )`;
+    await sql`alter table public.teacher_private_attendance add column if not exists minutes_late integer not null default 0`;
+    await sql`alter table public.teacher_private_attendance add column if not exists note text`;
+    await sql`alter table public.teacher_private_attendance drop constraint if exists teacher_private_attendance_status_check`;
+    await sql`alter table public.teacher_private_attendance add constraint teacher_private_attendance_status_check
+      check(status in ('present','absent','late','excused','left_early'))`;
     await sql`create table if not exists public.teacher_private_payments(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -533,7 +540,7 @@ async function custom(action,a,p){
       pa.display_name sender_name,null::text sender_photo
       from public.platform_group_messages_v2 m
       join public.platform_accounts pa on pa.id=m.sender_account_id
-      where m.school_id=${a.school_id} and m.group_id=${gid}::uuid
+      where m.group_id=${gid}::uuid
       order by m.created_at asc`;
   }
 
@@ -547,10 +554,86 @@ async function custom(action,a,p){
     return (await sql`insert into public.platform_group_messages_v2(
       school_id,group_id,sender_account_id,body,attachment_name,attachment_mime,attachment_base64
     ) values(
-      ${a.school_id},${gid}::uuid,${a.account_id},${body||null},
+      ${access.school_id},${gid}::uuid,${a.account_id},${body||null},
       ${p.p_attachment_name||null},${p.p_attachment_mime||null},${attachment}
     )
     returning id message_id,sender_account_id,body,attachment_name,attachment_mime,created_at`)[0];
+  }
+
+  if(action==='private_room_attendance_roster'){
+    const gid=String(p.p_group_id||'');
+    const onDate=String(p.p_on_date||new Date().toISOString().slice(0,10));
+    const access=await privateRoomAccess(a,gid,false);
+    if(!access)throw new Error('group_access_denied');
+
+    return await sql`select
+      ps.id student_id,
+      ps.private_code student_no,
+      ps.full_name student_name,
+      coalesce(att.status,'present') status,
+      coalesce(att.minutes_late,0)::int minutes_late,
+      coalesce(att.note,'') note,
+      true is_private_student
+      from public.teacher_private_students ps
+      left join public.teacher_private_attendance att
+        on att.private_student_id=ps.id
+       and att.group_id=ps.group_id
+       and att.attendance_date=${onDate}::date
+      where ps.group_id=${gid}::uuid
+        and ps.teacher_account_id=${access.teacher_account_id}
+        and ps.status='active'
+      order by ps.full_name`;
+  }
+
+  if(action==='private_room_attendance_save'){
+    const gid=String(p.p_group_id||'');
+    const onDate=String(p.p_on_date||'');
+    if(!gid||!onDate)throw new Error('group_and_date_required');
+    const access=await privateRoomAccess(a,gid,false);
+    if(!access)throw new Error('group_access_denied');
+
+    const link=await assistantLink(a);
+    const isTeacher=String(access.teacher_account_id)===String(a.account_id);
+    const canAssistant=Boolean(link && String(link.teacher_account_id)===String(access.teacher_account_id) && link.permissions?.attendance);
+    if(!isTeacher&&!canAssistant&&a.account_type!=='admin'&&a.account_type!=='staff')throw new Error('attendance_access_denied');
+
+    let saved=0,present=0,absent=0,late=0,excused=0,leftEarly=0;
+    for(const r of (Array.isArray(p.p_records)?p.p_records:[])){
+      const sid=String(r.student_id||'');
+      const ps=(await sql`select id
+        from public.teacher_private_students
+        where id=${sid}::uuid
+          and group_id=${gid}::uuid
+          and teacher_account_id=${access.teacher_account_id}
+          and status='active'
+        limit 1`)[0];
+      if(!ps)continue;
+
+      const status=['present','absent','late','excused','left_early'].includes(String(r.status||''))?String(r.status):'present';
+      const mins=Math.max(0,Number(r.minutes_late||0)||0);
+      await sql`insert into public.teacher_private_attendance(
+        school_id,teacher_account_id,group_id,private_student_id,attendance_date,status,
+        minutes_late,note,recorded_by_account_id,recorded_at
+      ) values(
+        ${access.school_id},${access.teacher_account_id},${gid}::uuid,${sid}::uuid,${onDate}::date,${status},
+        ${mins},${r.note||null},${a.account_id},now()
+      )
+      on conflict(group_id,private_student_id,attendance_date)
+      do update set
+        status=excluded.status,
+        minutes_late=excluded.minutes_late,
+        note=excluded.note,
+        recorded_by_account_id=excluded.recorded_by_account_id,
+        recorded_at=now()`;
+
+      saved++;
+      if(status==='present')present++;
+      else if(status==='absent')absent++;
+      else if(status==='late')late++;
+      else if(status==='excused')excused++;
+      else if(status==='left_early')leftEarly++;
+    }
+    return {saved,present,absent,late,excused,left_early:leftEarly};
   }
 
   if(action==='teacher_room_contract_set'){
@@ -2184,6 +2267,19 @@ export default{
         }
 
         return json(dashboard,200,o);
+      }
+
+      if(action==='platform_attendance_roster' || action==='platform_save_attendance'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        const gid=String(p.p_group_id||'');
+        const room=await privateRoomAccess(a,gid,false);
+        if(room){
+          const mapped=action==='platform_attendance_roster'
+            ?'private_room_attendance_roster'
+            :'private_room_attendance_save';
+          return json(await custom(mapped,a,p),200,o);
+        }
       }
 
       if(action==='platform_group_chat_list' || action==='platform_group_chat_send'){
