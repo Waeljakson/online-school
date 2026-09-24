@@ -771,6 +771,28 @@ async function custom(action,a,p){
     return {school_students:schoolStudents,private_students:privateStudents,certificates:certs,exam_results:results};
   }
 
+  if(action==='private_student_groups_list'){
+    const rows=await sql`select
+      ps.id private_student_id,
+      g.id group_id,
+      g.name group_name,
+      c.subject_name,
+      teacher.display_name teacher_name,
+      g.schedule_json,
+      g.meeting_url,
+      g.meeting_provider
+      from public.teacher_private_students ps
+      join public.study_groups g on g.id=ps.group_id
+      left join public.courses c on c.id=g.course_id
+      left join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
+      where ps.platform_account_id=${a.account_id}
+        and ps.school_id=${a.school_id}
+        and ps.status='active'
+        and g.is_active=true
+      order by g.name`;
+    return rows;
+  }
+
   if(action==='student_dashboard'){
     let sid=a.student_id,psid=null;
     if(!sid){
@@ -1277,9 +1299,13 @@ async function decorateLogin(result){
     where l.assistant_account_id=${result.account_id} and l.is_active=true limit 1`)[0];
   if(link)return {...result,account_type:'teacher_assistant',role:'teacher_assistant',
     teacher_account_id:link.teacher_account_id,teacher_name:link.teacher_name,permissions:link.permissions};
-  const ps=(await sql`select id from public.teacher_private_students
-    where platform_account_id=${result.account_id} and status='active' limit 1`)[0];
-  if(ps)return {...result,account_type:'private_student',role:'private_student',private_student_id:ps.id};
+  const ps=(await sql`select ps.id,ps.group_id,ps.teacher_account_id,g.name group_name
+    from public.teacher_private_students ps
+    left join public.study_groups g on g.id=ps.group_id
+    where ps.platform_account_id=${result.account_id} and ps.status='active' limit 1`)[0];
+  if(ps)return {...result,account_type:'private_student',role:'private_student',
+    private_student_id:ps.id,private_group_id:ps.group_id,group_id:ps.group_id,
+    private_teacher_account_id:ps.teacher_account_id,private_group_name:ps.group_name};
   const pg=(await sql`select id from public.teacher_private_students
     where guardian_account_id=${result.account_id} and status='active' limit 1`)[0];
   if(pg)return {...result,account_type:'private_parent',role:'private_parent'};
@@ -1352,6 +1378,14 @@ export default{
           session_expires_at:session.expires_at
         };
         return json(await decorateLogin(result),200,o);
+      }
+
+      if(action==='platform_list_groups'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        const privateStudent=(await sql`select id from public.teacher_private_students
+          where platform_account_id=${a.account_id} and school_id=${a.school_id} and status='active' limit 1`)[0];
+        if(privateStudent)return json(await custom('private_student_groups_list',a,p),200,o);
       }
 
       const customActions=new Set([
