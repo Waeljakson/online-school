@@ -31,6 +31,10 @@ async function ensureSchema(){
       updated_at timestamptz not null default now(),
       unique(teacher_account_id,private_code)
     )`;
+    await sql`alter table public.teacher_private_students add column if not exists books_fee numeric(12,2) not null default 0`;
+    await sql`alter table public.teacher_private_students add column if not exists books_free boolean not null default false`;
+    await sql`alter table public.teacher_private_payments add column if not exists payment_kind text not null default 'tuition'`;
+
     await sql`create table if not exists public.teacher_private_attendance(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -438,8 +442,10 @@ async function custom(action,a,p){
     const rows=await sql`select ps.*,g.name group_name,trm.capacity room_capacity,
       coalesce((select count(*) from public.teacher_private_students ps2 where ps2.group_id=ps.group_id and ps2.teacher_account_id=ps.teacher_account_id and ps2.status='active'),0)::int room_students_count,
       coalesce((select sum(pp.amount) from public.teacher_private_payments pp
-        where pp.private_student_id=ps.id
-          and date_trunc('month',pp.paid_on)=date_trunc('month',current_date)),0) month_paid
+        where pp.private_student_id=ps.id and coalesce(pp.payment_kind,'tuition')='tuition'
+          and date_trunc('month',pp.paid_on)=date_trunc('month',current_date)),0) month_paid,
+      coalesce((select sum(pp.amount) from public.teacher_private_payments pp
+        where pp.private_student_id=ps.id and pp.payment_kind='books'),0) books_paid
       from public.teacher_private_students ps
       left join public.study_groups g on g.id=ps.group_id
       left join public.teacher_room_management trm on trm.group_id=ps.group_id and trm.teacher_account_id=ps.teacher_account_id
@@ -474,6 +480,7 @@ async function custom(action,a,p){
       const rr=await sql`update public.teacher_private_students
         set full_name=${fullName},phone=${p.p_phone||null},parent_name=${p.p_parent_name||null},
             parent_phone=${p.p_parent_phone||null},monthly_fee=${Number(p.p_monthly_fee||0)},
+            books_fee=${Number(p.p_books_fee||0)},books_free=${Boolean(p.p_books_free)},
             joined_on=${p.p_joined_on||new Date().toISOString().slice(0,10)}::date,
             notes=${p.p_notes||null},group_id=${gid}::uuid,updated_at=now()
         where id=${existingId}::uuid and teacher_account_id=${teacherId}
@@ -507,11 +514,12 @@ async function custom(action,a,p){
 
     const row=(await sql`insert into public.teacher_private_students(
         school_id,teacher_account_id,group_id,platform_account_id,guardian_account_id,
-        private_code,full_name,phone,parent_name,parent_phone,monthly_fee,joined_on,notes
+        private_code,full_name,phone,parent_name,parent_phone,monthly_fee,books_fee,books_free,joined_on,notes
       ) values(
         ${a.school_id},${teacherId},${gid}::uuid,${acct.id},${guardian?.id||null},
         ${code},${fullName},${p.p_phone||null},${p.p_parent_name||null},
         ${p.p_parent_phone||null},${Number(p.p_monthly_fee||0)},
+        ${Number(p.p_books_fee||0)},${Boolean(p.p_books_free)},
         ${p.p_joined_on||new Date().toISOString().slice(0,10)}::date,${p.p_notes||null}
       ) returning *`)[0];
 
@@ -571,11 +579,11 @@ async function custom(action,a,p){
       where id=${p.p_private_student_id}::uuid and teacher_account_id=${teacherId} and status='active' limit 1`)[0];
     if(!s)throw new Error('private_student_not_found');
     return (await sql`insert into public.teacher_private_payments(
-      school_id,teacher_account_id,group_id,private_student_id,amount,paid_on,method,note,recorded_by_account_id
+      school_id,teacher_account_id,group_id,private_student_id,amount,paid_on,method,note,payment_kind,recorded_by_account_id
     ) values(
       ${a.school_id},${teacherId},${s.group_id},${s.id},${Number(p.p_amount||0)},
       ${p.p_date||new Date().toISOString().slice(0,10)}::date,${p.p_method||'cash'},
-      ${p.p_note||null},${a.account_id}
+      ${p.p_note||null},${p.p_payment_kind||'tuition'},${a.account_id}
     ) returning *`)[0];
   }
 
@@ -673,9 +681,12 @@ async function custom(action,a,p){
       from public.students s
       left join public.grades g on g.id=s.grade_id
       where s.id=any(${schoolStudentIds}::uuid[])`:[];
-    const privateStudents=privateIds.length?await sql`select ps.id,ps.private_code,ps.full_name,ps.monthly_fee,
+    const privateStudents=privateIds.length?await sql`select ps.id,ps.private_code,ps.full_name,ps.monthly_fee,ps.books_fee,ps.books_free,
       coalesce((select sum(p.amount) from public.teacher_private_payments p
-        where p.private_student_id=ps.id and date_trunc('month',p.paid_on)=date_trunc('month',current_date)),0) month_paid
+        where p.private_student_id=ps.id and coalesce(p.payment_kind,'tuition')='tuition'
+          and date_trunc('month',p.paid_on)=date_trunc('month',current_date)),0) month_paid,
+      coalesce((select sum(p.amount) from public.teacher_private_payments p
+        where p.private_student_id=ps.id and p.payment_kind='books'),0) books_paid
       from public.teacher_private_students ps
       where ps.id=any(${privateIds}::uuid[])`:[];
     const certs=await sql`select c.*,s.full_name student_name,ps.full_name private_student_name
