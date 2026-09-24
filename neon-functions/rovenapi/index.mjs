@@ -110,6 +110,20 @@ async function ensureSchema(){
       on public.platform_direct_messages_v2(school_id,sender_account_id,recipient_account_id,created_at desc)`;
     await sql`create index if not exists pdm2_recipient_unread_idx
       on public.platform_direct_messages_v2(school_id,recipient_account_id,read_at,created_at desc)`;
+    await sql`create table if not exists public.platform_group_messages_v2(
+      id uuid primary key default gen_random_uuid(),
+      school_id uuid not null references public.schools(id) on delete cascade,
+      group_id uuid not null references public.study_groups(id) on delete cascade,
+      sender_account_id uuid not null references public.platform_accounts(id) on delete cascade,
+      body text,
+      attachment_name text,
+      attachment_mime text,
+      attachment_base64 text,
+      created_at timestamptz not null default now(),
+      check(coalesce(length(trim(body)),0)>0 or attachment_base64 is not null)
+    )`;
+    await sql`create index if not exists pgm2_group_created_idx
+      on public.platform_group_messages_v2(school_id,group_id,created_at)`;
     await sql`create table if not exists public.platform_certificates(
       id uuid primary key default gen_random_uuid(),
       school_id uuid not null references public.schools(id) on delete cascade,
@@ -333,6 +347,45 @@ async function directChatPeerAllowed(a,peerId){
   return (await directChatBaseContacts(a)).some(x=>String(x.account_id)===String(peerId));
 }
 
+async function privateRoomAccess(a,groupId,requireChat=false){
+  const gid=String(groupId||'');
+  if(!gid)return null;
+  const room=(await sql`select trm.group_id,trm.school_id,trm.teacher_account_id
+    from public.teacher_room_management trm
+    where trm.group_id=${gid}::uuid
+      and trm.is_active=true
+    limit 1`)[0]||null;
+  if(!room||String(room.school_id)!==String(a.school_id))return null;
+
+  if(String(room.teacher_account_id)===String(a.account_id))return room;
+
+  const privateStudent=(await sql`select 1
+    from public.teacher_private_students ps
+    where ps.group_id=${gid}::uuid
+      and ps.teacher_account_id=${room.teacher_account_id}
+      and ps.platform_account_id=${a.account_id}
+      and ps.status='active'
+    limit 1`)[0];
+  if(privateStudent)return room;
+
+  if(a.student_id){
+    const enrolled=(await sql`select 1 from public.enrollments
+      where group_id=${gid}::uuid and student_id=${a.student_id} and status='active'
+      limit 1`)[0];
+    if(enrolled)return room;
+  }
+
+  const link=await assistantLink(a);
+  if(link && String(link.teacher_account_id)===String(room.teacher_account_id)){
+    if(requireChat && !Boolean(link.permissions?.chat))return null;
+    const groups=(await delegatedGroups(link.id)).map(x=>String(x.group_id));
+    if(groups.includes(gid))return room;
+  }
+
+  if(a.account_type==='admin' || (a.account_type==='staff' && ['super_admin','school_manager','academic_admin'].includes(String(a.role||''))))return room;
+  return null;
+}
+
 async function custom(action,a,p){
   await ensureSchema();
 
@@ -384,6 +437,36 @@ async function custom(action,a,p){
       ${a.school_id},${a.account_id},${peer}::uuid,${body||null},${p.p_attachment_name||null},
       ${p.p_attachment_mime||null},${attachment}
     ) returning id message_id,sender_account_id,recipient_account_id,body,attachment_name,attachment_mime,created_at,read_at`)[0];
+  }
+
+  if(action==='platform_group_chat_list_v2'){
+    const gid=String(p.p_group_id||'');
+    const access=await privateRoomAccess(a,gid,true);
+    if(!access)throw new Error('group_access_denied');
+    return await sql`select
+      m.id message_id,m.sender_account_id,m.body,
+      m.attachment_name,m.attachment_mime,m.attachment_base64,m.created_at,
+      pa.display_name sender_name,null::text sender_photo
+      from public.platform_group_messages_v2 m
+      join public.platform_accounts pa on pa.id=m.sender_account_id
+      where m.school_id=${a.school_id} and m.group_id=${gid}::uuid
+      order by m.created_at asc`;
+  }
+
+  if(action==='platform_group_chat_send_v2'){
+    const gid=String(p.p_group_id||'');
+    const access=await privateRoomAccess(a,gid,true);
+    if(!access)throw new Error('group_access_denied');
+    const body=String(p.p_body||'').trim();
+    const attachment=String(p.p_attachment_base64||'')||null;
+    if(!body&&!attachment)throw new Error('empty_message');
+    return (await sql`insert into public.platform_group_messages_v2(
+      school_id,group_id,sender_account_id,body,attachment_name,attachment_mime,attachment_base64
+    ) values(
+      ${a.school_id},${gid}::uuid,${a.account_id},${body||null},
+      ${p.p_attachment_name||null},${p.p_attachment_mime||null},${attachment}
+    )
+    returning id message_id,sender_account_id,body,attachment_name,attachment_mime,created_at`)[0];
   }
 
   if(action==='teacher_room_contract_set'){
@@ -1174,14 +1257,18 @@ async function custom(action,a,p){
   const adminEntityAllowed=()=>a.account_type==='admin'||['super_admin','school_manager'].includes(String(a.role||''));
 
   if(action==='teacher_update_group_schedule'){
-    must(a,a.account_type==='teacher'&&a.teacher_id);
+    must(a,a.account_type==='teacher');
     const gid=String(p.p_group_id||'');
     if(!gid)throw new Error('group_id_required');
-    const owned=(await sql`select g.id
-      from public.study_groups g
-      join public.courses c on c.id=g.course_id
-      where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
-      limit 1`)[0];
+    const contracted=await privateRoomAccess(a,gid,false);
+    let owned=contracted;
+    if(!owned && a.teacher_id){
+      owned=(await sql`select g.id
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
+        limit 1`)[0];
+    }
     if(!owned)throw new Error('group_not_owned_by_teacher');
     const allowedDays=new Set(['saturday','sunday','monday','tuesday','wednesday','thursday','friday']);
     const raw=Array.isArray(p.p_sessions)?p.p_sessions:[];
@@ -1203,26 +1290,30 @@ async function custom(action,a,p){
     const schedule={sessions};
     return (await sql`update public.study_groups
       set schedule_json=${JSON.stringify(schedule)}::jsonb
-      where id=${gid}::uuid and school_id=${a.school_id}
+      where id=${gid}::uuid
       returning id group_id,name group_name,schedule_json`)[0];
   }
 
   if(action==='platform_set_group_meeting'){
-    must(a,a.account_type==='teacher'&&a.teacher_id);
+    must(a,a.account_type==='teacher');
     const gid=String(p.p_group_id||'');
     if(!gid)throw new Error('group_id_required');
-    const owned=(await sql`select g.id
-      from public.study_groups g
-      join public.courses c on c.id=g.course_id
-      where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
-      limit 1`)[0];
+    const contracted=await privateRoomAccess(a,gid,false);
+    let owned=contracted;
+    if(!owned && a.teacher_id){
+      owned=(await sql`select g.id
+        from public.study_groups g
+        join public.courses c on c.id=g.course_id
+        where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
+        limit 1`)[0];
+    }
     if(!owned)throw new Error('group_not_owned_by_teacher');
     const provider=String(p.p_provider||'zoom');
     const url=p.p_url?String(p.p_url).trim():null;
     if(url&&!/^https:\/\//i.test(url))throw new Error('invalid_meeting_url');
     return (await sql`update public.study_groups
       set meeting_provider=${provider},meeting_url=${url}
-      where id=${gid}::uuid and school_id=${a.school_id}
+      where id=${gid}::uuid
       returning id group_id,name group_name,meeting_provider,meeting_url`)[0];
   }
 
@@ -1522,6 +1613,17 @@ export default{
         }
 
         return json([],200,o);
+      }
+
+      if(action==='platform_group_chat_list' || action==='platform_group_chat_send'){
+        const a=await actorFromToken(token);
+        if(!a)return json({error:'invalid_or_expired_session'},401,o);
+        const gid=String(p.p_group_id||'');
+        const room=await privateRoomAccess(a,gid,true);
+        if(room){
+          const mapped=action==='platform_group_chat_list'?'platform_group_chat_list_v2':'platform_group_chat_send_v2';
+          return json(await custom(mapped,a,p),200,o);
+        }
       }
 
       const customActions=new Set([
