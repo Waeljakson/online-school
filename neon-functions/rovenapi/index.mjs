@@ -792,7 +792,7 @@ async function custom(action,a,p){
     }
 
     if(a.student_id){
-      return await sql`select distinct
+      const schoolRows=await sql`select distinct
         g.id group_id,g.name group_name,
         coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
         coalesce(t.full_name,pa.display_name) teacher_name,
@@ -807,6 +807,7 @@ async function custom(action,a,p){
           and g.school_id=${a.school_id}
           and g.is_active=true
         order by group_name`;
+      if(schoolRows.length)return schoolRows;
     }
 
     const privateRows=await sql`select distinct
@@ -1454,7 +1455,60 @@ export default{
       if(action==='platform_list_groups'){
         const a=await actorFromToken(token);
         if(!a)return json({error:'invalid_or_expired_session'},401,o);
-        return json(await custom('platform_groups_list_local',a,p),200,o);
+
+        const directGroups=await custom('platform_groups_list_local',a,p);
+        if(Array.isArray(directGroups)&&directGroups.length)return json(directGroups,200,o);
+
+        // Compatibility for private students created by the old registration fallback:
+        // the account is a normal student account and its private group was recorded
+        // in an internal PRIVATE_STUDENT_LINK message instead of teacher_private_students.
+        if(a.account_type==='student'){
+          try{
+            const mailRpc=await sql`select public.roven_rpc(
+              'platform_mail_list',
+              ${token},
+              ${JSON.stringify({p_folder:'inbox'})}::jsonb
+            ) result`;
+            const mails=Array.isArray(mailRpc[0]?.result)?mailRpc[0].result:[];
+            const links=mails
+              .filter(m=>String(m?.subject||'').startsWith('[PRIVATE_STUDENT_LINK]'))
+              .map(m=>{
+                let body=m?.body;
+                if(typeof body==='string'){
+                  try{body=JSON.parse(body)}catch{body={}}
+                }
+                return {...(body&&typeof body==='object'?body:{}),_sent_at:m?.sent_at||null};
+              })
+              .filter(x=>x.group_id)
+              .sort((x,y)=>new Date(y.linked_at||y._sent_at||0)-new Date(x.linked_at||x._sent_at||0));
+
+            const link=links[0]||null;
+            if(link?.group_id){
+              const legacyGroups=await sql`select
+                g.id group_id,g.name group_name,
+                coalesce(
+                  to_jsonb(c)->>'subject_name',
+                  to_jsonb(c)->>'name',
+                  to_jsonb(c)->>'title',
+                  to_jsonb(c)->>'subject',
+                  ${link.subject_name||null}
+                ) subject_name,
+                coalesce(t.full_name,pa.display_name,${link.teacher_name||null}) teacher_name,
+                g.schedule_json,g.meeting_url,g.meeting_provider
+                from public.study_groups g
+                left join public.courses c on c.id=g.course_id
+                left join public.teachers t on t.id=c.teacher_id
+                left join public.platform_accounts pa on pa.teacher_id=c.teacher_id and pa.is_active=true
+                where g.id=${String(link.group_id)}::uuid
+                  and g.school_id=${a.school_id}
+                  and g.is_active=true
+                limit 1`;
+              if(legacyGroups.length)return json(legacyGroups,200,o);
+            }
+          }catch{}
+        }
+
+        return json([],200,o);
       }
 
       const customActions=new Set([
