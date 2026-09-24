@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1930" />
+  <meta name="roven-build" content="20260924-1945" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1599,7 +1599,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1930';
+  window.__ROVEN_BUILD__='20260924-1945';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3119,6 +3119,37 @@
   let teacherPrivateGroupIds=new Set();
   let privateCredentialCurrent=null;
 
+  const normalizeTeacherGroupKey=g=>{
+    const name=String(g?.group_name||g?.name||'').trim().toLowerCase().replace(/\s+/g,' ');
+    const subject=String(g?.subject_name||g?.subject||'').trim().toLowerCase().replace(/\s+/g,' ');
+    return name+'|'+subject;
+  };
+
+  const dedupeTeacherGroups=(groups,contracts=[])=>{
+    const contractIds=new Set((contracts||[]).map(x=>String(x.group_id)));
+    const byId=new Map();
+    for(const g of (groups||[])){
+      const id=String(g?.group_id||g?.id||'');
+      if(id&&!byId.has(id))byId.set(id,g);
+    }
+    const rows=[...byId.values()];
+    const byKey=new Map();
+    for(const g of rows){
+      const key=normalizeTeacherGroupKey(g);
+      if(!key||key==='|'){byKey.set('id:'+String(g.group_id||g.id),g);continue}
+      const prev=byKey.get(key);
+      if(!prev){byKey.set(key,g);continue}
+      const prevPrivate=contractIds.has(String(prev.group_id||prev.id));
+      const nextPrivate=contractIds.has(String(g.group_id||g.id));
+      if(nextPrivate&&!prevPrivate){byKey.set(key,g);continue}
+      if(nextPrivate===prevPrivate){
+        const prevStudents=Number(prev.students_count||0),nextStudents=Number(g.students_count||0);
+        if(nextStudents>prevStudents)byKey.set(key,g);
+      }
+    }
+    return [...byKey.values()];
+  };
+
   const privateMonthKey=value=>{
     const d=value?new Date(value):new Date();
     if(Number.isNaN(d.getTime()))return '';
@@ -3833,6 +3864,7 @@
       return {...c,current_private_students:Number(c.current_private_students??used)};
     });
     teacherPrivateGroupIds=new Set(teacherRoomContractsCache.map(x=>String(x.group_id)));
+    teacherHubGroupsCache=dedupeTeacherGroups(teacherHubGroupsCache,teacherRoomContractsCache);
 
     const assistantRows=results[3].status==='fulfilled'&&Array.isArray(results[3].value)?results[3].value:[];
     teacherAssistantLinksCache=assistantRows.map(x=>{
@@ -4262,7 +4294,17 @@
     if(!request?.sender_email)throw new Error('تعذر تحديد حساب المعلم لإرسال بيانات القاعة.');
     const capacity=Math.max(1,Number(response?.capacity||request.capacity||20)||20);
     const payload={p_group_name:String(request.room_name||'قاعة المعلم').trim(),p_teacher_id:request.teacher_id,p_subject_name:String(request.subject||'مادة تعليمية').trim(),p_stage_name:request.stage||null,p_grade_name:request.grade||null,p_meeting_provider:null,p_meeting_url:null,p_capacity:capacity,p_schedule:{sessions:[]},p_student_ids:null};
-    const createdResult=await dataApiFetch('/rpc/create_study_group_admin',{method:'POST',body:JSON.stringify(payload)});
+    let existingGroup=null;
+    try{
+      const groups=await dataApiFetch('/rpc/platform_list_groups',{method:'POST',body:'{}'});
+      const targetName=String(payload.p_group_name||'').trim().toLowerCase().replace(/\s+/g,' ');
+      const targetSubject=String(payload.p_subject_name||'').trim().toLowerCase().replace(/\s+/g,' ');
+      existingGroup=(Array.isArray(groups)?groups:[]).find(g=>
+        String(g.group_name||g.name||'').trim().toLowerCase().replace(/\s+/g,' ')===targetName &&
+        String(g.subject_name||g.subject||'').trim().toLowerCase().replace(/\s+/g,' ')===targetSubject
+      )||null;
+    }catch{}
+    const createdResult=existingGroup||await dataApiFetch('/rpc/create_study_group_admin',{method:'POST',body:JSON.stringify(payload)});
     const created=Array.isArray(createdResult)?createdResult[0]:createdResult;
     if(!created?.group_id)throw new Error('تمت الموافقة لكن لم يتم إرجاع رقم القاعة الجديدة.');
     await dataApiFetch('/rpc/teacher_room_contract_set',{method:'POST',body:JSON.stringify({p_group_id:created.group_id,p_teacher_id:request.teacher_id,p_capacity:capacity,p_agreed_price:Number(response?.agreed_price||0),p_pricing_basis:response?.pricing_basis||request.pricing_basis||'monthly',p_management_mode:response?.management_mode||request.management_mode||'teacher',p_management_fee:Number(response?.management_fee||0),p_management_fee_basis:response?.management_fee_basis||'monthly'})});
