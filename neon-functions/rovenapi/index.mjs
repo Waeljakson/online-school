@@ -292,14 +292,21 @@ async function ensureSchema(){
 }
 
 async function actorFromToken(token){
-  let r=await sql`select a.id account_id,a.school_id,a.account_type,a.student_id,a.teacher_id,a.parent_id,a.app_user_id,u.role,a.display_name,a.internal_email
+  let r=await sql`select
+      a.id account_id,a.school_id,a.account_type,a.student_id,a.teacher_id,a.parent_id,a.app_user_id,
+      a.account_code,a.username,a.display_name,a.internal_email,
+      u.role,s.expires_at session_expires_at
     from public.platform_sessions s
     join public.platform_accounts a on a.id=s.account_id and a.is_active=true
     left join public.app_users u on u.id=a.app_user_id and u.is_active=true
     where s.token=${token} and s.expires_at>now()
     order by s.created_at desc limit 1`;
   if(r.length)return r[0];
-  r=await sql`select a.id account_id,u.school_id,coalesce(a.account_type,'admin') account_type,a.student_id,a.teacher_id,a.parent_id,a.app_user_id,u.role,a.display_name,a.internal_email
+  r=await sql`select
+      a.id account_id,u.school_id,coalesce(a.account_type,'admin') account_type,
+      a.student_id,a.teacher_id,a.parent_id,a.app_user_id,
+      a.account_code,a.username,a.display_name,a.internal_email,
+      u.role,s."expiresAt" session_expires_at
     from neon_auth.session s
     join public.app_users u on u.auth_user_id=s."userId"::text and u.is_active=true
     left join public.platform_accounts a on a.app_user_id=u.id and a.is_active=true
@@ -2859,6 +2866,16 @@ export default{
           session_expires_at:session.expires_at
         };
         return json(await decorateLogin(result),200,o);
+      }
+
+      if(action==='platform_my_profile'){
+        const actor=await actorFromToken(token);
+        if(!actor)return json({error:'invalid_or_expired_session'},401,o);
+        return json(await decorateLogin({
+          ...actor,
+          session_token:token,
+          session_expires_at:actor.session_expires_at||null
+        }),200,o);
       }
 
       if(action==='register_new_student'){
