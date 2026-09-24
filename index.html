@@ -5907,12 +5907,38 @@
     return {mcqScore:score,maxScore:max,essayMax};
   };
 
+  const persistExamResultRecord=async(submission,exam,result)=>{
+    if(!submission||!exam||!result)return null;
+    return await dataApiFetch('/rpc/exam_result_publish',{method:'POST',body:JSON.stringify({
+      p_result_id:result.result_id||null,
+      p_submission_id:submission.submission_id,
+      p_exam_id:exam.exam_id,
+      p_exam_title:exam.title||submission.exam_title||'اختبار',
+      p_student_account_id:submission.student_account_id||null,
+      p_student_name:submission.student_name||null,
+      p_score:Number(result.score||0),
+      p_max_score:Number(result.max_score||0),
+      p_mcq_score:Number(result.mcq_score||0),
+      p_essay_score:Number(result.essay_score||0),
+      p_graded_at:result.graded_at||new Date().toISOString()
+    })});
+  };
+
   const loadExamSubmissions=async(inbox=null)=>{
     const rows=inbox||await structuredMail('inbox');
     const defs=new Map(teacherExamDefs.map(x=>[String(x.exam_id),x]));
     const graded=latestStructuredBy(rows,'EXAM_GRADED','submission_id');
     const gradedMap=new Map(graded.map(x=>[String(x.submission_id),x]));
     const submissions=latestStructuredBy(rows,'EXAM_SUBMISSION','submission_id').sort((a,b)=>new Date(b.submitted_at||0)-new Date(a.submitted_at||0));
+
+    // Persist old mail-based graded results so parent/student dashboards can read them directly.
+    await Promise.allSettled(submissions.map(async submission=>{
+      const g=gradedMap.get(String(submission.submission_id));
+      const ex=defs.get(String(submission.exam_id));
+      if(!g||!ex)return;
+      await persistExamResultRecord(submission,ex,g);
+    }));
+
     const tbody=document.getElementById('examSubmissionsRows');
     if(!submissions.length){tbody.innerHTML='<tr><td colspan="6" class="students-empty">لا توجد إجابات حتى الآن.</td></tr>';return}
     tbody.innerHTML=submissions.map(s=>{
@@ -6252,8 +6278,12 @@
     };
     const ctx=await hydratePlatformContext();
     try{
+      const persisted=await persistExamResultRecord(submission,exam,result);
+      const parentEmail=persisted?.parent_internal_email||submission.parent_internal_email||null;
       if(submission.student_internal_email)await sendStructuredMail(submission.student_internal_email,'EXAM_RESULT',result.result_id,result);
-      if(submission.parent_internal_email)await sendStructuredMail(submission.parent_internal_email,'EXAM_RESULT_PARENT',result.result_id,result);
+      if(parentEmail)await sendStructuredMail(parentEmail,'EXAM_RESULT_PARENT',result.result_id,{
+        ...result,parent_internal_email:parentEmail
+      });
       await sendStructuredMail(ctx.internal_email,'EXAM_GRADED',submission.submission_id,result);
       await loadAssessments();
     }catch(err){alert(err.message||'تعذر اعتماد النتيجة')}
