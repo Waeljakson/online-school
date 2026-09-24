@@ -773,21 +773,30 @@ async function custom(action,a,p){
 
   if(action==='platform_groups_list_local'){
     const subjectExpr="coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject')";
-    if(a.account_type==='teacher' && a.teacher_id){
+    if(a.account_type==='teacher'){
       return await sql`select distinct
         g.id group_id,g.name group_name,
         coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
-        coalesce(t.full_name,pa.display_name) teacher_name,
+        coalesce(t.full_name,pa.display_name,${a.display_name||null}) teacher_name,
         g.schedule_json,g.meeting_url,g.meeting_provider
         from public.study_groups g
-        join public.courses c on c.id=g.course_id
+        left join public.courses c on c.id=g.course_id
         left join public.teachers t on t.id=c.teacher_id
         left join public.platform_accounts pa on pa.teacher_id=c.teacher_id and pa.is_active=true
-        where g.school_id=${a.school_id} and g.is_active=true
-          and (c.teacher_id=${a.teacher_id} or exists(
-            select 1 from public.teacher_room_management trm
-            where trm.group_id=g.id and trm.teacher_account_id=${a.account_id} and trm.is_active=true
-          ))
+        where coalesce(g.is_active,true)=true
+          and (
+            exists(
+              select 1 from public.teacher_room_management trm
+              where trm.group_id=g.id
+                and trm.teacher_account_id=${a.account_id}
+                and trm.is_active=true
+            )
+            or (
+              ${a.teacher_id||null}::uuid is not null
+              and c.teacher_id=${a.teacher_id||null}
+              and g.school_id=${a.school_id}
+            )
+          )
         order by group_name`;
     }
 
