@@ -297,7 +297,25 @@ async function ensureSchema(){
       sold_at timestamptz not null default now(),
       note text
     )`;
+    // Teacher profile fields used by the admin edit form.
+    // Keep these migrations idempotent so older school databases are upgraded automatically.
+    await sql`alter table public.teachers add column if not exists national_id text`;
+    await sql`alter table public.teachers add column if not exists gender text`;
+    await sql`alter table public.teachers add column if not exists birth_date date`;
+    await sql`alter table public.teachers add column if not exists address text`;
+    await sql`alter table public.teachers add column if not exists qualification text`;
+    await sql`alter table public.teachers add column if not exists specialization text`;
+    await sql`alter table public.teachers add column if not exists hire_date date`;
+    await sql`alter table public.teachers add column if not exists salary_type text not null default 'monthly'`;
+    await sql`alter table public.teachers add column if not exists base_salary numeric(12,2) not null default 0`;
+    await sql`alter table public.teachers add column if not exists rate_value numeric(12,2) not null default 0`;
+    await sql`alter table public.teachers add column if not exists bank_name text`;
+    await sql`alter table public.teachers add column if not exists bank_account text`;
     await sql`alter table public.teachers add column if not exists subjects_text text`;
+    await sql`alter table public.teachers add column if not exists notes text`;
+    await sql`alter table public.teachers drop constraint if exists teachers_salary_type_check`;
+    await sql`alter table public.teachers add constraint teachers_salary_type_check
+      check(salary_type in ('monthly','per_lesson','per_hour','percentage','custom'))`;
     await sql`alter table public.study_groups add column if not exists meeting_started_at timestamptz`;
     await sql`alter table public.study_groups add column if not exists meeting_ended_at timestamptz`;
     await sql`create index if not exists tps_teacher_idx on public.teacher_private_students(teacher_account_id,status)`;
