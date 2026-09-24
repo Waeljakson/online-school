@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1855" />
+  <meta name="roven-build" content="20260924-1915" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -770,6 +770,31 @@
         <article class="panel teacher-upcoming-panel" style="margin-bottom:15px">
           <div class="panel-head"><div><h3>حصص اليوم والقادمة</h3><p>أقرب مواعيد حصصك من جداول القاعات.</p></div><span>🗓️</span></div>
           <div id="teacherUpcomingLessons"><div class="students-empty">جارٍ حساب المواعيد...</div></div>
+        </article>
+
+        <article class="panel" id="teacherScheduleManager" style="margin-bottom:15px">
+          <div class="panel-head">
+            <div><h3>إدارة مواعيد حصصي</h3><p>أضف حصصك الأسبوعية أو عدّل مواعيدها. التعديل يظهر في جدول الطلاب والتنبيهات تلقائيًا.</p></div>
+            <span>🕒</span>
+          </div>
+          <div class="form-grid">
+            <div class="form-field"><label>القاعة / المجموعة</label><select id="teacherScheduleGroup"><option value="">اختر القاعة</option></select></div>
+            <div class="form-field"><label>اليوم</label><select id="teacherScheduleDay"><option value="saturday">السبت</option><option value="sunday">الأحد</option><option value="monday">الاثنين</option><option value="tuesday">الثلاثاء</option><option value="wednesday">الأربعاء</option><option value="thursday">الخميس</option><option value="friday">الجمعة</option></select></div>
+            <div class="form-field"><label>وقت الحصة</label><input id="teacherScheduleTime" type="time" value="18:00"></div>
+            <div class="form-field"><label>المدة بالدقائق</label><input id="teacherScheduleDuration" type="number" min="15" max="480" step="15" value="60"></div>
+          </div>
+          <div class="student-form-msg" id="teacherScheduleMsg"></div>
+          <div class="room-actions" style="margin-top:10px">
+            <button class="primary-action" id="saveTeacherScheduleSession" type="button">＋ إضافة الحصة</button>
+            <button class="secondary-action" id="cancelTeacherScheduleEdit" type="button" style="display:none">إلغاء التعديل</button>
+          </div>
+          <div class="table-wrap" style="margin-top:14px">
+            <table class="table" style="min-width:620px">
+              <thead><tr><th>اليوم</th><th>الوقت</th><th>المدة</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody id="teacherScheduleRows"><tr><td colspan="5" class="students-empty">اختر القاعة لعرض مواعيدها.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="teacher-private-note" style="margin-top:10px">رابط Zoom / Meet / Teams يتم تفعيله من زر «تجهيز الحصة / الشات» داخل القاعة.</div>
         </article>
 
         <div class="grid teacher-hub-grid">
@@ -1574,7 +1599,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1855';
+  window.__ROVEN_BUILD__='20260924-1915';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3891,6 +3916,7 @@
     document.getElementById('teacherUpcomingLessons').innerHTML=upcoming.length?upcoming.slice(0,8).map(x=>{
       return '<div class="lesson"><time>'+escapeHtml(x.s.time||'')+'</time><div><strong>'+escapeHtml(x.g.subject_name||x.g.group_name||'حصة')+'</strong><span>'+escapeHtml(weekDayLabels[x.s.day]||x.s.day||'')+'</span></div></div>';
     }).join(''):'<div class="students-empty">لا توجد مواعيد في الجداول الحالية.</div>';
+    renderTeacherScheduleManager();
 
     if(typeof syncTeacherAssistants==='function')syncTeacherAssistants().catch(()=>{});
   };
@@ -3930,6 +3956,118 @@
     }
     const add=e.target.closest('.teacher-add-private-room');
     if(add)openPrivateStudentModal(null,add.dataset.id);
+  });
+
+  let teacherScheduleEditIndex=-1;
+
+  const teacherScheduleGroupRecord=()=>teacherHubGroupsCache.find(g=>String(g.group_id)===String(document.getElementById('teacherScheduleGroup')?.value||''));
+
+  const resetTeacherScheduleEditor=()=>{
+    teacherScheduleEditIndex=-1;
+    const btn=document.getElementById('saveTeacherScheduleSession');
+    if(btn)btn.textContent='＋ إضافة الحصة';
+    const cancel=document.getElementById('cancelTeacherScheduleEdit');
+    if(cancel)cancel.style.display='none';
+    const day=document.getElementById('teacherScheduleDay'),time=document.getElementById('teacherScheduleTime'),duration=document.getElementById('teacherScheduleDuration');
+    if(day)day.value='saturday';
+    if(time)time.value='18:00';
+    if(duration)duration.value='60';
+  };
+
+  const renderTeacherScheduleManager=()=>{
+    const select=document.getElementById('teacherScheduleGroup');
+    const tbody=document.getElementById('teacherScheduleRows');
+    if(!select||!tbody)return;
+    const selected=select.value;
+    select.innerHTML='<option value="">اختر القاعة</option>'+teacherHubGroupsCache.map(g=>
+      '<option value="'+escapeHtml(g.group_id)+'">'+escapeHtml(g.group_name||'قاعة')+(g.subject_name?' — '+escapeHtml(g.subject_name):'')+'</option>'
+    ).join('');
+    if(selected&&teacherHubGroupsCache.some(g=>String(g.group_id)===String(selected)))select.value=selected;
+    const g=teacherScheduleGroupRecord();
+    if(!g){tbody.innerHTML='<tr><td colspan="5" class="students-empty">اختر القاعة لعرض مواعيدها.</td></tr>';return}
+    const sessions=parseScheduleSessions(g.schedule_json);
+    if(!sessions.length){tbody.innerHTML='<tr><td colspan="5" class="students-empty">لا توجد حصص مسجلة لهذه القاعة. أضف أول حصة.</td></tr>';return}
+    tbody.innerHTML=sessions.map((x,i)=>'<tr>'+
+      '<td><b>'+escapeHtml(weekDayLabels[String(x.day||'').toLowerCase()]||x.day||'—')+'</b></td>'+
+      '<td>'+escapeHtml(x.time||'—')+'</td>'+
+      '<td>'+Number(x.duration||60)+' دقيقة</td>'+
+      '<td><span class="status active">مجدولة</span></td>'+
+      '<td><div class="private-money-actions"><button class="secondary-action edit-teacher-session" type="button" data-index="'+i+'">تعديل</button><button class="secondary-action delete-teacher-session" type="button" data-index="'+i+'" style="color:#b42318">حذف</button></div></td>'+
+      '</tr>').join('');
+  };
+
+  const persistTeacherSchedule=async(group,sessions)=>{
+    const msg=document.getElementById('teacherScheduleMsg');
+    msg.className='student-form-msg';
+    try{
+      const result=await dataApiFetch('/rpc/teacher_update_group_schedule',{method:'POST',body:JSON.stringify({
+        p_group_id:group.group_id,
+        p_sessions:sessions
+      })});
+      group.schedule_json=result?.schedule_json||{sessions};
+      const contract=teacherRoomContractsCache.find(x=>String(x.group_id)===String(group.group_id));
+      if(contract)contract.schedule_json=group.schedule_json;
+      msg.textContent='تم حفظ مواعيد الحصص وتحديث الجدول.';
+      msg.className='student-form-msg success show';
+      resetTeacherScheduleEditor();
+      await Promise.allSettled([loadTeacherHub(),loadAdvancedSchedule(),loadPlatformGroups()]);
+    }catch(err){
+      msg.textContent=err?.message||'تعذر حفظ مواعيد الحصص.';
+      msg.className='student-form-msg error show';
+    }
+  };
+
+  document.getElementById('teacherScheduleGroup')?.addEventListener('change',()=>{
+    resetTeacherScheduleEditor();
+    document.getElementById('teacherScheduleMsg').className='student-form-msg';
+    renderTeacherScheduleManager();
+  });
+
+  document.getElementById('saveTeacherScheduleSession')?.addEventListener('click',async()=>{
+    const group=teacherScheduleGroupRecord();
+    const msg=document.getElementById('teacherScheduleMsg');
+    msg.className='student-form-msg';
+    if(!group){msg.textContent='اختر القاعة أولًا.';msg.className='student-form-msg error show';return}
+    const day=document.getElementById('teacherScheduleDay').value;
+    const time=document.getElementById('teacherScheduleTime').value;
+    const duration=Math.max(15,Math.min(480,Number(document.getElementById('teacherScheduleDuration').value)||60));
+    if(!day||!time){msg.textContent='حدد اليوم ووقت الحصة.';msg.className='student-form-msg error show';return}
+    const sessions=parseScheduleSessions(group.schedule_json).map(x=>({...x}));
+    const duplicate=sessions.some((x,i)=>i!==teacherScheduleEditIndex&&String(x.day)===String(day)&&String(x.time)===String(time));
+    if(duplicate){msg.textContent='يوجد بالفعل موعد في نفس اليوم والوقت لهذه القاعة.';msg.className='student-form-msg error show';return}
+    const session={day,time,duration};
+    if(teacherScheduleEditIndex>=0&&teacherScheduleEditIndex<sessions.length)sessions[teacherScheduleEditIndex]=session;
+    else sessions.push(session);
+    sessions.sort((a,b)=>{
+      const da=weekDayOrder.indexOf(String(a.day)),db=weekDayOrder.indexOf(String(b.day));
+      return da===db?String(a.time||'').localeCompare(String(b.time||'')):da-db;
+    });
+    await persistTeacherSchedule(group,sessions);
+  });
+
+  document.getElementById('cancelTeacherScheduleEdit')?.addEventListener('click',resetTeacherScheduleEditor);
+
+  document.getElementById('teacherScheduleRows')?.addEventListener('click',async e=>{
+    const group=teacherScheduleGroupRecord();if(!group)return;
+    const sessions=parseScheduleSessions(group.schedule_json).map(x=>({...x}));
+    const edit=e.target.closest('.edit-teacher-session');
+    if(edit){
+      const i=Number(edit.dataset.index);const x=sessions[i];if(!x)return;
+      teacherScheduleEditIndex=i;
+      document.getElementById('teacherScheduleDay').value=x.day||'saturday';
+      document.getElementById('teacherScheduleTime').value=x.time||'18:00';
+      document.getElementById('teacherScheduleDuration').value=Number(x.duration||60);
+      document.getElementById('saveTeacherScheduleSession').textContent='حفظ تعديل الحصة';
+      document.getElementById('cancelTeacherScheduleEdit').style.display='';
+      return;
+    }
+    const del=e.target.closest('.delete-teacher-session');
+    if(del){
+      const i=Number(del.dataset.index);const x=sessions[i];if(!x)return;
+      if(!confirm('حذف حصة '+(weekDayLabels[x.day]||x.day)+' الساعة '+(x.time||'')+'؟'))return;
+      sessions.splice(i,1);
+      await persistTeacherSchedule(group,sessions);
+    }
   });
 
   const resolveTeacherRoomAdmin=async(force=false)=>{
@@ -4244,7 +4382,7 @@
       register_new_teacher:['create','إنشاء معلم'],create_study_group_admin:['create','إنشاء مجموعة'],
       platform_save_attendance:['attendance','حفظ حضور'],platform_issue_points:['academic','إضافة/خصم نقاط'],
       platform_reward_create_admin:['academic','إنشاء مكافأة'],platform_reward_update_status:['academic','تحديث طلب مكافأة'],
-      platform_set_group_meeting:['update','تعديل رابط القاعة'],platform_update_profile:['update','تعديل الحساب'],
+      platform_set_group_meeting:['update','تعديل رابط القاعة'],teacher_update_group_schedule:['update','تعديل مواعيد الحصص'],platform_update_profile:['update','تعديل الحساب'],
       teacher_assistant_create:['create','إنشاء مساعد معلم'],teacher_assistant_update:['update','تعديل مساعد معلم'],
       teacher_assistant_delete:['delete','إلغاء مساعد معلم'],create_system_user_admin:['create','إنشاء مستخدم'],
       archive_school_entity:['status','أرشفة/إيقاف عنصر'],

@@ -1003,6 +1003,40 @@ async function custom(action,a,p){
 
   const adminEntityAllowed=()=>a.account_type==='admin'||['super_admin','school_manager'].includes(String(a.role||''));
 
+  if(action==='teacher_update_group_schedule'){
+    must(a,a.account_type==='teacher'&&a.teacher_id);
+    const gid=String(p.p_group_id||'');
+    if(!gid)throw new Error('group_id_required');
+    const owned=(await sql`select g.id
+      from public.study_groups g
+      join public.courses c on c.id=g.course_id
+      where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
+      limit 1`)[0];
+    if(!owned)throw new Error('group_not_owned_by_teacher');
+    const allowedDays=new Set(['saturday','sunday','monday','tuesday','wednesday','thursday','friday']);
+    const raw=Array.isArray(p.p_sessions)?p.p_sessions:[];
+    if(raw.length>30)throw new Error('too_many_sessions');
+    const sessions=raw.map(x=>{
+      const day=String(x?.day||'').toLowerCase();
+      const time=String(x?.time||'');
+      const duration=Math.max(15,Math.min(480,Number(x?.duration||60)||60));
+      if(!allowedDays.has(day))throw new Error('invalid_session_day');
+      if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(time))throw new Error('invalid_session_time');
+      return {day,time,duration};
+    });
+    const keys=new Set();
+    for(const x of sessions){
+      const key=x.day+'|'+x.time;
+      if(keys.has(key))throw new Error('duplicate_session');
+      keys.add(key);
+    }
+    const schedule={sessions};
+    return (await sql`update public.study_groups
+      set schedule_json=${JSON.stringify(schedule)}::jsonb
+      where id=${gid}::uuid and school_id=${a.school_id}
+      returning id group_id,name group_name,schedule_json`)[0];
+  }
+
   if(action==='platform_set_group_meeting'){
     must(a,a.account_type==='teacher'&&a.teacher_id);
     const gid=String(p.p_group_id||'');
@@ -1222,7 +1256,7 @@ export default{
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
-        'platform_set_group_meeting',
+        'platform_set_group_meeting','teacher_update_group_schedule',
         'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
         'admin_entity_set_active','admin_entity_delete'
       ]);

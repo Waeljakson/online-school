@@ -1,4 +1,4 @@
-const BUILD='20260924-1855';
+const BUILD='20260924-1915';
 self.addEventListener('install',event=>{
   self.skipWaiting();
 });
