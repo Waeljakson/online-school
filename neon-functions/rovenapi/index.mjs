@@ -1882,8 +1882,10 @@ export default{
               ${JSON.stringify({p_folder:'inbox'})}::jsonb
             ) result`;
             const mails=Array.isArray(mailRpc[0]?.result)?mailRpc[0].result:[];
-            const links=mails
-              .filter(m=>String(m?.subject||'').startsWith('[PRIVATE_PARENT_LINK]'))
+
+            // Normal school student link.
+            const schoolLinks=mails
+              .filter(m=>String(m?.subject||'').startsWith('[PARENT_LINK]'))
               .map(m=>{
                 let body=m?.body;
                 if(typeof body==='string'){
@@ -1891,39 +1893,112 @@ export default{
                 }
                 return {...(body&&typeof body==='object'?body:{}),_sent_at:m?.sent_at||null};
               })
-              .filter(x=>x.student_name||x.group_id)
-              .sort((x,y)=>new Date(y.linked_at||y._sent_at||0)-new Date(x.linked_at||x._sent_at||0));
+              .filter(x=>x.student_id)
+              .sort((x,y)=>new Date(y.created_at||y._sent_at||0)-new Date(x.created_at||x._sent_at||0));
 
-            const link=links[0]||null;
-            if(link){
-              let candidate=null;
+            const schoolLink=schoolLinks[0]||null;
+            if(schoolLink?.student_id){
+              let parentId=a.parent_id||null;
 
-              if(link.group_id && link.student_name){
-                candidate=(await sql`select ps.id
-                  from public.teacher_private_students ps
-                  where ps.group_id=${String(link.group_id)}::uuid
-                    and ps.status='active'
-                    and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
-                  order by ps.updated_at desc nulls last
+              if(!parentId){
+                // Prefer an already existing relation created by the legacy registrar.
+                const existingRel=(await sql`select parent_id
+                  from public.student_parents
+                  where student_id=${String(schoolLink.student_id)}::uuid
                   limit 1`)[0]||null;
+                parentId=existingRel?.parent_id||null;
               }
 
-              if(!candidate && link.student_name && link.teacher_internal_email){
-                candidate=(await sql`select ps.id
-                  from public.teacher_private_students ps
-                  join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
-                  where ps.status='active'
-                    and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
-                    and lower(coalesce(teacher.internal_email,''))=lower(${String(link.teacher_internal_email)})
-                  order by ps.updated_at desc nulls last
+              if(!parentId){
+                const phone=String(schoolLink.parent_phone||'').trim();
+                const email=String(schoolLink.parent_email||schoolLink.parent_internal_email||'').trim();
+                const name=String(schoolLink.parent_name||'').trim();
+                const parent=(await sql`select pr.id
+                  from public.parents pr
+                  where (
+                    (${phone}<>'' and regexp_replace(coalesce(to_jsonb(pr)->>'phone',''),'\\D','','g')=
+                                      regexp_replace(${phone},'\\D','','g'))
+                    or (${email}<>'' and lower(coalesce(to_jsonb(pr)->>'email',''))=lower(${email}))
+                    or (${name}<>'' and lower(trim(coalesce(to_jsonb(pr)->>'full_name','')))=lower(trim(${name})))
+                  )
                   limit 1`)[0]||null;
+                parentId=parent?.id||null;
               }
 
-              if(candidate?.id){
-                await sql`update public.teacher_private_students
-                  set guardian_account_id=${a.account_id},updated_at=now()
-                  where id=${candidate.id}`;
-                dashboard=await custom('parent_dashboard',a,p);
+              if(parentId){
+                await sql`update public.platform_accounts
+                  set parent_id=${parentId}::uuid,updated_at=now()
+                  where id=${a.account_id}`;
+
+                const relCols=await sql`select column_name
+                  from information_schema.columns
+                  where table_schema='public' and table_name='student_parents'`;
+                const hasRelationship=relCols.some(x=>x.column_name==='relationship');
+                if(hasRelationship){
+                  await sql`insert into public.student_parents(student_id,parent_id,relationship)
+                    values(
+                      ${String(schoolLink.student_id)}::uuid,
+                      ${parentId}::uuid,
+                      ${String(schoolLink.relationship||'guardian')}
+                    )
+                    on conflict do nothing`;
+                }else{
+                  await sql`insert into public.student_parents(student_id,parent_id)
+                    values(${String(schoolLink.student_id)}::uuid,${parentId}::uuid)
+                    on conflict do nothing`;
+                }
+
+                const repaired={...a,parent_id:parentId};
+                dashboard=await custom('parent_dashboard',repaired,p);
+              }
+            }
+
+            // Private student link remains supported as a fallback.
+            const totalChildren=(dashboard?.school_students?.length||0)+(dashboard?.private_students?.length||0);
+            if(!totalChildren){
+              const links=mails
+                .filter(m=>String(m?.subject||'').startsWith('[PRIVATE_PARENT_LINK]'))
+                .map(m=>{
+                  let body=m?.body;
+                  if(typeof body==='string'){
+                    try{body=JSON.parse(body)}catch{body={}}
+                  }
+                  return {...(body&&typeof body==='object'?body:{}),_sent_at:m?.sent_at||null};
+                })
+                .filter(x=>x.student_name||x.group_id)
+                .sort((x,y)=>new Date(y.linked_at||y._sent_at||0)-new Date(x.linked_at||x._sent_at||0));
+
+              const link=links[0]||null;
+              if(link){
+                let candidate=null;
+
+                if(link.group_id && link.student_name){
+                  candidate=(await sql`select ps.id
+                    from public.teacher_private_students ps
+                    where ps.group_id=${String(link.group_id)}::uuid
+                      and ps.status='active'
+                      and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
+                    order by ps.updated_at desc nulls last
+                    limit 1`)[0]||null;
+                }
+
+                if(!candidate && link.student_name && link.teacher_internal_email){
+                  candidate=(await sql`select ps.id
+                    from public.teacher_private_students ps
+                    join public.platform_accounts teacher on teacher.id=ps.teacher_account_id
+                    where ps.status='active'
+                      and lower(trim(ps.full_name))=lower(trim(${String(link.student_name)}))
+                      and lower(coalesce(teacher.internal_email,''))=lower(${String(link.teacher_internal_email)})
+                    order by ps.updated_at desc nulls last
+                    limit 1`)[0]||null;
+                }
+
+                if(candidate?.id){
+                  await sql`update public.teacher_private_students
+                    set guardian_account_id=${a.account_id},updated_at=now()
+                    where id=${candidate.id}`;
+                  dashboard=await custom('parent_dashboard',a,p);
+                }
               }
             }
           }catch{}
