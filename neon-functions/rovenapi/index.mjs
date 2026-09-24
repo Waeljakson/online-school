@@ -934,6 +934,25 @@ async function custom(action,a,p){
 
   const adminEntityAllowed=()=>a.account_type==='admin'||['super_admin','school_manager'].includes(String(a.role||''));
 
+  if(action==='platform_set_group_meeting'){
+    must(a,a.account_type==='teacher'&&a.teacher_id);
+    const gid=String(p.p_group_id||'');
+    if(!gid)throw new Error('group_id_required');
+    const owned=(await sql`select g.id
+      from public.study_groups g
+      join public.courses c on c.id=g.course_id
+      where g.id=${gid}::uuid and g.school_id=${a.school_id} and c.teacher_id=${a.teacher_id}
+      limit 1`)[0];
+    if(!owned)throw new Error('group_not_owned_by_teacher');
+    const provider=String(p.p_provider||'zoom');
+    const url=p.p_url?String(p.p_url).trim():null;
+    if(url&&!/^https:\/\//i.test(url))throw new Error('invalid_meeting_url');
+    return (await sql`update public.study_groups
+      set meeting_provider=${provider},meeting_url=${url}
+      where id=${gid}::uuid and school_id=${a.school_id}
+      returning id group_id,name group_name,meeting_provider,meeting_url`)[0];
+  }
+
   if(action==='admin_accounts_all'){
     must(a,adminEntityAllowed());
     return await sql`select pa.id account_id,pa.account_type,pa.account_code,pa.username,pa.internal_email,
@@ -1133,6 +1152,7 @@ export default{
         'products_list','product_create','product_delete','product_sale_add','product_sales_summary',
         'teacher_roven_contacts','school_contacts','archive_school_entity',
         'platform_direct_chat_contacts','platform_direct_chat_list','platform_direct_chat_send',
+        'platform_set_group_meeting',
         'admin_accounts_all','admin_students_all','admin_teachers_all','admin_groups_all',
         'admin_entity_set_active','admin_entity_delete'
       ]);
