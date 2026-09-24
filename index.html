@@ -1683,7 +1683,7 @@
     }else if(type==='parent'){
       allowed=new Set(['parenthub','homework','schedule','certificates','mail','profile']);
     }else if(type==='private_parent'){
-      allowed=new Set(['parenthub','certificates','mail','profile']);
+      allowed=new Set(['parenthub','homework','schedule','certificates','mail','profile']);
     }else if(type==='student'||type==='private_student'){
       allowed=new Set(['dashboard','assessments','homework','schedule','certificates','rewards','mygroups','directchat','mail','profile']);
     }else if(type==='teacher_assistant'){
@@ -3650,12 +3650,14 @@
       owner_account_id:ctx.account_id,owner_name:ctx.display_name,owner_email:ctx.internal_email,created_at:new Date().toISOString()
     };
     try{
-      const [roster,directory]=await Promise.all([
-        dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})}),
-        accountDirectorySafe()
+      const [rosterResult,directory,privateResult]=await Promise.all([
+        dataApiFetch('/rpc/platform_attendance_roster',{method:'POST',body:JSON.stringify({p_group_id:groupId,p_on_date:new Date().toISOString().slice(0,10)})}).catch(()=>[]),
+        accountDirectorySafe(),
+        ctx.account_type==='teacher'?dataApiFetch('/rpc/teacher_private_students_list',{method:'POST',body:'{}'}).catch(()=>[]):Promise.resolve([])
       ]);
-      const students=Array.isArray(roster)?roster:[];
+      const students=Array.isArray(rosterResult)?rosterResult:[];
       let sentCount=0;
+      const sentAccounts=new Set();
       for(const st of students){
         const acct=directory.find(a=>a.account_type==='student'&&(
           (a.student_id&&String(a.student_id)===String(st.student_id))||
@@ -3664,7 +3666,17 @@
         ));
         if(!acct?.internal_email)continue;
         await sendStructuredMail(acct.internal_email,'HOMEWORK_ASSIGN',hw.homework_id,{...hw,student_id:st.student_id,student_no:st.student_no,student_name:st.student_name});
-        sentCount++;
+        sentAccounts.add(String(acct.account_id||acct.internal_email));sentCount++;
+      }
+      for(const ps of (Array.isArray(privateResult)?privateResult:[]).filter(x=>String(x.group_id||'')===String(groupId))){
+        const acct=directory.find(a=>String(a.account_id||'')===String(ps.platform_account_id||''));
+        if(!acct?.internal_email||sentAccounts.has(String(acct.account_id||acct.internal_email)))continue;
+        const guardian=directory.find(a=>String(a.account_id||'')===String(ps.guardian_account_id||''));
+        await sendStructuredMail(acct.internal_email,'HOMEWORK_ASSIGN',hw.homework_id,{
+          ...hw,private_student_id:ps.id||ps.private_student_id||null,student_name:ps.full_name,
+          parent_internal_email:guardian?.internal_email||null
+        });
+        sentAccounts.add(String(acct.account_id||acct.internal_email));sentCount++;
       }
       if(ctx.internal_email)await sendStructuredMail(ctx.internal_email,'HOMEWORK_DEF',hw.homework_id,{...hw,assigned_count:sentCount});
       await recordAudit('academic','نشر واجب','homework',hw.homework_id,hw.title,{group_id:groupId,students:sentCount});
@@ -3697,7 +3709,7 @@
         group_id:assignment.group_id,group_name:assignment.group_name,student_id:ctx.student_id||null,student_name:ctx.display_name||assignment.student_name||'طالب',
         student_email:ctx.internal_email,body:document.getElementById('homeworkSubmitBody').value.trim()||null,
         attachment_name:file.name,attachment_mime:file.mime,attachment_base64:file.base64,
-        owner_email:assignment.owner_email,max_score:assignment.max_score,submitted_at:new Date().toISOString()
+        owner_email:assignment.owner_email,parent_internal_email:assignment.parent_internal_email||null,max_score:assignment.max_score,submitted_at:new Date().toISOString()
       };
       await sendStructuredMail(assignment.owner_email,'HOMEWORK_SUBMISSION',sub.submission_id,sub);
       await sendStructuredMail(ctx.internal_email,'HOMEWORK_SUBMISSION',sub.submission_id,sub);
@@ -3717,6 +3729,7 @@
     const grade={...sub,score,max_score:Number(sub.max_score||0),feedback,grader_name:ctx.display_name,graded_at:new Date().toISOString()};
     try{
       await sendStructuredMail(sub.student_email,'HOMEWORK_GRADED',sub.submission_id,grade);
+      if(sub.parent_internal_email)await sendStructuredMail(sub.parent_internal_email,'HOMEWORK_PARENT',sub.submission_id,grade);
       if(ctx.internal_email)await sendStructuredMail(ctx.internal_email,'HOMEWORK_GRADED',sub.submission_id,grade);
       await recordAudit('academic','تصحيح واجب','homework_submission',sub.submission_id,sub.student_name,{score,max_score:grade.max_score});
       await loadHomework();
@@ -5731,7 +5744,7 @@
     notificationCount.classList.toggle('show',total>0);
     notificationSummary.textContent=total?total+' إشعار غير مقروء':'لا توجد إشعارات جديدة';
 
-    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0,homework:0,schedule:0};
+    const sectionCounts={directchat:0,mail:0,mygroups:0,rewards:0,homework:0,schedule:0,parenthub:0};
     notificationItems.forEach(x=>{if(sectionCounts[x.section]!==undefined)sectionCounts[x.section]+=Number(x.count||1)});
     Object.entries(sectionCounts).forEach(([k,v])=>setNavNotificationBadge(k,v));
 
@@ -5773,6 +5786,9 @@
     }else if(item.section==='rewards'){
       switchTo('rewards','النقاط والمكافآت');
       await loadRewards();
+    }else if(item.section==='parenthub'){
+      switchTo('parenthub','متابعة الأبناء');
+      await loadParentHub();
     }else if(item.section==='homework'){
       if(String(item.uid||'').startsWith('homework-grade:')){
         const seen=getStoredMap('homework_grade_seen');seen[String(item.uid).replace('homework-grade:','')]=Date.now();setStoredMap('homework_grade_seen',seen);
@@ -5864,6 +5880,25 @@
           if(key&&!seen[key])items.push({uid:'homework-grade:'+key,section:'homework',count:1,icon:'✅',title:'تم تصحيح الواجب',text:(g.homework_title||'واجب')+' — '+Number(g.score||0)+' / '+Number(g.max_score||0),time:g.graded_at});
         });
       }catch{}
+
+      // Financial reminder for parent/student accounts.
+      if(['parent','private_parent'].includes(type)){
+        try{
+          const inboxFin=await structuredMail('inbox');
+          const links=latestStructuredBy(inboxFin,'PARENT_LINK','student_no');
+          const payments=latestStructuredBy(inboxFin,'PARENT_PAYMENT','payment_id');
+          const voids=new Set(latestStructuredBy(inboxFin,'PARENT_PAYMENT_VOID','payment_id').map(x=>String(x.payment_id)));
+          links.forEach(l=>{
+            const due=Math.max(0,Number(l.fee||0)-Number(l.discount||0));
+            const extra=payments.filter(p=>!voids.has(String(p.payment_id))&&((l.student_id&&String(p.student_id||'')===String(l.student_id))||(l.student_no&&String(p.student_no||'')===String(l.student_no)))).reduce((sum,p)=>sum+Number(p.amount||0),0);
+            const balance=Math.max(0,due-Number(l.paid||0)-extra);
+            if(balance>0){
+              const key='balance:'+String(l.student_no||l.student_id||l.student_name);
+              items.push({uid:key,section:'parenthub',count:1,icon:'💳',title:'رصيد مستحق على '+(l.student_name||'الطالب'),text:'المتبقي '+balance.toFixed(2),time:new Date().toISOString()});
+            }
+          });
+        }catch{}
+      }
 
       // Upcoming lesson reminder.
       if(['student','private_student','teacher'].includes(type)){
