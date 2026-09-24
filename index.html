@@ -6810,7 +6810,7 @@
           p_type:c.type||'appreciation',
           p_body:c.body||null,
           p_template:'classic',
-          p_legacy_ref:c.certificate_id||null
+          p_legacy_ref:c.legacy_ref||c.certificate_id||null
         })});
       }catch{}
     }
@@ -6869,8 +6869,9 @@
 
     const map=new Map();
     [...mailRows,...normalizedDb].forEach(c=>{
-      const key=String(c.id||c.certificate_id||c.legacy_ref||Math.random());
-      map.set(key,c);
+      const key=String(c.legacy_ref||c.certificate_id||c.id||Math.random());
+      const current=map.get(key);
+      if(!current || c._db)map.set(key,c);
     });
     const rows=[...map.values()].sort((a,b)=>new Date(b.issued_at||0)-new Date(a.issued_at||0));
 
@@ -6886,7 +6887,11 @@
     </div>`).join(''):'<div class="students-empty">لا توجد شهادات.</div>';
   };
 
-  document.getElementById('issueCertificate').addEventListener('click',async()=>{
+  document.getElementById('issueCertificate').addEventListener('click',async e=>{
+    const issueBtn=e.currentTarget;
+    if(issueBtn.disabled)return;
+    issueBtn.disabled=true;
+    issueBtn.textContent='جارٍ إصدار الشهادة...';
     const msg=document.getElementById('certificateMsg');
     const ctx=await hydratePlatformContext();
     const target=certificateTargetsCache.get(document.getElementById('certificateStudent').value);
@@ -6922,7 +6927,13 @@
       msg.textContent='تم إصدار الشهادة وحفظها في حساب الطالب وولي الأمر.';
       msg.className='student-form-msg success show';
       await loadCertificates();
-    }catch(err){msg.textContent=err.message||'تعذر إصدار الشهادة';msg.className='student-form-msg error show'}
+    }catch(err){
+      msg.textContent=err.message||'تعذر إصدار الشهادة';
+      msg.className='student-form-msg error show';
+    }finally{
+      issueBtn.disabled=false;
+      issueBtn.textContent='إصدار الشهادة';
+    }
   });
 
   document.getElementById('refreshCertificates').addEventListener('click',loadCertificates);
