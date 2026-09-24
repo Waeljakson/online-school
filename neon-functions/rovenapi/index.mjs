@@ -347,6 +347,32 @@ async function directChatPeerAllowed(a,peerId){
   return (await directChatBaseContacts(a)).some(x=>String(x.account_id)===String(peerId));
 }
 
+async function reconcileSinglePrivateRoomByAccount(accountId){
+  const ps=(await sql`select id,teacher_account_id,group_id
+    from public.teacher_private_students
+    where platform_account_id=${accountId} and status='active'
+    order by updated_at desc nulls last
+    limit 1`)[0]||null;
+  if(!ps)return null;
+
+  const rooms=await sql`select group_id,teacher_account_id,school_id
+    from public.teacher_room_management
+    where teacher_account_id=${ps.teacher_account_id}
+      and is_active=true
+    order by updated_at desc`;
+  if(rooms.length!==1)return ps;
+
+  const room=rooms[0];
+  if(String(ps.group_id||'')!==String(room.group_id)){
+    const updated=(await sql`update public.teacher_private_students
+      set group_id=${room.group_id},updated_at=now()
+      where id=${ps.id}
+      returning id,teacher_account_id,group_id`)[0];
+    return updated||ps;
+  }
+  return ps;
+}
+
 async function privateRoomAccess(a,groupId,requireChat=false){
   const gid=String(groupId||'');
   if(!gid)return null;
@@ -355,10 +381,14 @@ async function privateRoomAccess(a,groupId,requireChat=false){
     where trm.group_id=${gid}::uuid
       and trm.is_active=true
     limit 1`)[0]||null;
-  if(!room||String(room.school_id)!==String(a.school_id))return null;
+  if(!room)return null;
 
+  // The room owner is authoritative even when legacy school_id values drifted.
   if(String(room.teacher_account_id)===String(a.account_id))return room;
 
+  // Private student membership is authoritative and repairs an old duplicate-room link
+  // when this teacher currently owns exactly one active private room.
+  await reconcileSinglePrivateRoomByAccount(a.account_id);
   const privateStudent=(await sql`select 1
     from public.teacher_private_students ps
     where ps.group_id=${gid}::uuid
@@ -368,7 +398,8 @@ async function privateRoomAccess(a,groupId,requireChat=false){
     limit 1`)[0];
   if(privateStudent)return room;
 
-  if(a.student_id){
+  // Ordinary school membership remains school-scoped.
+  if(a.student_id && String(room.school_id)===String(a.school_id)){
     const enrolled=(await sql`select 1 from public.enrollments
       where group_id=${gid}::uuid and student_id=${a.student_id} and status='active'
       limit 1`)[0];
@@ -382,7 +413,8 @@ async function privateRoomAccess(a,groupId,requireChat=false){
     if(groups.includes(gid))return room;
   }
 
-  if(a.account_type==='admin' || (a.account_type==='staff' && ['super_admin','school_manager','academic_admin'].includes(String(a.role||''))))return room;
+  if(String(room.school_id)===String(a.school_id) &&
+     (a.account_type==='admin' || (a.account_type==='staff' && ['super_admin','school_manager','academic_admin'].includes(String(a.role||'')))))return room;
   return null;
 }
 
@@ -902,6 +934,7 @@ async function custom(action,a,p){
       if(schoolRows.length)return schoolRows;
     }
 
+    await reconcileSinglePrivateRoomByAccount(a.account_id);
     const privateRows=await sql`select distinct
       g.id group_id,g.name group_name,
       coalesce(to_jsonb(c)->>'subject_name',to_jsonb(c)->>'name',to_jsonb(c)->>'title',to_jsonb(c)->>'subject') subject_name,
@@ -1341,6 +1374,17 @@ async function custom(action,a,p){
         limit 1`)[0];
     }
     if(!owned)throw new Error('group_not_owned_by_teacher');
+
+    const activePrivateRooms=await sql`select group_id
+      from public.teacher_room_management
+      where teacher_account_id=${a.account_id} and is_active=true`;
+    if(activePrivateRooms.length===1 && String(activePrivateRooms[0].group_id)===gid){
+      await sql`update public.teacher_private_students
+        set group_id=${gid}::uuid,updated_at=now()
+        where teacher_account_id=${a.account_id} and status='active'
+          and group_id is distinct from ${gid}::uuid`;
+    }
+
     const provider=String(p.p_provider||'zoom');
     const url=p.p_url?String(p.p_url).trim():null;
     if(url&&!/^https:\/\//i.test(url))throw new Error('invalid_meeting_url');
@@ -1508,6 +1552,7 @@ async function decorateLogin(result){
     where l.assistant_account_id=${result.account_id} and l.is_active=true limit 1`)[0];
   if(link)return {...result,account_type:'teacher_assistant',role:'teacher_assistant',
     teacher_account_id:link.teacher_account_id,teacher_name:link.teacher_name,permissions:link.permissions};
+  await reconcileSinglePrivateRoomByAccount(result.account_id);
   const ps=(await sql`select ps.id,ps.group_id,ps.teacher_account_id,g.name group_name
     from public.teacher_private_students ps
     left join public.study_groups g on g.id=ps.group_id
