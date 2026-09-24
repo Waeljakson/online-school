@@ -3074,7 +3074,6 @@ export default{
         let legacyResult={updated:true};
         if(p.p_new_password){
           const rows=await sql`select public.roven_rpc('platform_update_profile',${token},${JSON.stringify({
-            p_profile_photo:null,
             p_old_password:p.p_old_password||null,
             p_new_password:p.p_new_password||null
           })}::jsonb) result`;
