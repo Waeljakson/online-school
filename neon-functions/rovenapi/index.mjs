@@ -939,6 +939,17 @@ async function unifyGuardianPhoneLinks(schoolId,rawPhone,preferredAccountId=null
   return guardian;
 }
 
+async function cleanupCertificateMigrationDuplicates(schoolId){
+  await sql`update public.platform_certificates dup
+    set revoked_at=coalesce(dup.revoked_at,now())
+    from public.platform_certificates original
+    where dup.school_id=${schoolId}
+      and original.school_id=dup.school_id
+      and dup.id<>original.id
+      and dup.revoked_at is null
+      and dup.legacy_ref=original.id::text`;
+}
+
 async function custom(action,a,p){
   await ensureSchema();
 
@@ -1844,6 +1855,7 @@ async function custom(action,a,p){
       join public.teacher_private_students ps on ps.id=pp.private_student_id
       where pp.private_student_id=any(${privateIds}::uuid[])
       order by record_type,record_id desc`:[];
+    await cleanupCertificateMigrationDuplicates(a.school_id);
     const certs=await sql`select c.*,s.full_name student_name,ps.full_name private_student_name
       from public.platform_certificates c
       left join public.students s on s.id=c.student_id
@@ -1986,6 +1998,7 @@ async function custom(action,a,p){
   }
 
   if(action==='student_dashboard'){
+    await cleanupCertificateMigrationDuplicates(a.school_id);
     let sid=a.student_id,psid=null;
     if(!sid){
       const ps=(await sql`select id from public.teacher_private_students
@@ -2012,7 +2025,9 @@ async function custom(action,a,p){
 
     if(legacyRef){
       const existing=(await sql`select * from public.platform_certificates
-        where school_id=${a.school_id} and legacy_ref=${legacyRef}
+        where school_id=${a.school_id}
+          and (legacy_ref=${legacyRef} or id::text=${legacyRef})
+        order by issued_at asc
         limit 1`)[0]||null;
       if(existing)return existing;
     }
@@ -2041,6 +2056,7 @@ async function custom(action,a,p){
 
   if(action==='certificate_list_owned'){
     must(a,a.account_type==='teacher'||a.account_type==='admin'||a.account_type==='staff');
+    await cleanupCertificateMigrationDuplicates(a.school_id);
     return await sql`select c.*,s.full_name student_name,ps.full_name private_student_name
       from public.platform_certificates c
       left join public.students s on s.id=c.student_id
