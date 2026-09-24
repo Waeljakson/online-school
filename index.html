@@ -1728,7 +1728,7 @@
       body:JSON.stringify({action:'platform_my_profile',sessionToken:String(token||''),payload:{}})
     });
     let data=null;try{data=await res.json()}catch{}
-    if(!res.ok||!data?.account_id)throw new Error(String(data?.error||'invalid_or_expired_session'));
+    if(!res.ok||!(data?.account_id||data?.app_user_id||data?.school_id))throw new Error(String(data?.error||'invalid_or_expired_session'));
     return data;
   };
   const makeRandomPassword=()=>{
@@ -8460,31 +8460,48 @@
 
   const restorePlatformSession=async()=>{
     if(new URLSearchParams(location.search).get('token'))return;
-    const saved=readStoredPlatformSession();
-    if(!saved?.token)return;
-    try{
-      platformSessionToken=saved.token;
-      const profile=await validateStoredPlatformSession(saved.token);
-      currentPlatformAccount={...(saved.account||{}),...profile,session_token:saved.token};
-      try{
-        saved.store.setItem(PLATFORM_ACCOUNT_KEY,JSON.stringify(currentPlatformAccount));
-      }catch{}
-      enterPlatformPortal(currentPlatformAccount);
 
+    const reopenLastSection=()=>{
       let last='';
       try{
         last=sessionStorage.getItem(LAST_SECTION_KEY)||localStorage.getItem(LAST_SECTION_KEY)||'';
       }catch{}
-      if(last){
-        const nav=document.querySelector('#nav [data-section="'+CSS.escape(last)+'"]');
-        if(nav&&nav.style.display!=='none'){
-          setTimeout(()=>switchTo(last,nav.dataset.title||'ROVEN'),120);
-        }
+      if(!last)return;
+      const nav=document.querySelector('#nav [data-section="'+CSS.escape(last)+'"]');
+      if(nav&&nav.style.display!=='none'){
+        setTimeout(()=>switchTo(last,nav.dataset.title||'ROVEN'),120);
       }
+    };
+
+    const saved=readStoredPlatformSession();
+    if(saved?.token){
+      try{
+        platformSessionToken=saved.token;
+        const profile=await validateStoredPlatformSession(saved.token);
+        currentPlatformAccount={...(saved.account||{}),...profile,session_token:saved.token};
+        try{saved.store.setItem(PLATFORM_ACCOUNT_KEY,JSON.stringify(currentPlatformAccount))}catch{}
+        enterPlatformPortal(currentPlatformAccount);
+        reopenLastSection();
+        return;
+      }catch{
+        platformSessionToken='';
+        currentPlatformAccount=null;
+        clearStoredPlatformSession();
+      }
+    }
+
+    // Admin/staff accounts can use Neon Auth's secure cookie session.
+    try{
+      const opaque=await getOpaqueSessionToken(true);
+      if(!opaque)return;
+      const profile=await validateStoredPlatformSession(opaque);
+      rovenSessionToken=opaque;
+      currentPlatformAccount={...(currentPlatformAccount||{}),...profile};
+      enterPlatformPortal(currentPlatformAccount);
+      reopenLastSection();
     }catch{
-      platformSessionToken='';
+      rovenSessionToken='';
       currentPlatformAccount=null;
-      clearStoredPlatformSession();
     }
   };
   restorePlatformSession();
