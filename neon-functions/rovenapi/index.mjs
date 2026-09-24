@@ -994,6 +994,60 @@ async function custom(action,a,p){
         where p.private_student_id=ps.id and p.payment_kind='books'),0) books_paid
       from public.teacher_private_students ps
       where ps.id=any(${privateIds}::uuid[])`:[];
+    const schoolFinance=schoolStudentIds.length?await sql`select
+      i.id record_id,
+      s.id student_id,
+      s.full_name student_name,
+      'invoice'::text record_type,
+      to_jsonb(i) record_json
+      from public.invoices i
+      join public.students s on s.id=i.student_id
+      where i.student_id=any(${schoolStudentIds}::uuid[])
+      order by coalesce(
+        nullif(to_jsonb(i)->>'created_at','')::timestamptz,
+        nullif(to_jsonb(i)->>'issued_at','')::timestamptz,
+        now()
+      ) desc`:[];
+    const privateFinance=privateIds.length?await sql`
+      select
+        ('fee-'||ps.id::text)::text record_id,
+        null::uuid student_id,
+        ps.id private_student_id,
+        ps.full_name student_name,
+        'private_fee'::text record_type,
+        jsonb_build_object(
+          'monthly_fee',ps.monthly_fee,
+          'books_fee',ps.books_fee,
+          'books_free',ps.books_free,
+          'month_paid',coalesce((select sum(pp.amount) from public.teacher_private_payments pp
+            where pp.private_student_id=ps.id
+              and coalesce(pp.payment_kind,'tuition')='tuition'
+              and date_trunc('month',pp.paid_on)=date_trunc('month',current_date)),0),
+          'books_paid',coalesce((select sum(pp.amount) from public.teacher_private_payments pp
+            where pp.private_student_id=ps.id and pp.payment_kind='books'),0),
+          'joined_on',ps.joined_on
+        ) record_json
+      from public.teacher_private_students ps
+      where ps.id=any(${privateIds}::uuid[])
+      union all
+      select
+        pp.id::text record_id,
+        null::uuid student_id,
+        pp.private_student_id,
+        ps.full_name student_name,
+        'private_payment'::text record_type,
+        jsonb_build_object(
+          'amount',pp.amount,
+          'paid_on',pp.paid_on,
+          'method',pp.method,
+          'note',pp.note,
+          'payment_kind',pp.payment_kind,
+          'created_at',pp.created_at
+        ) record_json
+      from public.teacher_private_payments pp
+      join public.teacher_private_students ps on ps.id=pp.private_student_id
+      where pp.private_student_id=any(${privateIds}::uuid[])
+      order by record_type,record_id desc`:[];
     const certs=await sql`select c.*,s.full_name student_name,ps.full_name private_student_name
       from public.platform_certificates c
       left join public.students s on s.id=c.student_id
@@ -1010,7 +1064,13 @@ async function custom(action,a,p){
       where at.status='graded'
         and ((at.student_id=any(${schoolStudentIds}::uuid[])) or (at.private_student_id=any(${privateIds}::uuid[])))
       order by at.submitted_at desc`;
-    return {school_students:schoolStudents,private_students:privateStudents,certificates:certs,exam_results:results};
+    return {
+      school_students:schoolStudents,
+      private_students:privateStudents,
+      finance_records:[...schoolFinance,...privateFinance],
+      certificates:certs,
+      exam_results:results
+    };
   }
 
   if(action==='platform_groups_list_local'){
