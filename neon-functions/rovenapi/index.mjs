@@ -889,8 +889,41 @@ async function custom(action,a,p){
   if(action==='parent_dashboard'){
     let schoolStudentIds=[];
     let privateIds=[];
-    if(a.parent_id){
-      schoolStudentIds=(await sql`select student_id from public.student_parents where parent_id=${a.parent_id}`).map(x=>x.student_id);
+    let resolvedParentId=a.parent_id||null;
+
+    if(!resolvedParentId && a.account_type==='parent'){
+      const displayName=String(a.display_name||'').trim();
+      const username=String(a.username||'').trim();
+      const internalEmail=String(a.internal_email||'').trim();
+
+      const candidates=await sql`select pr.id,
+        coalesce(to_jsonb(pr)->>'full_name','') full_name,
+        coalesce(to_jsonb(pr)->>'phone','') phone,
+        coalesce(to_jsonb(pr)->>'email','') email
+        from public.parents pr
+        where
+          (${displayName}<>'' and lower(trim(coalesce(to_jsonb(pr)->>'full_name','')))=lower(trim(${displayName})))
+          or (${username}<>'' and regexp_replace(coalesce(to_jsonb(pr)->>'phone',''),'\\D','','g')=
+                                regexp_replace(${username},'\\D','','g'))
+          or (${internalEmail}<>'' and lower(coalesce(to_jsonb(pr)->>'email',''))=lower(${internalEmail}))
+        limit 5`;
+
+      if(candidates.length===1){
+        resolvedParentId=candidates[0].id;
+      }else if(candidates.length>1){
+        const exactName=candidates.find(x=>displayName && String(x.full_name||'').trim().toLowerCase()===displayName.toLowerCase());
+        resolvedParentId=exactName?.id||candidates[0].id;
+      }
+
+      if(resolvedParentId){
+        await sql`update public.platform_accounts
+          set parent_id=${resolvedParentId}::uuid,updated_at=now()
+          where id=${a.account_id}`;
+      }
+    }
+
+    if(resolvedParentId){
+      schoolStudentIds=(await sql`select student_id from public.student_parents where parent_id=${resolvedParentId}`).map(x=>x.student_id);
     }
     privateIds=(await sql`select id from public.teacher_private_students where guardian_account_id=${a.account_id} and status='active'`).map(x=>x.id);
 
