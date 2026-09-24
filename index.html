@@ -6882,17 +6882,22 @@
 
   const openGroupRoom=async(group)=>{
     currentRoomGroupId=group.group_id||group.id;
-    document.getElementById('groupRoomTitle').textContent='قاعة '+(group.group_name||group.name||'المجموعة');
-    document.getElementById('roomProvider').value=group.meeting_provider||'zoom';
-    document.getElementById('roomMeetingUrl').value=group.meeting_url||'';
+    let live={...group};
+    try{
+      const fresh=await dataApiFetch('/rpc/platform_group_room_details',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId})});
+      if(fresh&&typeof fresh==='object')live={...live,...fresh};
+    }catch{}
+    document.getElementById('groupRoomTitle').textContent='قاعة '+(live.group_name||live.name||'المجموعة');
+    document.getElementById('roomProvider').value=live.meeting_provider||'zoom';
+    document.getElementById('roomMeetingUrl').value=live.meeting_url||'';
     const link=document.getElementById('openRoomLink');
     const accountType=String(currentPlatformAccount?.account_type||'');
     const canEdit=accountType==='teacher';
     document.getElementById('teacherMeetingEditor').style.display=canEdit?'':'none';
     document.getElementById('meetingViewerBox').style.display=canEdit?'none':'';
     document.getElementById('groupRoomSubtitle').textContent=canEdit?'جهّز رابط الحصة ثم استخدم شات المجموعة والملفات.':'انضم للحصة من الرابط الذي يفعّله المعلم واستخدم شات المجموعة.';
-    document.getElementById('meetingViewerStatus').textContent=group.meeting_url?'رابط الحصة جاهز الآن. اضغط «انضم للحصة».':'لم يفعّل المعلم رابط الحصة بعد.';
-    if(group.meeting_url){link.href=group.meeting_url;link.style.display='inline-flex'}else{link.removeAttribute('href');link.style.display='none'}
+    document.getElementById('meetingViewerStatus').textContent=live.meeting_url?'رابط الحصة جاهز الآن. اضغط «انضم للحصة».':'لم يفعّل المعلم رابط الحصة بعد.';
+    if(live.meeting_url){link.href=live.meeting_url;link.style.display='inline-flex'}else{link.removeAttribute('href');link.style.display='none'}
     groupRoomModal.classList.add('show');groupRoomModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     await loadGroupChat();
   };
@@ -6904,9 +6909,11 @@
     if(!url){alert('ضع رابط الحصة أولًا.');return}
     try{
       new URL(url);
-      await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:url})});
+      const saved=await dataApiFetch('/rpc/platform_set_group_meeting',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId,p_provider:provider,p_url:url})});
+      const savedUrl=saved?.meeting_url||url;
+      document.getElementById('roomMeetingUrl').value=savedUrl;
       const link=document.getElementById('openRoomLink');
-      link.href=url;link.style.display='inline-flex';
+      link.href=savedUrl;link.style.display='inline-flex';
       await Promise.allSettled([loadPlatformGroups(),loadGroups(),loadAdvancedSchedule()]);
       alert('تم تفعيل رابط الحصة. أصبح زر «انضم للحصة» ظاهرًا للطلاب.');
     }catch(err){alert(String(err.message||'').includes('Invalid URL')?'الرابط غير صحيح.':(err.message||'تعذر حفظ رابط الحصة'))}
