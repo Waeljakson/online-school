@@ -5,7 +5,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="roven-build" content="20260924-1735" />
+  <meta name="roven-build" content="20260924-1748" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f766e" />
   <meta name="description" content="ROVEN School - روفين سكول | نظام متكامل للإدارة التعليمية والمالية" />
@@ -1554,7 +1554,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260924-1735';
+  window.__ROVEN_BUILD__='20260924-1748';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -3749,6 +3749,24 @@
   const teacherPricingLabel={monthly:'شهري',per_student:'لكل طالب',per_session:'لكل حصة',fixed:'مبلغ ثابت',custom:'حسب الاتفاق'};
   const teacherRoomStatusLabel={pending:'قيد المراجعة',approved:'تمت الموافقة',rejected:'مرفوض',created:'تم إنشاء القاعة'};
   let adminRoomRequestCache=new Map();
+  const roomAutoCreateAttempted=new Set();
+  const roomAutoCreateErrors=new Map();
+
+  const createApprovedTeacherRoom=async(request,response)=>{
+    if(!request?.request_id)throw new Error('رقم طلب القاعة غير متاح.');
+    if(!request?.teacher_id)throw new Error('تعذر تحديد المعلم المرتبط بالطلب.');
+    if(!request?.sender_email)throw new Error('تعذر تحديد حساب المعلم لإرسال بيانات القاعة.');
+    const capacity=Math.max(1,Number(response?.capacity||request.capacity||20)||20);
+    const payload={p_group_name:String(request.room_name||'قاعة المعلم').trim(),p_teacher_id:request.teacher_id,p_subject_name:String(request.subject||'مادة تعليمية').trim(),p_stage_name:request.stage||null,p_grade_name:request.grade||null,p_meeting_provider:null,p_meeting_url:null,p_capacity:capacity,p_schedule:{sessions:[]},p_student_ids:null};
+    const createdResult=await dataApiFetch('/rpc/create_study_group_admin',{method:'POST',body:JSON.stringify(payload)});
+    const created=Array.isArray(createdResult)?createdResult[0]:createdResult;
+    if(!created?.group_id)throw new Error('تمت الموافقة لكن لم يتم إرجاع رقم القاعة الجديدة.');
+    await dataApiFetch('/rpc/teacher_room_contract_set',{method:'POST',body:JSON.stringify({p_group_id:created.group_id,p_teacher_id:request.teacher_id,p_capacity:capacity,p_agreed_price:Number(response?.agreed_price||0),p_pricing_basis:response?.pricing_basis||request.pricing_basis||'monthly',p_management_mode:response?.management_mode||request.management_mode||'teacher',p_management_fee:Number(response?.management_fee||0),p_management_fee_basis:response?.management_fee_basis||'monthly'})});
+    const roomCreatedPayload={request_id:request.request_id,status:'created',group_id:created.group_id,group_name:created.group_name||payload.p_group_name,capacity,current_students:Number(created.students_count||0),remaining_capacity:Math.max(0,capacity-Number(created.students_count||0)),meeting_provider:null,meeting_url:null,agreed_price:Number(response?.agreed_price||0),pricing_basis:response?.pricing_basis||request.pricing_basis||'monthly',management_mode:response?.management_mode||request.management_mode||'teacher',management_fee:Number(response?.management_fee||0),management_fee_basis:response?.management_fee_basis||'monthly',management_internal_email:response?.management_internal_email||request.management_internal_email||null,teacher_internal_email:request.sender_email,teacher_name:request.teacher_name||request.sender_name||null,note:response?.note||null,created_at:new Date().toISOString()};
+    await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({p_recipient:request.sender_email,p_subject:'[ROOM_CREATED] '+request.request_id,p_body:JSON.stringify(roomCreatedPayload)})});
+    if(roomCreatedPayload.management_mode==='roven'&&roomCreatedPayload.management_internal_email){await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({p_recipient:roomCreatedPayload.management_internal_email,p_subject:'[ROOM_MANAGED] '+request.request_id,p_body:JSON.stringify(roomCreatedPayload)})});}
+    return roomCreatedPayload;
+  };
 
   const loadTeacherRoomRequestsAdmin=async()=>{
     const panel=document.getElementById('teacherRoomAdminPanel');
@@ -3765,16 +3783,27 @@
         dataApiFetch('/rpc/platform_mail_list',{method:'POST',body:JSON.stringify({p_folder:'sent'})})
       ]);
       const responses=new Map();
+      const createdByRequest=new Map();
       (sent||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_RESPONSE]')).forEach(m=>{
         const x=teacherSafeJson(m.body);if(x?.request_id&&!responses.has(x.request_id))responses.set(x.request_id,x);
       });
       (sent||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_CREATED]')).forEach(m=>{
-        const x=teacherSafeJson(m.body);if(x?.request_id)responses.set(x.request_id,x);
+        const x=teacherSafeJson(m.body);if(x?.request_id){createdByRequest.set(String(x.request_id),x);responses.set(x.request_id,x)}
       });
       const requests=(inbox||[]).filter(m=>String(m.subject||'').startsWith('[ROOM_REQUEST]')).map(m=>{
         const x=teacherSafeJson(m.body);return x?{...x,sender_email:m.sender_email,sender_name:m.sender_name,message_id:m.message_id,sent_at:m.sent_at}:null
       }).filter(x=>x?.request_id);
       adminRoomRequestCache=new Map(requests.map(x=>[x.request_id,{...x,review_response:responses.get(x.request_id)||null}]));
+      const approvedMissing=requests.filter(r=>{const id=String(r.request_id),response=responses.get(r.request_id);return response?.status==='approved'&&!createdByRequest.has(id)&&!roomAutoCreateAttempted.has(id)});
+      if(approvedMissing.length){
+        tbody.innerHTML='<tr><td colspan="8" class="students-empty">جارٍ إنشاء القاعات التي تمت الموافقة عليها وربطها بالمعلمين...</td></tr>';
+        let createdAny=false;
+        for(const request of approvedMissing){
+          const id=String(request.request_id),response=responses.get(request.request_id);roomAutoCreateAttempted.add(id);
+          try{await createApprovedTeacherRoom(request,response);roomAutoCreateErrors.delete(id);createdAny=true}catch(createErr){roomAutoCreateErrors.set(id,String(createErr?.message||createErr||'تعذر إنشاء القاعة تلقائيًا'))}
+        }
+        if(createdAny)return loadTeacherRoomRequestsAdmin();
+      }
       let pendingCount=0,approvedCount=0,monthlyTotal=0,sessionTotal=0,managedCount=0,managementMonthlyTotal=0;
       requests.forEach(r=>{
         const response=responses.get(r.request_id);
@@ -3879,12 +3908,13 @@
     };
     if(!recipient){msg.textContent='تعذر تحديد حساب المعلم.';msg.className='student-form-msg error show';return}
     try{
-      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({
-        p_recipient:recipient,p_subject:'[ROOM_RESPONSE] '+requestId,p_body:JSON.stringify(response)
-      })});
-      msg.textContent=response.status==='approved'?'تم اعتماد الطلب وإرسال السعر للمعلم.':'تم رفض الطلب وإبلاغ المعلم.';
-      msg.className='student-form-msg success show';
-      setTimeout(async()=>{closeTeacherRoomReview();await loadTeacherRoomRequestsAdmin()},600);
+      await dataApiFetch('/rpc/platform_mail_send',{method:'POST',body:JSON.stringify({p_recipient:recipient,p_subject:'[ROOM_RESPONSE] '+requestId,p_body:JSON.stringify(response)})});
+      if(response.status==='approved'){
+        roomAutoCreateAttempted.add(String(requestId));
+        try{await createApprovedTeacherRoom({...requestRecord,sender_email:recipient},response);roomAutoCreateErrors.delete(String(requestId));msg.textContent='تمت الموافقة، وإنشاء القاعة وربطها بحساب المعلم تلقائيًا.';msg.className='student-form-msg success show'}
+        catch(createErr){roomAutoCreateErrors.set(String(requestId),String(createErr?.message||createErr||'تعذر إنشاء القاعة تلقائيًا'));msg.textContent='تمت الموافقة وإبلاغ المعلم، لكن تعذر إنشاء القاعة تلقائيًا: '+roomAutoCreateErrors.get(String(requestId));msg.className='student-form-msg error show'}
+      }else{msg.textContent='تم رفض الطلب وإبلاغ المعلم.';msg.className='student-form-msg success show'}
+      setTimeout(async()=>{closeTeacherRoomReview();await loadTeacherRoomRequestsAdmin()},1200);
     }catch(err){msg.textContent=err.message||'تعذر حفظ القرار';msg.className='student-form-msg error show'}
   });
 
