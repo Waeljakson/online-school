@@ -1,4 +1,4 @@
-const BUILD='20260924-2130';
+const BUILD='20260925-1800';
 self.addEventListener('install',event=>{
   self.skipWaiting();
 });
@@ -6,15 +6,9 @@ self.addEventListener('activate',event=>{
   event.waitUntil((async()=>{
     const keys=await caches.keys();
     await Promise.all(keys.map(k=>caches.delete(k)));
+    // This legacy service worker is intentionally retired.
+    // Do not navigate/reload open clients; the page handles version checks safely.
     await self.registration.unregister();
-    const clients=await self.clients.matchAll({type:'window',includeUncontrolled:true});
-    for(const client of clients){
-      try{
-        const u=new URL(client.url);
-        u.searchParams.set('roven_build',BUILD);
-        await client.navigate(u.href);
-      }catch{}
-    }
   })());
 });
 self.addEventListener('fetch',()=>{});
