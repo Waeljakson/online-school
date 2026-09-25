@@ -399,32 +399,59 @@ const lessonAccessState=(scheduleValue,now=new Date())=>{
   if(!sessions.length)return {status:'unscheduled',ended:false,end:null};
 
   const zone='Africa/Cairo';
+  const dayIndex={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6};
+  const valid=sessions.filter(x=>
+    Object.prototype.hasOwnProperty.call(dayIndex,String(x?.day||'').toLowerCase()) &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(String(x?.time||''))
+  );
+  if(!valid.length)return {status:'unscheduled',ended:false,end:null};
+
   const dateParts=Object.fromEntries(
     new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'})
       .formatToParts(now).filter(x=>x.type!=='literal').map(x=>[x.type,x.value])
   );
-  const dateStr=`${dateParts.year}-${dateParts.month}-${dateParts.day}`;
-  const today=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'long'}).format(now).toLowerCase();
+  const todayName=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'long'}).format(now).toLowerCase();
+  const todayIdx=dayIndex[todayName];
 
-  const windows=sessions
-    .filter(x=>String(x?.day||'').toLowerCase()===today && /^([01]\d|2[0-3]):[0-5]\d$/.test(String(x?.time||'')))
-    .map(x=>{
-      const start=zonedLessonDate(dateStr,String(x.time),zone);
-      const duration=Math.max(15,Math.min(480,Number(x.duration||60)||60));
-      return {start,end:new Date(start.getTime()+duration*60000),duration};
-    })
-    .sort((x,y)=>x.start-y.start);
-
-  if(!windows.length)return {status:'no_session_today',ended:false,end:null};
+  const windows=[];
+  // Build concrete occurrences for the previous 7 days, today, and the next 7 days.
+  // This prevents yesterday's lesson from being treated as "no session today".
+  for(const sess of valid){
+    const targetIdx=dayIndex[String(sess.day).toLowerCase()];
+    for(let weekOffset=-1;weekOffset<=1;weekOffset++){
+      let diff=targetIdx-todayIdx+(weekOffset*7);
+      const baseUtc=Date.UTC(+dateParts.year,+dateParts.month-1,+dateParts.day);
+      const d=new Date(baseUtc+diff*86400000);
+      const dateStr=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      const start=zonedLessonDate(dateStr,String(sess.time),zone);
+      const duration=Math.max(15,Math.min(480,Number(sess.duration||60)||60));
+      windows.push({start,end:new Date(start.getTime()+duration*60000),duration});
+    }
+  }
+  windows.sort((x,y)=>x.start-y.start);
 
   const active=windows.find(x=>now>=x.start&&now<x.end);
   if(active)return {status:'active',ended:false,start:active.start,end:active.end};
 
-  const upcoming=windows.find(x=>now<x.start);
-  if(upcoming)return {status:'upcoming',ended:false,start:upcoming.start,end:upcoming.end};
+  const previous=[...windows].reverse().find(x=>x.end<=now)||null;
+  const next=windows.find(x=>x.start>now)||null;
 
-  const last=windows[windows.length-1];
-  return {status:'ended',ended:true,start:last.start,end:last.end};
+  // Student meeting links are valid only during the scheduled lesson itself.
+  // Outside the active window, a previously finished occurrence is treated as ended.
+  if(previous)return {
+    status:'ended',
+    ended:true,
+    start:previous.start,
+    end:previous.end,
+    next_start:next?.start||null
+  };
+
+  return {
+    status:'upcoming',
+    ended:false,
+    start:next?.start||null,
+    end:next?.end||null
+  };
 };
 
 const protectStudentMeeting=row=>{
