@@ -1674,7 +1674,7 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260925-0242';
+  window.__ROVEN_BUILD__='20260925-1715';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
@@ -5473,6 +5473,32 @@
     const jsDay={sunday:0,monday:1,tuesday:2,wednesday:3,thursday:4,friday:5,saturday:6}[key]??0;
     const d=new Date(base);const diff=(jsDay-d.getDay()+7)%7;d.setDate(d.getDate()+diff);return d;
   };
+  const lessonStateForGroup=(group,now=new Date())=>{
+    if(String(group?.lesson_status||'')==='ended'){
+      return {status:'ended',ended:true,end:group?.lesson_ended_at?new Date(group.lesson_ended_at):null};
+    }
+    const sessions=parseScheduleSessions(group?.schedule_json);
+    if(!sessions.length)return {status:'unscheduled',ended:false,end:null};
+    const zone='Africa/Cairo';
+    const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
+    const dateStr=parts.year+'-'+parts.month+'-'+parts.day;
+    const today=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'long'}).format(now).toLowerCase();
+    const windows=sessions.filter(x=>String(x?.day||'').toLowerCase()===today&&x?.time).map(x=>{
+      const start=zonedDateFromLocal(dateStr,String(x.time),zone);
+      const duration=Math.max(15,Math.min(480,Number(x.duration||60)||60));
+      return {start,end:new Date(start.getTime()+duration*60000),duration};
+    }).sort((a,b)=>a.start-b.start);
+    if(!windows.length)return {status:'no_session_today',ended:false,end:null};
+    const active=windows.find(x=>now>=x.start&&now<x.end);
+    if(active)return {status:'active',ended:false,start:active.start,end:active.end};
+    const upcoming=windows.find(x=>now<x.start);
+    if(upcoming)return {status:'upcoming',ended:false,start:upcoming.start,end:upcoming.end};
+    const last=windows[windows.length-1];
+    return {status:'ended',ended:true,start:last.start,end:last.end};
+  };
+  const isStudentAccount=()=>['student','private_student'].includes(String(currentPlatformAccount?.account_type||''));
+  const endedLessonBadge=()=>'<span class="status watch" style="display:inline-flex;align-items:center;gap:5px">⏱ انتهى وقت الحصة</span>';
+
   const loadAdvancedSchedule=async()=>{
     const board=document.getElementById('weeklyScheduleBoard');if(!board)return;
     board.innerHTML='<div class="students-empty">جارٍ تحميل الجدول...</div>';
@@ -5485,8 +5511,10 @@
         const key=String(sess.day||'').toLowerCase();if(!weekDayLabels[key]||!sess.time)return;
         const date=dayDateForKey(now,key),dateStr=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
         const instant=zonedDateFromLocal(dateStr,String(sess.time),'Africa/Cairo');
+        const duration=Math.max(15,Math.min(480,Number(sess.duration||60)||60));
+        const end=new Date(instant.getTime()+duration*60000);
         const displayTime=new Intl.DateTimeFormat('ar-EG',{timeZone:targetZone,hour:'2-digit',minute:'2-digit'}).format(instant);
-        lessons.push({day:key,instant,time:displayTime,duration:Number(sess.duration||60),group:g});
+        lessons.push({day:key,instant,end,time:displayTime,duration,group:g});
       }));
       const todayKey=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'][now.getDay()];
       document.getElementById('scheduleTodayCount').textContent=String(lessons.filter(x=>x.day===todayKey).length);
@@ -5495,15 +5523,32 @@
       const future=lessons.filter(x=>x.instant>=now).sort((a,b)=>a.instant-b.instant)[0];
       document.getElementById('scheduleNextValue').textContent=future?future.time:'—';
       document.getElementById('scheduleNextSub').textContent=future?((future.group.subject_name||future.group.group_name||'حصة')+' • '+weekDayLabels[future.day]):'لا توجد حصة قادمة هذا الأسبوع';
+      const studentView=isStudentAccount();
       board.className='week-board';
       board.innerHTML=weekDayOrder.map(day=>{
         const rows=lessons.filter(x=>x.day===day).sort((a,b)=>a.instant-b.instant);
-        return `<div class="week-day"><h4>${weekDayLabels[day]}</h4>${rows.length?rows.map(x=>`<div class="week-lesson"><b>${escapeHtml(x.group.subject_name||x.group.group_name||'حصة')}</b><div>${escapeHtml(x.time)} • ${x.duration} د</div><div>${escapeHtml([x.group.group_name,x.group.teacher_name].filter(Boolean).join(' • '))}</div>${x.group.meeting_url?`<div style="margin-top:5px"><a href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener">انضم للحصة</a></div>`:''}</div>`).join(''):'<div class="students-empty" style="padding:10px">لا توجد حصص</div>'}</div>`;
+        return `<div class="week-day"><h4>${weekDayLabels[day]}</h4>${rows.length?rows.map(x=>{
+          const ended=studentView&&now>=x.end;
+          const action=ended
+            ?`<div class="schedule-lesson-status" style="margin-top:5px">${endedLessonBadge()}</div>`
+            :(x.group.meeting_url?`<div style="margin-top:5px"><a class="schedule-join-link" data-lesson-end="${x.end.getTime()}" href="${escapeHtml(x.group.meeting_url)}" target="_blank" rel="noopener">انضم للحصة</a></div>`:'');
+          return `<div class="week-lesson"><b>${escapeHtml(x.group.subject_name||x.group.group_name||'حصة')}</b><div>${escapeHtml(x.time)} • ${x.duration} د</div><div>${escapeHtml([x.group.group_name,x.group.teacher_name].filter(Boolean).join(' • '))}</div>${action}</div>`;
+        }).join(''):'<div class="students-empty" style="padding:10px">لا توجد حصص</div>'}</div>`;
       }).join('');
     }catch(err){board.innerHTML='<div class="students-empty">'+escapeHtml(err.message||'تعذر تحميل الجدول')+'</div>'}
   };
   document.getElementById('refreshSchedule')?.addEventListener('click',loadAdvancedSchedule);
   document.getElementById('scheduleTimezone')?.addEventListener('change',loadAdvancedSchedule);
+  document.getElementById('weeklyScheduleBoard')?.addEventListener('click',e=>{
+    const link=e.target.closest('.schedule-join-link');
+    if(!link||!isStudentAccount())return;
+    const end=Number(link.dataset.lessonEnd||0);
+    if(end&&Date.now()>=end){
+      e.preventDefault();
+      const holder=link.parentElement;
+      if(holder)holder.innerHTML=endedLessonBadge();
+    }
+  });
 
   // ===== Student 360 =====
   const student360Modal=document.getElementById('student360Modal');
@@ -7734,8 +7779,9 @@
   },7000);
 
   let currentRoomGroupId=null;
+  let currentRoomLive=null;
   const groupRoomModal=document.getElementById('groupRoomModal');
-  const closeGroupRoom=()=>{groupRoomModal.classList.remove('show');groupRoomModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  const closeGroupRoom=()=>{currentRoomLive=null;groupRoomModal.classList.remove('show');groupRoomModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
   document.getElementById('closeGroupRoomModal').addEventListener('click',closeGroupRoom);
   groupRoomModal.addEventListener('click',e=>{if(e.target===groupRoomModal)closeGroupRoom()});
 
@@ -7772,17 +7818,25 @@
       const fresh=await dataApiFetch('/rpc/platform_group_room_details',{method:'POST',body:JSON.stringify({p_group_id:currentRoomGroupId})});
       if(fresh&&typeof fresh==='object')live={...live,...fresh};
     }catch{}
+    currentRoomLive=live;
     document.getElementById('groupRoomTitle').textContent='قاعة '+(live.group_name||live.name||'المجموعة');
     document.getElementById('roomProvider').value=live.meeting_provider||'zoom';
     document.getElementById('roomMeetingUrl').value=live.meeting_url||'';
     const link=document.getElementById('openRoomLink');
     const accountType=String(currentPlatformAccount?.account_type||'');
     const canEdit=accountType==='teacher';
+    const lessonState=!canEdit&&isStudentAccount()?lessonStateForGroup(live):{ended:false,status:'teacher'};
     document.getElementById('teacherMeetingEditor').style.display=canEdit?'':'none';
     document.getElementById('meetingViewerBox').style.display=canEdit?'none':'';
-    document.getElementById('groupRoomSubtitle').textContent=canEdit?'جهّز رابط الحصة ثم استخدم شات المجموعة والملفات.':'انضم للحصة من الرابط الذي يفعّله المعلم واستخدم شات المجموعة.';
-    document.getElementById('meetingViewerStatus').textContent=live.meeting_url?'رابط الحصة جاهز الآن. اضغط «انضم للحصة».':'لم يفعّل المعلم رابط الحصة بعد.';
-    if(live.meeting_url){link.href=live.meeting_url;link.style.display='inline-flex'}else{link.removeAttribute('href');link.style.display='none'}
+    document.getElementById('groupRoomSubtitle').textContent=canEdit
+      ?'جهّز رابط الحصة ثم استخدم شات المجموعة والملفات.'
+      :(lessonState.ended?'انتهى الموعد المحدد لهذه الحصة. يمكنك استخدام الشات والملفات فقط.':'انضم للحصة من الرابط الذي يفعّله المعلم واستخدم شات المجموعة.');
+    document.getElementById('meetingViewerStatus').textContent=lessonState.ended
+      ?'انتهى وقت الحصة.'
+      :(live.meeting_url?'رابط الحصة جاهز الآن. اضغط «انضم للحصة».':'لم يفعّل المعلم رابط الحصة بعد.');
+    link.dataset.lessonEnd=lessonState.end?.getTime?.()||'';
+    if(live.meeting_url&&!lessonState.ended){link.href=live.meeting_url;link.style.display='inline-flex'}
+    else{link.removeAttribute('href');link.style.display='none'}
     groupRoomModal.classList.add('show');groupRoomModal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';
     await loadGroupChat();
   };
@@ -7858,7 +7912,18 @@
       finally{del.disabled=false}
     }
   });
+  let platformGroupsCache=[];
   document.getElementById('platformGroupsRows').addEventListener('click',e=>{
+    const join=e.target.closest('.platform-join-link');
+    if(join&&isStudentAccount()){
+      const g=platformGroupsCache.find(x=>String(x.group_id||x.id)===String(join.dataset.groupId||''));
+      if(g&&lessonStateForGroup(g).ended){
+        e.preventDefault();
+        const cell=join.closest('td');
+        if(cell)cell.innerHTML=endedLessonBadge();
+        return;
+      }
+    }
     const btn=e.target.closest('.platform-room-btn');
     if(btn)openGroupRoom({group_id:btn.dataset.groupId,group_name:btn.dataset.groupName,meeting_provider:btn.dataset.provider,meeting_url:btn.dataset.url});
   });
@@ -7875,14 +7940,49 @@
           return fresh&&typeof fresh==='object'?{...g,...fresh}:g;
         }catch{return g}
       }));
-      tbody.innerHTML=data.map(g=>`<tr>
-        <td><b>${escapeHtml(g.group_name)}</b></td><td>${escapeHtml(g.subject_name||'—')}</td><td>${escapeHtml(g.teacher_name||'—')}</td>
-        <td>${g.meeting_url?`<a class="primary-action" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">انضم للحصة ↗</a>`:'لم يفعّل المعلم رابط الحصة بعد'}</td>
-        <td><button class="secondary-action platform-room-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">${String(currentPlatformAccount?.account_type||'')==='teacher'?'تجهيز الحصة / الشات':'فتح القاعة / الشات'}</button></td>
-      </tr>`).join('');
+      platformGroupsCache=data;
+      const studentView=isStudentAccount();
+      tbody.innerHTML=data.map(g=>{
+        const state=studentView?lessonStateForGroup(g):{ended:false};
+        const meetingCell=state.ended
+          ?endedLessonBadge()
+          :(g.meeting_url?`<a class="primary-action platform-join-link" data-group-id="${escapeHtml(g.group_id||g.id||'')}" href="${escapeHtml(g.meeting_url)}" target="_blank" rel="noopener" style="text-decoration:none">انضم للحصة ↗</a>`:'لم يفعّل المعلم رابط الحصة بعد');
+        return `<tr>
+          <td><b>${escapeHtml(g.group_name)}</b></td><td>${escapeHtml(g.subject_name||'—')}</td><td>${escapeHtml(g.teacher_name||'—')}</td>
+          <td>${meetingCell}</td>
+          <td><button class="secondary-action platform-room-btn" type="button" data-group-id="${escapeHtml(g.group_id)}" data-group-name="${escapeHtml(g.group_name)}" data-provider="${escapeHtml(g.meeting_provider||'zoom')}" data-url="${escapeHtml(g.meeting_url||'')}">${String(currentPlatformAccount?.account_type||'')==='teacher'?'تجهيز الحصة / الشات':'فتح القاعة / الشات'}</button></td>
+        </tr>`;
+      }).join('');
     }catch(err){tbody.innerHTML='<tr><td colspan="5" class="students-empty">'+escapeHtml(err.message||'تعذر تحميل المجموعات')+'</td></tr>'}
   };
   document.getElementById('refreshPlatformGroups').addEventListener('click',loadPlatformGroups);
+  const refreshExpiredLessonAccess=()=>{
+    if(!isStudentAccount())return;
+    document.querySelectorAll('.schedule-join-link[data-lesson-end]').forEach(link=>{
+      const end=Number(link.dataset.lessonEnd||0);
+      if(end&&Date.now()>=end){
+        const holder=link.parentElement;
+        if(holder)holder.innerHTML=endedLessonBadge();
+      }
+    });
+    document.querySelectorAll('.platform-join-link[data-group-id]').forEach(link=>{
+      const g=platformGroupsCache.find(x=>String(x.group_id||x.id)===String(link.dataset.groupId||''));
+      if(g&&lessonStateForGroup(g).ended){
+        const cell=link.closest('td');
+        if(cell)cell.innerHTML=endedLessonBadge();
+      }
+    });
+    if(currentRoomGroupId&&currentRoomLive&&groupRoomModal.classList.contains('show')){
+      const state=lessonStateForGroup(currentRoomLive);
+      if(state.ended){
+        const link=document.getElementById('openRoomLink');
+        link.removeAttribute('href');link.style.display='none';
+        document.getElementById('meetingViewerStatus').textContent='انتهى وقت الحصة.';
+        document.getElementById('groupRoomSubtitle').textContent='انتهى الموعد المحدد لهذه الحصة. يمكنك استخدام الشات والملفات فقط.';
+      }
+    }
+  };
+  setInterval(refreshExpiredLessonAccess,15000);
 
   let mailFolder='inbox';
   const loadMailbox=async(folder=mailFolder)=>{
