@@ -2892,6 +2892,87 @@
     document.getElementById('nsPassword').value=makeRandomStudentPassword();
   };
   const closeStudentModal=()=>{studentModal.classList.remove('show');studentModal.setAttribute('aria-hidden','true');document.body.style.overflow='';};
+  const downloadStudentRegistrationCard=async(data={})=>{
+    const name=String(data.name||'الطالب');
+    const grade=String(data.grade||'—');
+    const code=String(data.code||'—');
+    const username=String(data.username||'—');
+    const password=String(data.password||'—');
+    const parentName=String(data.parentName||'ولي الأمر');
+    const parentUsername=String(data.parentUsername||'—');
+    const parentPassword=String(data.parentPassword||'—');
+    const parentReused=Boolean(data.parentReused);
+
+    const canvas=document.createElement('canvas');
+    const scale=Math.max(2,Math.min(3,window.devicePixelRatio||2));
+    const W=1080,H=1280;
+    canvas.width=W*scale;canvas.height=H*scale;
+    const ctx=canvas.getContext('2d');
+    ctx.scale(scale,scale);
+
+    const rr=(x,y,w,h,r,fill,stroke)=>{
+      ctx.beginPath();
+      if(typeof ctx.roundRect==='function')ctx.roundRect(x,y,w,h,r);
+      else{ctx.rect(x,y,w,h)}
+      if(fill){ctx.fillStyle=fill;ctx.fill()}
+      if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}
+    };
+
+    ctx.fillStyle='#eef5f6';ctx.fillRect(0,0,W,H);
+    rr(55,45,970,1190,34,'#ffffff','#d7e5e7');
+    rr(55,45,970,190,34,'#0f766e',null);
+
+    ctx.direction='rtl';ctx.textAlign='right';
+    ctx.fillStyle='#ffffff';ctx.font='700 48px Cairo,Tahoma,Arial';
+    ctx.fillText('ROVEN Online School',950,118);
+    ctx.font='500 27px Cairo,Tahoma,Arial';
+    ctx.fillText('بطاقة دخول الطالب',950,168);
+
+    const rows=[
+      ['اسم الطالب',name],
+      ['الصف / المرحلة',grade],
+      ['كود الطالب',code],
+      ['اسم المستخدم',username],
+      ['كلمة المرور',password]
+    ];
+
+    let y=285;
+    rows.forEach(([label,value])=>{
+      rr(105,y,870,112,18,'#f8fbfb','#e1ebed');
+      ctx.fillStyle='#64748b';ctx.font='500 21px Cairo,Tahoma,Arial';
+      ctx.fillText(label,930,y+35);
+      ctx.fillStyle='#102a32';ctx.font='700 30px Cairo,Tahoma,Arial';
+      ctx.fillText(String(value),930,y+77);
+      y+=128;
+    });
+
+    rr(105,y+5,870,235,18,'#f7fafc','#e1ebed');
+    ctx.fillStyle='#0f766e';ctx.font='700 25px Cairo,Tahoma,Arial';
+    ctx.fillText('حساب ولي الأمر — '+parentName,930,y+45);
+    ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';
+    ctx.fillText('اسم المستخدم',930,y+90);
+    ctx.fillStyle='#102a32';ctx.font='700 27px Cairo,Tahoma,Arial';
+    ctx.fillText(parentUsername,930,y+126);
+    ctx.fillStyle='#64748b';ctx.font='500 20px Cairo,Tahoma,Arial';
+    ctx.fillText('كلمة المرور',930,y+166);
+    ctx.fillStyle='#102a32';ctx.font='700 27px Cairo,Tahoma,Arial';
+    ctx.fillText(parentReused?'استخدم كلمة المرور الحالية':parentPassword,930,y+202);
+
+    ctx.textAlign='center';ctx.fillStyle='#71858b';ctx.font='500 19px Cairo,Tahoma,Arial';
+    ctx.fillText('احتفظ ببيانات الدخول بسرية — يمكنك إرسال هذه البطاقة للطالب مباشرة',540,1190);
+
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png',1));
+    if(!blob)throw new Error('تعذر إنشاء بطاقة الطالب.');
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const safe=name.replace(/[^\p{L}\p{N}_-]+/gu,'-').replace(/^-+|-+$/g,'')||'student';
+    a.href=url;
+    a.download='ROVEN-Student-Card-'+safe+'.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  };
   document.getElementById('openStudentModal').addEventListener('click',openStudentModal);
   document.getElementById('closeStudentModal').addEventListener('click',closeStudentModal);
   document.getElementById('cancelStudentModal').addEventListener('click',closeStudentModal);
@@ -3064,7 +3145,29 @@
       studentFormMsg.className='student-form-msg success show';
       try{await persistParentLink(r,payload)}catch{}
       await loadRegisteredStudents();
-      newStudentForm.reset();document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);updateMoneySummary();
+
+      const cardData={
+        name:payload.p_full_name,
+        grade:[payload.p_stage_name,payload.p_grade_name].filter(Boolean).join(' — '),
+        code:r?.account_code||r?.student_no||'—',
+        username:r?.username||r?.student_no||payload.p_username||'—',
+        password:r?.generated_password||payload.p_password||'—',
+        parentName:payload.p_parent_name||'ولي الأمر',
+        parentUsername:r?.parent_username||'—',
+        parentPassword:r?.parent_generated_password||'—',
+        parentReused:Boolean(r?.parent_reused)
+      };
+
+      newStudentForm.reset();
+      document.getElementById('nsJoinedOn').value=new Date().toISOString().slice(0,10);
+      updateMoneySummary();
+      closeStudentModal();
+
+      try{
+        await downloadStudentRegistrationCard(cardData);
+      }catch(cardErr){
+        alert((cardErr?.message||'تم تسجيل الطالب، لكن تعذر تنزيل بطاقة الدخول تلقائيًا.')+'\nيمكنك إعادة إصدار البطاقة لاحقًا من سجل الطالب.');
+      }
     }catch(err){
       studentFormMsg.textContent=err.message||'حدث خطأ أثناء تسجيل الطالب.';
       studentFormMsg.className='student-form-msg error show';
