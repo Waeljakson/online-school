@@ -1674,17 +1674,20 @@
   </div>
 </div>
 <script>
-  window.__ROVEN_BUILD__='20260925-1732';
+  window.__ROVEN_BUILD__='20260925-1800';
   const checkRovenBuild=async()=>{
     try{
       const r=await fetch('./version.json?t='+Date.now(),{cache:'no-store'});
       if(!r.ok)return;
       const v=await r.json();
-      if(v?.build&&String(v.build)!==String(window.__ROVEN_BUILD__)){
-        const u=new URL(location.href);
-        u.searchParams.set('roven_build',String(v.build));
-        location.replace(u.href);
-      }
+      const remoteBuild=String(v?.build||'');
+      if(!remoteBuild||remoteBuild===String(window.__ROVEN_BUILD__))return;
+      const u=new URL(location.href);
+      // Reload at most once for a given remote build. If the browser/CDN still serves
+      // an older index after that reload, stay on the page instead of entering a loop.
+      if(u.searchParams.get('roven_build')===remoteBuild)return;
+      u.searchParams.set('roven_build',remoteBuild);
+      location.replace(u.href);
     }catch{}
   };
   setTimeout(checkRovenBuild,3000);
@@ -2072,7 +2075,8 @@
   if ('caches' in window) caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k)))).catch(()=>{});
   try{
     const u=new URL(location.href);
-    if(u.searchParams.get('roven_build')!==window.__ROVEN_BUILD__){
+    // Keep an update marker placed by checkRovenBuild. Only add one when absent.
+    if(!u.searchParams.get('roven_build')){
       u.searchParams.set('roven_build',window.__ROVEN_BUILD__);
       history.replaceState(null,'',u.href);
     }
