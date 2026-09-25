@@ -370,6 +370,75 @@ async function actorFromToken(token){
 }
 const must=(a,ok)=>{if(!a||!ok)throw new Error('not_authorized')};
 
+const parseLessonSchedule=value=>{
+  if(!value)return [];
+  let data=value;
+  if(typeof data==='string'){try{data=JSON.parse(data)}catch{return []}}
+  if(Array.isArray(data))return data.filter(Boolean);
+  if(Array.isArray(data?.sessions))return data.sessions.filter(Boolean);
+  if(Array.isArray(data?.schedule))return data.schedule.filter(Boolean);
+  return [];
+};
+
+const zonedLessonDate=(dateStr,timeStr,zone='Africa/Cairo')=>{
+  const [y,m,d]=String(dateStr).split('-').map(Number);
+  const [hh,mm]=String(timeStr||'00:00').split(':').map(Number);
+  const desired=Date.UTC(y,m-1,d,hh||0,mm||0,0);
+  const fmt=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  const offsetAt=ts=>{
+    const parts=Object.fromEntries(fmt.formatToParts(new Date(ts)).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
+    return Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute)-ts;
+  };
+  let ts=desired-offsetAt(desired);
+  ts=desired-offsetAt(ts);
+  return new Date(ts);
+};
+
+const lessonAccessState=(scheduleValue,now=new Date())=>{
+  const sessions=parseLessonSchedule(scheduleValue);
+  if(!sessions.length)return {status:'unscheduled',ended:false,end:null};
+
+  const zone='Africa/Cairo';
+  const dateParts=Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'})
+      .formatToParts(now).filter(x=>x.type!=='literal').map(x=>[x.type,x.value])
+  );
+  const dateStr=`${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+  const today=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'long'}).format(now).toLowerCase();
+
+  const windows=sessions
+    .filter(x=>String(x?.day||'').toLowerCase()===today && /^([01]\d|2[0-3]):[0-5]\d$/.test(String(x?.time||'')))
+    .map(x=>{
+      const start=zonedLessonDate(dateStr,String(x.time),zone);
+      const duration=Math.max(15,Math.min(480,Number(x.duration||60)||60));
+      return {start,end:new Date(start.getTime()+duration*60000),duration};
+    })
+    .sort((x,y)=>x.start-y.start);
+
+  if(!windows.length)return {status:'no_session_today',ended:false,end:null};
+
+  const active=windows.find(x=>now>=x.start&&now<x.end);
+  if(active)return {status:'active',ended:false,start:active.start,end:active.end};
+
+  const upcoming=windows.find(x=>now<x.start);
+  if(upcoming)return {status:'upcoming',ended:false,start:upcoming.start,end:upcoming.end};
+
+  const last=windows[windows.length-1];
+  return {status:'ended',ended:true,start:last.start,end:last.end};
+};
+
+const protectStudentMeeting=row=>{
+  const state=lessonAccessState(row?.schedule_json);
+  if(!state.ended)return {...row,lesson_status:state.status,lesson_ended_at:state.end?.toISOString?.()||null};
+  return {
+    ...row,
+    meeting_url:null,
+    lesson_status:'ended',
+    lesson_ended_at:state.end?.toISOString?.()||null
+  };
+};
+
+
 async function assistantLink(a){
   const r=await sql`select l.*,pa.display_name teacher_name
     from public.teacher_assistant_links l
@@ -2560,7 +2629,7 @@ async function custom(action,a,p){
       where g.id=${gid}::uuid
       limit 1`)[0];
     if(!room)throw new Error('group_not_found');
-    return room;
+    return ['student','private_student'].includes(String(a.account_type||''))?protectStudentMeeting(room):room;
   }
 
   if(action==='platform_set_group_meeting'){
@@ -3213,7 +3282,12 @@ export default{
         }
 
         const directGroups=await custom('platform_groups_list_local',a,p);
-        if(Array.isArray(directGroups)&&directGroups.length)return json(directGroups,200,o);
+        if(Array.isArray(directGroups)&&directGroups.length){
+          const rows=['student','private_student'].includes(String(a.account_type||''))
+            ?directGroups.map(protectStudentMeeting)
+            :directGroups;
+          return json(rows,200,o);
+        }
 
         // Compatibility for private students created by the old registration fallback:
         // the account is a normal student account and its private group was recorded
@@ -3259,7 +3333,12 @@ export default{
                   and g.school_id=${a.school_id}
                   and g.is_active=true
                 limit 1`;
-              if(legacyGroups.length)return json(legacyGroups,200,o);
+              if(legacyGroups.length){
+                const rows=['student','private_student'].includes(String(a.account_type||''))
+                  ?legacyGroups.map(protectStudentMeeting)
+                  :legacyGroups;
+                return json(rows,200,o);
+              }
             }
           }catch{}
         }
